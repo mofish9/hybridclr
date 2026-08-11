@@ -4,6 +4,11 @@
 #include <unordered_set>
 
 #include "TransformContext.h"
+#include "../interpreter/InterpreterProfile.h"
+
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+#include <chrono>
+#endif
 
 #include "../metadata/MethodBodyCache.h"
 
@@ -14,6 +19,9 @@ namespace transform
 
 	InterpMethodInfo* HiTransform::Transform(const MethodInfo* methodInfo)
 	{
+	#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		auto started = std::chrono::steady_clock::now();
+	#endif
 		TemporaryMemoryArena pool;
 
 		metadata::Image* image = metadata::MetadataModule::GetUnderlyingInterpreterImage(methodInfo);
@@ -32,6 +40,10 @@ namespace transform
 
 		ctx.TransformBody(0, 0, *result);
 		metadata::MethodBodyCache::EnableShrinkMethodBodyCache(true);
+	#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started).count();
+		interpreter::InterpreterProfile::RecordTransform(static_cast<uint64_t>(elapsed));
+	#endif
 		return result;
 	}
 }

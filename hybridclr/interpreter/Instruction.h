@@ -921,6 +921,20 @@ namespace interpreter
 		GetEnumHashCode,
 		AssemblyGetExecutingAssembly,
 		MethodBaseGetCurrentMethod,
+		LdlocVarVar_2,
+		LdcVarConst_4_Add_i4,
+		ConvertVarVar_i4_i8_Add_i8,
+		LdlocVarVar_3,
+		LdlocVarVar_4,
+		LdlocVarVar_2_LdcVarConst_4,
+		LdcVarConst_4_Add_i4_LdlocVarVar,
+		LdcVarConst_4_And_i4,
+		LdcVarConst_4_Mul_i4,
+		LdcVarConst_8_Mul_f8,
+		LdcVarConst_4_Shr_i4_i4,
+		ConvertVarVar_i4_i8_Add_i8_LdlocVarVar_2,
+		LdcVarConst_4_Add_i4_LdlocVarVar_2,
+		LdcVarConst_4_Add_i4_Ret_4,
 
 		//!!!}}OPCODE
 	};
@@ -10548,6 +10562,266 @@ namespace interpreter
 		uint8_t __pad5;
 		uint8_t __pad6;
 		uint8_t __pad7;
+	};
+
+
+	struct IRLdlocVarVar_2 : IRCommon
+	{
+		uint16_t dst0;
+		uint16_t src0;
+		uint16_t dst1;
+		uint16_t src1;
+		uint8_t __pad10;
+		uint8_t __pad11;
+		uint8_t __pad12;
+		uint8_t __pad13;
+		uint8_t __pad14;
+		uint8_t __pad15;
+	};
+
+
+	struct IRLdcVarConst_4_Add_i4 : IRCommon
+	{
+		uint16_t ret;
+		uint16_t op;
+		uint32_t constant;
+		uint8_t __pad10;
+		uint8_t __pad11;
+		uint8_t __pad12;
+		uint8_t __pad13;
+		uint8_t __pad14;
+		uint8_t __pad15;
+	};
+
+
+	struct IRConvertVarVar_i4_i8_Add_i8 : IRCommon
+	{
+		uint16_t ret;
+		uint16_t converted;
+		uint16_t other;
+		uint8_t __pad8;
+		uint8_t __pad9;
+		uint8_t __pad10;
+		uint8_t __pad11;
+		uint8_t __pad12;
+		uint8_t __pad13;
+		uint8_t __pad14;
+		uint8_t __pad15;
+	};
+
+
+	struct IRLdlocVarVar_3 : IRCommon
+	{
+		uint16_t dst0;
+		uint16_t src0;
+		uint16_t dst1;
+		uint16_t src1;
+		uint16_t dst2;
+		uint16_t src2;
+		uint8_t __pad14;
+		uint8_t __pad15;
+		uint8_t __pad16;
+		uint8_t __pad17;
+		uint8_t __pad18;
+		uint8_t __pad19;
+		uint8_t __pad20;
+		uint8_t __pad21;
+		uint8_t __pad22;
+		uint8_t __pad23;
+	};
+
+
+	struct IRLdlocVarVar_4 : IRCommon
+	{
+		uint16_t dst0;
+		uint16_t src0;
+		uint16_t dst1;
+		uint16_t src1;
+		uint16_t dst2;
+		uint16_t src2;
+		uint16_t dst3;
+		uint16_t src3;
+		uint8_t __pad18;
+		uint8_t __pad19;
+		uint8_t __pad20;
+		uint8_t __pad21;
+		uint8_t __pad22;
+		uint8_t __pad23;
+		uint8_t __pad24;
+		uint8_t __pad25;
+		uint8_t __pad26;
+		uint8_t __pad27;
+		uint8_t __pad28;
+		uint8_t __pad29;
+		uint8_t __pad30;
+		uint8_t __pad31;
+	};
+
+
+	struct IRLdlocVarVar_2_LdcVarConst_4 : IRCommon
+	{
+		uint16_t dst0;
+		uint16_t src0;
+		uint16_t dst1;
+		uint16_t src1;
+		uint16_t ldcDst;
+		uint32_t constant;
+		uint8_t __pad16;
+		uint8_t __pad17;
+		uint8_t __pad18;
+		uint8_t __pad19;
+		uint8_t __pad20;
+		uint8_t __pad21;
+		uint8_t __pad22;
+		uint8_t __pad23;
+	};
+
+
+	struct IRLdcVarConst_4_Add_i4_LdlocVarVar : IRCommon
+	{
+		uint16_t ret;
+		uint16_t op;
+		int32_t constant;
+		uint16_t loadDst;
+		uint16_t loadSrc;
+		uint8_t __pad14;
+		uint8_t __pad15;
+		uint8_t __pad16;
+		uint8_t __pad17;
+		uint8_t __pad18;
+		uint8_t __pad19;
+		uint8_t __pad20;
+		uint8_t __pad21;
+		uint8_t __pad22;
+		uint8_t __pad23;
+	};
+
+
+	struct IRLdcVarConst_4_And_i4 : IRCommon
+	{
+		uint16_t ret;
+		uint16_t op;
+		int32_t constant;
+		uint8_t __pad10;
+		uint8_t __pad11;
+		uint8_t __pad12;
+		uint8_t __pad13;
+		uint8_t __pad14;
+		uint8_t __pad15;
+	};
+
+
+	struct IRLdcVarConst_4_Mul_i4 : IRCommon
+	{
+		uint16_t ret;
+		uint16_t op;
+		int32_t constant;
+		uint8_t __pad10;
+		uint8_t __pad11;
+		uint8_t __pad12;
+		uint8_t __pad13;
+		uint8_t __pad14;
+		uint8_t __pad15;
+	};
+
+
+	struct IRLdcVarConst_8_Mul_f8 : IRCommon
+	{
+		uint16_t ret;
+		uint16_t op;
+		uint8_t __pad6;
+		uint8_t __pad7;
+		double constant;
+		uint8_t __pad16;
+		uint8_t __pad17;
+		uint8_t __pad18;
+		uint8_t __pad19;
+		uint8_t __pad20;
+		uint8_t __pad21;
+		uint8_t __pad22;
+		uint8_t __pad23;
+	};
+
+
+	struct IRLdcVarConst_4_Shr_i4_i4 : IRCommon
+	{
+		uint16_t ret;
+		uint16_t value;
+		int32_t shiftAmount;
+		uint8_t __pad10;
+		uint8_t __pad11;
+		uint8_t __pad12;
+		uint8_t __pad13;
+		uint8_t __pad14;
+		uint8_t __pad15;
+	};
+
+
+	struct IRConvertVarVar_i4_i8_Add_i8_LdlocVarVar_2 : IRCommon
+	{
+		uint16_t ret;
+		uint16_t converted;
+		uint16_t other;
+		uint16_t dst0;
+		uint16_t src0;
+		uint16_t dst1;
+		uint16_t src1;
+		uint8_t __pad16;
+		uint8_t __pad17;
+		uint8_t __pad18;
+		uint8_t __pad19;
+		uint8_t __pad20;
+		uint8_t __pad21;
+		uint8_t __pad22;
+		uint8_t __pad23;
+		uint8_t __pad24;
+		uint8_t __pad25;
+		uint8_t __pad26;
+		uint8_t __pad27;
+		uint8_t __pad28;
+		uint8_t __pad29;
+		uint8_t __pad30;
+		uint8_t __pad31;
+	};
+
+
+	struct IRLdcVarConst_4_Add_i4_LdlocVarVar_2 : IRCommon
+	{
+		uint16_t ret;
+		uint16_t op;
+		int32_t constant;
+		uint16_t dst0;
+		uint16_t src0;
+		uint16_t dst1;
+		uint16_t src1;
+		uint8_t __pad18;
+		uint8_t __pad19;
+		uint8_t __pad20;
+		uint8_t __pad21;
+		uint8_t __pad22;
+		uint8_t __pad23;
+		uint8_t __pad24;
+		uint8_t __pad25;
+		uint8_t __pad26;
+		uint8_t __pad27;
+		uint8_t __pad28;
+		uint8_t __pad29;
+		uint8_t __pad30;
+		uint8_t __pad31;
+	};
+
+
+	struct IRLdcVarConst_4_Add_i4_Ret_4 : IRCommon
+	{
+		uint16_t ret;
+		uint16_t op;
+		int32_t constant;
+		uint8_t __pad10;
+		uint8_t __pad11;
+		uint8_t __pad12;
+		uint8_t __pad13;
+		uint8_t __pad14;
+		uint8_t __pad15;
 	};
 
 

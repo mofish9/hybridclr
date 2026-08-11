@@ -1,4 +1,5 @@
 #include "TransformContext.h"
+#include "InstructionCombiner.h"
 
 #include "metadata/GenericMetadata.h"
 #include "vm/Class.h"
@@ -1691,6 +1692,163 @@ namespace transform
 	void TransformContext::AddInst(IRCommon* ir)
 	{
 		IL2CPP_ASSERT(ir->type != HiOpcodeEnum::None);
+		if (ir2offsetMap == nullptr && !curbb->insts.empty())
+		{
+			IRCommon* combined = nullptr;
+			if (ir->type == HiOpcodeEnum::RetVar_ret_4)
+			{
+				combined = TryCombineLdc4AddI4Ret4(pool, curbb->insts.back(), ir);
+				if (combined != nullptr)
+				{
+					curbb->insts.back() = combined;
+					return;
+				}
+			}
+			combined = TryReduceLdlocPairLdc4AndI4(pool, curbb->insts.back(), ir);
+			if (combined != nullptr)
+			{
+				curbb->insts.push_back(combined);
+				return;
+			}
+			combined = TryReduceLdlocPairLdc4AddI4(pool, curbb->insts.back(), ir);
+			if (combined != nullptr)
+			{
+				curbb->insts.push_back(combined);
+				return;
+			}
+			if (curbb->insts.size() >= 2)
+			{
+				const size_t size = curbb->insts.size();
+				if (ir->type == HiOpcodeEnum::BinOpVarVarVar_Add_i4)
+				{
+					combined = TryCombineLdlocLdc4AddI4(pool, curbb->insts[size - 2], curbb->insts[size - 1], ir);
+				}
+				else if (ir->type == HiOpcodeEnum::BinOpVarVarVar_And_i4)
+				{
+					combined = TryCombineLdlocLdc4AndI4(pool, curbb->insts[size - 2], curbb->insts[size - 1], ir);
+				}
+				else if (ir->type == HiOpcodeEnum::BinOpVarVarVar_Mul_i4)
+				{
+					combined = TryCombineLdlocLdc4MulI4(pool, curbb->insts[size - 2], curbb->insts[size - 1], ir);
+				}
+				else if (ir->type == HiOpcodeEnum::BitShiftBinOpVarVarVar_Shr_i4_i4)
+				{
+					combined = TryCombineLdlocLdc4ShrI4(pool, curbb->insts[size - 2], curbb->insts[size - 1], ir);
+				}
+				else if (ir->type == HiOpcodeEnum::BinOpVarVarVar_Mul_f8)
+				{
+					combined = TryCombineLdlocLdc8MulF8(pool, curbb->insts[size - 2], curbb->insts[size - 1], ir);
+				}
+				if (combined != nullptr)
+				{
+					curbb->insts.resize(size - 2);
+					curbb->insts.push_back(combined);
+					return;
+				}
+			}
+			if (curbb->insts.size() >= 2 && ir->type == HiOpcodeEnum::LdlocVarVar)
+			{
+				const size_t size = curbb->insts.size();
+				combined = TryCombineConvertAddLoadPair(pool, curbb->insts[size - 2], curbb->insts[size - 1], ir);
+				if (combined == nullptr)
+				{
+					combined = TryCombineLdc4AddLoadPair(pool, curbb->insts[size - 2], curbb->insts[size - 1], ir);
+				}
+				if (combined != nullptr)
+				{
+					curbb->insts.resize(size - 2);
+					curbb->insts.push_back(combined);
+					return;
+				}
+			}
+			if (ir->type == HiOpcodeEnum::LdlocVarVar)
+			{
+				combined = TryCombineLdlocTripleLoad(pool, curbb->insts.back(), ir);
+				if (combined != nullptr)
+				{
+					curbb->insts.back() = combined;
+					return;
+				}
+				combined = TryCombineLdlocPairLoad(pool, curbb->insts.back(), ir);
+				if (combined != nullptr)
+				{
+					curbb->insts.back() = combined;
+					return;
+				}
+				combined = TryCombineLdc4AddLoad(pool, curbb->insts.back(), ir);
+				if (combined != nullptr)
+				{
+					curbb->insts.back() = combined;
+					return;
+				}
+			}
+			if (ir->type == HiOpcodeEnum::LdcVarConst_4)
+			{
+				combined = TryCombineLdlocPairLdc4(pool, curbb->insts.back(), ir);
+				if (combined != nullptr)
+				{
+					curbb->insts.back() = combined;
+					return;
+				}
+			}
+			if (ir->type == HiOpcodeEnum::BinOpVarVarVar_And_i4)
+			{
+				combined = TryCombineLdc4I4BinOp<IRBinOpVarVarVar_And_i4>(pool, curbb->insts.back(), ir,
+					HiOpcodeEnum::BinOpVarVarVar_And_i4, HiOpcodeEnum::LdcVarConst_4_And_i4);
+			}
+			else if (ir->type == HiOpcodeEnum::BinOpVarVarVar_Mul_i4)
+			{
+				combined = TryCombineLdc4I4BinOp<IRBinOpVarVarVar_Mul_i4>(pool, curbb->insts.back(), ir,
+					HiOpcodeEnum::BinOpVarVarVar_Mul_i4, HiOpcodeEnum::LdcVarConst_4_Mul_i4);
+			}
+			else if (ir->type == HiOpcodeEnum::BinOpVarVarVar_Mul_f8)
+			{
+				combined = TryCombineLdc8MulF8(pool, curbb->insts.back(), ir);
+			}
+			else if (ir->type == HiOpcodeEnum::BitShiftBinOpVarVarVar_Shr_i4_i4)
+			{
+				combined = TryCombineLdc4ShrI4(pool, curbb->insts.back(), ir);
+			}
+			if (combined != nullptr)
+			{
+				curbb->insts.back() = combined;
+				return;
+			}
+
+			combined = TryPropagateLdlocToConsumer(curbb->insts.back(), ir);
+			if (combined == nullptr)
+			{
+				combined = TryPropagateLdlocPairToStfldI4(curbb->insts.back(), ir);
+			}
+			if (combined != nullptr)
+			{
+				curbb->insts.back() = combined;
+				return;
+			}
+
+			combined = TryCombineLdlocVarVarPair(pool, curbb->insts.back(), ir);
+			if (combined == nullptr)
+			{
+				combined = TryCombineLdc4AddI4(pool, curbb->insts.back(), ir);
+			}
+			if (combined == nullptr)
+			{
+				combined = TryCombineConvertI4I8AddI8(pool, curbb->insts.back(), ir);
+			}
+			if (combined == nullptr)
+			{
+				combined = TryPropagateLdlocToBranchCltI4(pool, curbb->insts.back(), ir);
+			}
+			if (combined == nullptr)
+			{
+				combined = TryPropagateLdlocPairToBranchCltI4(pool, curbb->insts.back(), ir);
+			}
+			if (combined != nullptr)
+			{
+				curbb->insts.back() = combined;
+				return;
+			}
+		}
 		curbb->insts.push_back(ir);
 		if (ir2offsetMap)
 		{
@@ -1779,6 +1937,15 @@ namespace transform
 	{
 		LocVarInfo& __loc = locals[locIdx];
 		IRCommon* ir = CreateAssignVarVar(pool, __loc.locOffset, GetEvalStackTopOffset(), GetTypeValueSize(__loc.type));
+		if (ir2offsetMap == nullptr && ir->type == HiOpcodeEnum::LdlocVarVar && !curbb->insts.empty())
+		{
+			IRLdlocVarVar* store = static_cast<IRLdlocVarVar*>(ir);
+			if (TryRedirectStlocDestination(curbb->insts.back(), store->src, store->dst))
+			{
+				PopStack();
+				return;
+			}
+		}
 		AddInst(ir);
 		PopStack();
 	}
@@ -1794,9 +1961,11 @@ namespace transform
 
 	void TransformContext::CreateAddInst_ldc4(int32_t c, EvalStackReduceDataType rtype)
 	{
-		CreateAddIR(ir, LdcVarConst_4);
+		IRLdcVarConst_4* ir = pool.AllocIR<IRLdcVarConst_4>();
+		ir->type = HiOpcodeEnum::LdcVarConst_4;
 		ir->dst = GetEvalStackNewTopOffset();
 		ir->src = c;
+		AddInst(ir);
 		PushStackByReduceType(rtype);
 	}
 
@@ -2060,8 +2229,10 @@ namespace transform
 			}
 			case EvalStackReduceDataType::I8:
 			{
-				CreateAddIR(irConv, ConvertVarVar_i4_i8);
+				IRConvertVarVar_i4_i8* irConv = pool.AllocIR<IRConvertVarVar_i4_i8>();
+				irConv->type = HiOpcodeEnum::ConvertVarVar_i4_i8;
 				irConv->dst = irConv->src = op1.locOffset;
+				AddInst(irConv);
 				ir->type = opI8;
 				resultType = EvalStackReduceDataType::I8;
 				break;
@@ -2080,8 +2251,10 @@ namespace transform
 			{
 			case EvalStackReduceDataType::I4:
 			{
-				CreateAddIR(irConv, ConvertVarVar_i4_i8);
+				IRConvertVarVar_i4_i8* irConv = pool.AllocIR<IRConvertVarVar_i4_i8>();
+				irConv->type = HiOpcodeEnum::ConvertVarVar_i4_i8;
 				irConv->dst = irConv->src = op2.locOffset;
+				AddInst(irConv);
 				resultType = EvalStackReduceDataType::I8;
 				ir->type = opI8;
 				break;
@@ -2158,7 +2331,7 @@ namespace transform
 		IL2CPP_ASSERT(evalStackTop >= 2);
 		EvalStackVarInfo& op1 = evalStack[evalStackTop - 2];
 		EvalStackVarInfo& op2 = evalStack[evalStackTop - 1];
-		CreateAddIR(ir, BitShiftBinOpVarVarVar_Shr_i4_i4);
+		CreateIR(ir, BitShiftBinOpVarVarVar_Shr_i4_i4);
 		ir->ret = op1.locOffset;
 		ir->value = op1.locOffset;
 		ir->shiftAmount = op2.locOffset;
@@ -2214,6 +2387,7 @@ namespace transform
 			break;
 		}
 		}
+		AddInst(ir);
 		PopStack();
 		ip++;
 	}
@@ -2323,6 +2497,10 @@ namespace transform
 		ir->arr = arr.locOffset;
 		ir->index = index.locOffset;
 		ir->dst = arr.locOffset;
+		if (ir2offsetMap == nullptr && opI4 == HiOpcodeEnum::GetArrayElementVarVar_i4 && curbb->insts.size() >= 2)
+		{
+			TryReduceLdlocTripleBeforeGetArrayI4(curbb->insts[curbb->insts.size() - 2], ir);
+		}
 
 		PopStackN(2);
 		PushStackByReduceType(resultType);
@@ -3339,7 +3517,6 @@ else \
 					int32_t curArgIdx = i + resolvedIsInstanceMethod;
 					__argIdxs[curArgIdx] = evalStack[callArgEvalStackIdxBase + curArgIdx].locOffset;
 				}
-
 				PopStackN(resolvedTotalArgNum);
 
 				if (!IsReturnVoidMethod(shareMethod))
@@ -3680,8 +3857,9 @@ else \
 					}
 					case 4:
 					{
-						CreateAddIR(ir, RetVar_ret_4);
+						CreateIR(ir, RetVar_ret_4);
 						ir->ret = GetEvalStackTopOffset();
+						AddInst(ir);
 						break;
 					}
 					case 8:

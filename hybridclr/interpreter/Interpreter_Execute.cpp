@@ -1,8 +1,10 @@
 
 #include "Interpreter.h"
+#include "InterpreterProfile.h"
 
 #include <cmath>
 #include <algorithm>
+#include <cstring>
 
 #include "vm/Object.h"
 #include "vm/Class.h"
@@ -37,6 +39,13 @@ namespace hybridclr
 namespace interpreter
 {
 
+	template<typename T>
+	inline T ReadUnaligned(const void* source)
+	{
+		T value;
+		std::memcpy(&value, source, sizeof(value));
+		return value;
+	}
 
 #pragma region memory
 
@@ -1668,6 +1677,9 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 
 	void Interpreter::Execute(const MethodInfo* methodInfo, StackObject* args, void* ret)
 	{
+	#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		InterpreterProfile::RecordInterpreterEntry();
+	#endif
 		MachineState& machine = InterpreterModule::GetCurrentThreadMachineState();
 		InterpFrameGroup interpFrameGroup(machine);
 
@@ -1687,6 +1699,9 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 		{
 			for (;;)
 			{
+			#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+				InterpreterProfile::RecordDispatch(static_cast<uint16_t>(*(HiOpcodeEnum*)ip));
+			#endif
 				switch (*(HiOpcodeEnum*)ip)
 				{
 					// avoid decrement *ip when compute jump table,  boosts about 5% performance
@@ -12282,7 +12297,174 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 				    ip += 8;
 				    continue;
 				}
-
+				case HiOpcodeEnum::LdlocVarVar_2:
+				{
+					uint16_t __dst0 = *(uint16_t*)(ip + 2);
+					uint16_t __src0 = *(uint16_t*)(ip + 4);
+					uint16_t __dst1 = *(uint16_t*)(ip + 6);
+					uint16_t __src1 = *(uint16_t*)(ip + 8);
+				    (*(uint64_t*)(localVarBase + __dst0)) = (*(uint64_t*)(localVarBase + __src0));
+				    (*(uint64_t*)(localVarBase + __dst1)) = (*(uint64_t*)(localVarBase + __src1));
+				    ip += 16;
+				    continue;
+				}
+				case HiOpcodeEnum::LdcVarConst_4_Add_i4:
+				{
+					uint16_t __ret = *(uint16_t*)(ip + 2);
+					uint16_t __op = *(uint16_t*)(ip + 4);
+					uint32_t __constant = ReadUnaligned<uint32_t>(ip + 6);
+					(*(uint32_t*)(localVarBase + __ret)) = (*(uint32_t*)(localVarBase + __op)) + __constant;
+				    ip += 16;
+				    continue;
+				}
+				case HiOpcodeEnum::ConvertVarVar_i4_i8_Add_i8:
+				{
+					uint16_t __ret = *(uint16_t*)(ip + 2);
+					uint16_t __converted = *(uint16_t*)(ip + 4);
+					uint16_t __other = *(uint16_t*)(ip + 6);
+					uint64_t __convertedValue = static_cast<uint64_t>(static_cast<int64_t>(*(int32_t*)(localVarBase + __converted)));
+					uint64_t __otherValue = *(uint64_t*)(localVarBase + __other);
+				    (*(uint64_t*)(localVarBase + __ret)) = __convertedValue + __otherValue;
+				    ip += 16;
+				    continue;
+				}
+				case HiOpcodeEnum::LdlocVarVar_3:
+				{
+					uint16_t __dst0 = *(uint16_t*)(ip + 2);
+					uint16_t __src0 = *(uint16_t*)(ip + 4);
+					uint16_t __dst1 = *(uint16_t*)(ip + 6);
+					uint16_t __src1 = *(uint16_t*)(ip + 8);
+					uint16_t __dst2 = *(uint16_t*)(ip + 10);
+					uint16_t __src2 = *(uint16_t*)(ip + 12);
+					(*(uint64_t*)(localVarBase + __dst0)) = (*(uint64_t*)(localVarBase + __src0));
+					(*(uint64_t*)(localVarBase + __dst1)) = (*(uint64_t*)(localVarBase + __src1));
+					(*(uint64_t*)(localVarBase + __dst2)) = (*(uint64_t*)(localVarBase + __src2));
+					ip += 24;
+					continue;
+				}
+				case HiOpcodeEnum::LdlocVarVar_4:
+				{
+					uint16_t __dst0 = *(uint16_t*)(ip + 2);
+					uint16_t __src0 = *(uint16_t*)(ip + 4);
+					uint16_t __dst1 = *(uint16_t*)(ip + 6);
+					uint16_t __src1 = *(uint16_t*)(ip + 8);
+					uint16_t __dst2 = *(uint16_t*)(ip + 10);
+					uint16_t __src2 = *(uint16_t*)(ip + 12);
+					uint16_t __dst3 = *(uint16_t*)(ip + 14);
+					uint16_t __src3 = *(uint16_t*)(ip + 16);
+					(*(uint64_t*)(localVarBase + __dst0)) = (*(uint64_t*)(localVarBase + __src0));
+					(*(uint64_t*)(localVarBase + __dst1)) = (*(uint64_t*)(localVarBase + __src1));
+					(*(uint64_t*)(localVarBase + __dst2)) = (*(uint64_t*)(localVarBase + __src2));
+					(*(uint64_t*)(localVarBase + __dst3)) = (*(uint64_t*)(localVarBase + __src3));
+					ip += 32;
+					continue;
+				}
+				case HiOpcodeEnum::LdlocVarVar_2_LdcVarConst_4:
+				{
+					uint16_t __dst0 = *(uint16_t*)(ip + 2);
+					uint16_t __src0 = *(uint16_t*)(ip + 4);
+					uint16_t __dst1 = *(uint16_t*)(ip + 6);
+					uint16_t __src1 = *(uint16_t*)(ip + 8);
+					uint16_t __ldcDst = *(uint16_t*)(ip + 10);
+					uint32_t __constant = ReadUnaligned<uint32_t>(ip + 12);
+					(*(uint64_t*)(localVarBase + __dst0)) = (*(uint64_t*)(localVarBase + __src0));
+					(*(uint64_t*)(localVarBase + __dst1)) = (*(uint64_t*)(localVarBase + __src1));
+					(*(int32_t*)(localVarBase + __ldcDst)) = __constant;
+					ip += 24;
+					continue;
+				}
+				case HiOpcodeEnum::LdcVarConst_4_Add_i4_LdlocVarVar:
+				{
+					uint16_t __ret = *(uint16_t*)(ip + 2);
+					uint16_t __op = *(uint16_t*)(ip + 4);
+					uint32_t __constant = ReadUnaligned<uint32_t>(ip + 6);
+					uint16_t __loadDst = *(uint16_t*)(ip + 10);
+					uint16_t __loadSrc = *(uint16_t*)(ip + 12);
+					uint32_t __value = *(uint32_t*)(localVarBase + __op);
+					*reinterpret_cast<int32_t*>(localVarBase + __ret) = static_cast<int32_t>(__value + __constant);
+					*reinterpret_cast<uint64_t*>(localVarBase + __loadDst) = *reinterpret_cast<uint64_t*>(localVarBase + __loadSrc);
+					ip += 24;
+					continue;
+				}
+				case HiOpcodeEnum::LdcVarConst_4_And_i4:
+				{
+					uint16_t __ret = *(uint16_t*)(ip + 2);
+					uint16_t __op = *(uint16_t*)(ip + 4);
+					uint32_t __constant = ReadUnaligned<uint32_t>(ip + 6);
+					*(int32_t*)(localVarBase + __ret) = static_cast<int32_t>(*(uint32_t*)(localVarBase + __op) & __constant);
+					ip += 16;
+					continue;
+				}
+				case HiOpcodeEnum::LdcVarConst_4_Mul_i4:
+				{
+					uint16_t __ret = *(uint16_t*)(ip + 2);
+					uint16_t __op = *(uint16_t*)(ip + 4);
+					uint32_t __constant = ReadUnaligned<uint32_t>(ip + 6);
+					*(int32_t*)(localVarBase + __ret) = static_cast<int32_t>(*(uint32_t*)(localVarBase + __op) * __constant);
+					ip += 16;
+					continue;
+				}
+				case HiOpcodeEnum::LdcVarConst_8_Mul_f8:
+				{
+					uint16_t __ret = *(uint16_t*)(ip + 2);
+					uint16_t __op = *(uint16_t*)(ip + 4);
+					double __constant = ReadUnaligned<double>(ip + 8);
+					*(double*)(localVarBase + __ret) = *(double*)(localVarBase + __op) * __constant;
+					ip += 16;
+					continue;
+				}
+				case HiOpcodeEnum::LdcVarConst_4_Shr_i4_i4:
+				{
+					uint16_t __ret = *(uint16_t*)(ip + 2);
+					uint16_t __value = *(uint16_t*)(ip + 4);
+					int32_t __shiftAmount = ReadUnaligned<int32_t>(ip + 6);
+					*(int32_t*)(localVarBase + __ret) = *(int32_t*)(localVarBase + __value) >> __shiftAmount;
+					ip += 16;
+					continue;
+				}
+				case HiOpcodeEnum::ConvertVarVar_i4_i8_Add_i8_LdlocVarVar_2:
+				{
+					uint16_t __ret = *(uint16_t*)(ip + 2);
+					uint16_t __converted = *(uint16_t*)(ip + 4);
+					uint16_t __other = *(uint16_t*)(ip + 6);
+					uint16_t __dst0 = *(uint16_t*)(ip + 8);
+					uint16_t __src0 = *(uint16_t*)(ip + 10);
+					uint16_t __dst1 = *(uint16_t*)(ip + 12);
+					uint16_t __src1 = *(uint16_t*)(ip + 14);
+					uint64_t __convertedValue = static_cast<uint64_t>(static_cast<int64_t>(*(int32_t*)(localVarBase + __converted)));
+					uint64_t __otherValue = *(uint64_t*)(localVarBase + __other);
+					*reinterpret_cast<uint64_t*>(localVarBase + __ret) = __convertedValue + __otherValue;
+					*reinterpret_cast<uint64_t*>(localVarBase + __dst0) = *reinterpret_cast<uint64_t*>(localVarBase + __src0);
+					*reinterpret_cast<uint64_t*>(localVarBase + __dst1) = *reinterpret_cast<uint64_t*>(localVarBase + __src1);
+					ip += 32;
+					continue;
+				}
+				case HiOpcodeEnum::LdcVarConst_4_Add_i4_LdlocVarVar_2:
+				{
+					uint16_t __ret = *(uint16_t*)(ip + 2);
+					uint16_t __op = *(uint16_t*)(ip + 4);
+					uint32_t __constant = ReadUnaligned<uint32_t>(ip + 6);
+					uint16_t __dst0 = *(uint16_t*)(ip + 10);
+					uint16_t __src0 = *(uint16_t*)(ip + 12);
+					uint16_t __dst1 = *(uint16_t*)(ip + 14);
+					uint16_t __src1 = *(uint16_t*)(ip + 16);
+					uint32_t __value = *(uint32_t*)(localVarBase + __op);
+					*reinterpret_cast<int32_t*>(localVarBase + __ret) = static_cast<int32_t>(__value + __constant);
+					*reinterpret_cast<uint64_t*>(localVarBase + __dst0) = *reinterpret_cast<uint64_t*>(localVarBase + __src0);
+					*reinterpret_cast<uint64_t*>(localVarBase + __dst1) = *reinterpret_cast<uint64_t*>(localVarBase + __src1);
+					ip += 32;
+					continue;
+				}
+				case HiOpcodeEnum::LdcVarConst_4_Add_i4_Ret_4:
+				{
+					uint16_t __ret = *(uint16_t*)(ip + 2);
+					uint16_t __op = *(uint16_t*)(ip + 4);
+					uint32_t __constant = ReadUnaligned<uint32_t>(ip + 6);
+					uint32_t __value = *(uint32_t*)(localVarBase + __op);
+					*reinterpret_cast<int32_t*>(localVarBase + __ret) = static_cast<int32_t>(__value + __constant);
+					SET_RET_AND_LEAVE_FRAME(4, 8);
+					continue;
+				}
 				//!!!}}INSTRINCT
 #pragma endregion
 				default:
@@ -12307,4 +12489,3 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 
 }
 }
-
