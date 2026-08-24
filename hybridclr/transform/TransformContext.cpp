@@ -24,6 +24,111 @@ namespace transform
 	constexpr int32_t MAX_STACK_SIZE = (2 << 16) - 1;
 	constexpr int32_t MAX_VALUE_TYPE_SIZE = (2 << 16) - 1;
 
+	// A boxed int32 local is represented by its raw value until the matching
+	// unbox.any.  Keep that representation only across instructions which are
+	// guaranteed not to branch, call, allocate, or throw.  In particular, this
+	// still permits the ordinary ldloc/ldloc arithmetic emitted around a box.
+	static bool IsSafeBoxElisionGapOpcode(OpcodeEnum opcode)
+	{
+		switch (opcode)
+		{
+		case OpcodeEnum::NOP:
+		case OpcodeEnum::LDARG_0:
+		case OpcodeEnum::LDARG_1:
+		case OpcodeEnum::LDARG_2:
+		case OpcodeEnum::LDARG_3:
+		case OpcodeEnum::LDLOC_0:
+		case OpcodeEnum::LDLOC_1:
+		case OpcodeEnum::LDLOC_2:
+		case OpcodeEnum::LDLOC_3:
+		case OpcodeEnum::STLOC_0:
+		case OpcodeEnum::STLOC_1:
+		case OpcodeEnum::STLOC_2:
+		case OpcodeEnum::STLOC_3:
+		case OpcodeEnum::LDARG_S:
+		case OpcodeEnum::LDARGA_S:
+		case OpcodeEnum::STARG_S:
+		case OpcodeEnum::LDLOC_S:
+		case OpcodeEnum::LDLOCA_S:
+		case OpcodeEnum::STLOC_S:
+		case OpcodeEnum::LDARG:
+		case OpcodeEnum::LDARGA:
+		case OpcodeEnum::STARG:
+		case OpcodeEnum::LDLOC:
+		case OpcodeEnum::LDLOCA:
+		case OpcodeEnum::STLOC:
+		case OpcodeEnum::LDNULL:
+		case OpcodeEnum::LDC_I4_M1:
+		case OpcodeEnum::LDC_I4_0:
+		case OpcodeEnum::LDC_I4_1:
+		case OpcodeEnum::LDC_I4_2:
+		case OpcodeEnum::LDC_I4_3:
+		case OpcodeEnum::LDC_I4_4:
+		case OpcodeEnum::LDC_I4_5:
+		case OpcodeEnum::LDC_I4_6:
+		case OpcodeEnum::LDC_I4_7:
+		case OpcodeEnum::LDC_I4_8:
+		case OpcodeEnum::LDC_I4_S:
+		case OpcodeEnum::LDC_I4:
+		case OpcodeEnum::LDC_I8:
+		case OpcodeEnum::LDC_R4:
+		case OpcodeEnum::LDC_R8:
+		case OpcodeEnum::DUP:
+		case OpcodeEnum::POP:
+		case OpcodeEnum::ADD:
+		case OpcodeEnum::SUB:
+		case OpcodeEnum::MUL:
+		case OpcodeEnum::AND:
+		case OpcodeEnum::OR:
+		case OpcodeEnum::XOR:
+		case OpcodeEnum::SHL:
+		case OpcodeEnum::SHR:
+		case OpcodeEnum::SHR_UN:
+		case OpcodeEnum::NEG:
+		case OpcodeEnum::NOT:
+		case OpcodeEnum::CONV_I1:
+		case OpcodeEnum::CONV_I2:
+		case OpcodeEnum::CONV_I4:
+		case OpcodeEnum::CONV_I8:
+		case OpcodeEnum::CONV_R4:
+		case OpcodeEnum::CONV_R8:
+		case OpcodeEnum::CONV_U4:
+		case OpcodeEnum::CONV_U8:
+		case OpcodeEnum::CONV_R_UN:
+		case OpcodeEnum::CONV_U2:
+		case OpcodeEnum::CONV_U1:
+		case OpcodeEnum::CONV_I:
+		case OpcodeEnum::CONV_U:
+		case OpcodeEnum::CEQ:
+		case OpcodeEnum::CGT:
+		case OpcodeEnum::CGT_UN:
+		case OpcodeEnum::CLT:
+		case OpcodeEnum::CLT_UN:
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	static bool IsSafeBoxElisionGap(const byte* begin, const byte* end, const byte* codeEnd)
+	{
+		if (begin > end)
+			return false;
+		const byte* ip = begin;
+		while (ip < end)
+		{
+			const byte* decodedIp = ip;
+			const OpCodeInfo* opcode = DecodeOpCodeInfo(decodedIp, codeEnd);
+			if (!opcode || !IsSafeBoxElisionGapOpcode(opcode->id))
+				return false;
+			const byte* nextIp = decodedIp + GetOpCodeSize(decodedIp, opcode);
+			if (nextIp <= ip || nextIp > end)
+				return false;
+			ip = nextIp;
+		}
+		return ip == end;
+	}
+
 	template<typename T>
 	void AllocResolvedData(il2cpp::utils::dynamic_array<uint64_t>& resolvedDatas, int32_t size, int32_t& index, T*& buf)
 	{
@@ -1499,7 +1604,7 @@ namespace transform
 		actualParamCount(0), ip2bb(nullptr), curbb(nullptr), args(nullptr), locals(nullptr), evalStack(nullptr),
 		evalStackTop(0), evalStackBaseOffset(0), curStackSize(0), maxStackSize(0),
 		nextFlowIdx(0), ipBase(nullptr), ip(nullptr), ipOffset(0), ir2offsetMap(nullptr),
-		prefixFlags(0), shareMethod(nullptr), totalIRSize(0), totalArgSize(0), totalArgLocalSize(0), initLocals(false)
+		prefixFlags(0), shareMethod(nullptr), directDelegateReceiverOffset(-1), totalIRSize(0), totalArgSize(0), totalArgLocalSize(0), initLocals(false)
 	{
 
 	}
@@ -1539,6 +1644,8 @@ namespace transform
 		evalStack[evalStackTop].reduceType = GetEvalStackReduceDataType(type);
 		evalStack[evalStackTop].byteSize = byteSize;
 		evalStack[evalStackTop].locOffset = GetEvalStackNewTopOffset();
+		evalStack[evalStackTop].exactClass = nullptr;
+		evalStack[evalStackTop].exactMethod = nullptr;
 		evalStackTop++;
 		curStackSize += stackSize;
 		maxStackSize = std::max(curStackSize, maxStackSize);
@@ -1552,6 +1659,8 @@ namespace transform
 		evalStack[evalStackTop].reduceType = t;
 		evalStack[evalStackTop].byteSize = byteSize;
 		evalStack[evalStackTop].locOffset = GetEvalStackNewTopOffset();
+		evalStack[evalStackTop].exactClass = nullptr;
+		evalStack[evalStackTop].exactMethod = nullptr;
 		evalStackTop++; curStackSize += stackSize;
 		maxStackSize = std::max(curStackSize, maxStackSize);
 		IL2CPP_ASSERT(maxStackSize < MAX_STACK_SIZE);
@@ -1566,6 +1675,8 @@ namespace transform
 		newTop.reduceType = oldTop.reduceType;
 		newTop.byteSize = oldTop.byteSize;
 		newTop.locOffset = curStackSize;
+		newTop.exactClass = oldTop.exactClass;
+		newTop.exactMethod = oldTop.exactMethod;
 		curStackSize += stackSize;
 		maxStackSize = std::max(curStackSize, maxStackSize);
 		IL2CPP_ASSERT(maxStackSize < MAX_STACK_SIZE);
@@ -1649,6 +1760,50 @@ namespace transform
 	{
 		IL2CPP_ASSERT(splitOffsets.find(targetOffset) != splitOffsets.end());
 		IRBasicBlock* targetBb = ip2bb[targetOffset];
+		if (!targetBb->exactStateInitialized)
+		{
+			targetBb->exactLocals = pool.NewNAny<Il2CppClass*>(body.localVars.size());
+			targetBb->exactArgs = pool.NewNAny<Il2CppClass*>(actualParamCount);
+			targetBb->exactLocalMethods = pool.NewNAny<const MethodInfo*>(body.localVars.size());
+			targetBb->exactArgMethods = pool.NewNAny<const MethodInfo*>(actualParamCount);
+			for (size_t i = 0; i < body.localVars.size(); i++)
+			{
+				targetBb->exactLocals[i] = locals[i].exactClass;
+				targetBb->exactLocalMethods[i] = locals[i].exactMethod;
+			}
+			for (int32_t i = 0; i < actualParamCount; i++)
+			{
+				targetBb->exactArgs[i] = args[i].exactClass;
+				targetBb->exactArgMethods[i] = args[i].exactMethod;
+			}
+			targetBb->exactStateInitialized = true;
+		}
+		else
+		{
+			for (size_t i = 0; i < body.localVars.size(); i++)
+			{
+				if (targetBb->exactLocals[i] != locals[i].exactClass)
+				{
+					targetBb->exactLocals[i] = nullptr;
+				}
+				if (targetBb->exactLocalMethods[i] != locals[i].exactMethod)
+				{
+					targetBb->exactLocalMethods[i] = nullptr;
+				}
+			}
+			for (int32_t i = 0; i < actualParamCount; i++)
+			{
+				if (targetBb->exactArgs[i] != args[i].exactClass)
+				{
+					targetBb->exactArgs[i] = nullptr;
+				}
+				if (targetBb->exactArgMethods[i] != args[i].exactMethod)
+				{
+					targetBb->exactArgMethods[i] = nullptr;
+				}
+			}
+		}
+		ClearEvalStackExactState();
 		if (!targetBb->inPending)
 		{
 			targetBb->inPending = true;
@@ -1667,6 +1822,47 @@ namespace transform
 		}
 	}
 
+	void TransformContext::ClearEvalStackExactState()
+	{
+		for (int32_t i = 0; i < evalStackTop; i++)
+		{
+			evalStack[i].exactClass = nullptr;
+			evalStack[i].exactMethod = nullptr;
+		}
+	}
+
+	void TransformContext::ClearExactClassState()
+	{
+		for (size_t i = 0; i < body.localVars.size(); i++)
+		{
+			locals[i].exactClass = nullptr;
+			locals[i].exactMethod = nullptr;
+		}
+		for (int32_t i = 0; i < actualParamCount; i++)
+		{
+			args[i].exactClass = nullptr;
+			args[i].exactMethod = nullptr;
+		}
+		ClearEvalStackExactState();
+	}
+
+	bool TransformContext::CanElideInt32BoxAtOffset(uint32_t offset, bool isUnbox) const
+	{
+		if (ir2offsetMap != nullptr || image->GetPDBImage() != nullptr)
+		{
+			return false;
+		}
+		for (size_t i = 0; i < body.localVars.size(); i++)
+		{
+			const LocVarInfo& local = locals[i];
+			if (local.elideInt32Box && (isUnbox ? local.unboxOffset : local.boxOffset) == offset)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	bool TransformContext::FindNextFlow()
 	{
 		for (; nextFlowIdx < (int32_t)pendingFlows.size(); )
@@ -1676,6 +1872,31 @@ namespace transform
 			if (!nextBb->visited)
 			{
 				ip = ipBase + fi->offset;
+				if (!nextBb->exactStateInitialized)
+				{
+					nextBb->exactLocals = pool.NewNAny<Il2CppClass*>(body.localVars.size());
+					nextBb->exactArgs = pool.NewNAny<Il2CppClass*>(actualParamCount);
+					nextBb->exactLocalMethods = pool.NewNAny<const MethodInfo*>(body.localVars.size());
+					nextBb->exactArgMethods = pool.NewNAny<const MethodInfo*>(actualParamCount);
+					std::memset(nextBb->exactLocals, 0, sizeof(Il2CppClass*) * body.localVars.size());
+					std::memset(nextBb->exactArgs, 0, sizeof(Il2CppClass*) * actualParamCount);
+					std::memset(nextBb->exactLocalMethods, 0, sizeof(const MethodInfo*) * body.localVars.size());
+					std::memset(nextBb->exactArgMethods, 0, sizeof(const MethodInfo*) * actualParamCount);
+					nextBb->exactStateInitialized = true;
+				}
+				if (nextBb->exactStateInitialized)
+				{
+					for (size_t i = 0; i < body.localVars.size(); i++)
+					{
+						locals[i].exactClass = nextBb->exactLocals[i];
+						locals[i].exactMethod = nextBb->exactLocalMethods[i];
+					}
+					for (int32_t i = 0; i < actualParamCount; i++)
+					{
+						args[i].exactClass = nextBb->exactArgs[i];
+						args[i].exactMethod = nextBb->exactArgMethods[i];
+					}
+				}
 				if (!fi->evalStack.empty()) {
 
 					std::memcpy(evalStack, &fi->evalStack[0], sizeof(EvalStackVarInfo) * fi->evalStack.size());
@@ -1863,6 +2084,8 @@ namespace transform
 		IRCommon* ir = CreateLoadExpandDataToStackVarVar(pool, GetEvalStackNewTopOffset(), __arg.argLocOffset, desc);
 		AddInst(ir);
 		PushStackByType(__arg.type);
+		evalStack[evalStackTop - 1].exactClass = __arg.exactClass;
+		evalStack[evalStackTop - 1].exactMethod = __arg.exactMethod;
 	}
 
 	bool TransformContext::IsCreateNotNullObjectInstrument(IRCommon* ir)
@@ -1908,6 +2131,7 @@ namespace transform
 	void TransformContext::AddInst_ldarga(int32_t argIdx)
 	{
 		IL2CPP_ASSERT(argIdx < actualParamCount);
+		ClearExactClassState();
 		ArgVarInfo& argInfo = args[argIdx];
 		CreateAddIR(ir, LdlocVarAddress);
 		ir->dst = GetEvalStackNewTopOffset();
@@ -1920,6 +2144,9 @@ namespace transform
 		IL2CPP_ASSERT(argIdx < actualParamCount);
 		ArgVarInfo& __arg = args[argIdx];
 		IRCommon* ir = CreateAssignVarVar(pool, __arg.argLocOffset, GetEvalStackTopOffset(), GetTypeValueSize(__arg.type));
+		// Arguments can be reassigned along control-flow paths that have already been emitted.
+		__arg.exactClass = nullptr;
+		__arg.exactMethod = nullptr;
 		AddInst(ir);
 		PopStack();
 	}
@@ -1931,12 +2158,17 @@ namespace transform
 		IRCommon* ir = CreateLoadExpandDataToStackVarVar(pool, GetEvalStackNewTopOffset(), __loc.locOffset, desc);
 		AddInst(ir);
 		PushStackByType(__loc.type);
+		evalStack[evalStackTop - 1].exactClass = __loc.exactClass;
+		evalStack[evalStackTop - 1].exactMethod = __loc.exactMethod;
 	}
 
 	void TransformContext::CreateAddInst_stloc(int32_t locIdx)
 	{
 		LocVarInfo& __loc = locals[locIdx];
 		IRCommon* ir = CreateAssignVarVar(pool, __loc.locOffset, GetEvalStackTopOffset(), GetTypeValueSize(__loc.type));
+		bool isInvariantEntryStore = __loc.storeCount == 1 && __loc.storeInEntryBlock && !__loc.hasLocalAddress;
+		__loc.exactClass = isInvariantEntryStore ? evalStack[evalStackTop - 1].exactClass : nullptr;
+		__loc.exactMethod = __loc.storeCount == 1 && __loc.storeInEntryBlock ? evalStack[evalStackTop - 1].exactMethod : nullptr;
 		if (ir2offsetMap == nullptr && ir->type == HiOpcodeEnum::LdlocVarVar && !curbb->insts.empty())
 		{
 			IRLdlocVarVar* store = static_cast<IRLdlocVarVar*>(ir);
@@ -1952,6 +2184,7 @@ namespace transform
 
 	void TransformContext::CreateAddInst_ldloca(int32_t locIdx)
 	{
+		ClearExactClassState();
 		CreateAddIR(ir, LdlocVarAddress);
 		LocVarInfo& __loc = locals[locIdx];
 		ir->dst = GetEvalStackNewTopOffset();
@@ -2858,6 +3091,24 @@ else \
 		return metadata::MethodBodyCache::IsInlineable(method);
 	}
 
+	static bool IsExactStaticDelegateTarget(const MethodInfo* invokeMethod, const MethodInfo* targetMethod)
+	{
+		if (!targetMethod || hybridclr::metadata::IsInstanceMethod(targetMethod) ||
+			targetMethod->parameters_count != invokeMethod->parameters_count ||
+			!IsTypeEqual(targetMethod->return_type, invokeMethod->return_type))
+		{
+			return false;
+		}
+		for (uint8_t i = 0; i < targetMethod->parameters_count; i++)
+		{
+			if (!IsTypeEqual(GET_METHOD_PARAMETER_TYPE(targetMethod->parameters[i]), GET_METHOD_PARAMETER_TYPE(invokeMethod->parameters[i])))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 
 	void TransformContext::TransformBody(int32_t depth, int32_t localVarOffset, interpreter::InterpMethodInfo& result)
 	{
@@ -2888,7 +3139,14 @@ else \
 		{
 			IRBasicBlock* bb = pool.NewAny<IRBasicBlock>();
 			bb->visited = false;
+			bb->inPending = false;
 			bb->ilOffset = lastSplitBegin;
+			bb->codeOffset = 0;
+			bb->exactLocals = nullptr;
+			bb->exactArgs = nullptr;
+			bb->exactLocalMethods = nullptr;
+			bb->exactArgMethods = nullptr;
+			bb->exactStateInitialized = false;
 			irbbs.push_back(bb);
 			for (uint32_t idx = lastSplitBegin; idx < offset; idx++)
 			{
@@ -2897,7 +3155,15 @@ else \
 			lastSplitBegin = offset;
 		}
 		IRBasicBlock* endBb = pool.NewAny<IRBasicBlock>();
-		*endBb = { true, false, body.codeSize, 0 };
+		endBb->visited = true;
+		endBb->inPending = false;
+		endBb->ilOffset = body.codeSize;
+		endBb->codeOffset = 0;
+		endBb->exactLocals = nullptr;
+		endBb->exactArgs = nullptr;
+		endBb->exactLocalMethods = nullptr;
+		endBb->exactArgMethods = nullptr;
+		endBb->exactStateInitialized = false;
 		ip2bb[body.codeSize] = endBb;
 		irbbs.push_back(endBb);
 
@@ -2921,6 +3187,8 @@ else \
 			{
 				ArgVarInfo& self = args[0];
 				self.klass = methodInfo->klass;
+				self.exactClass = nullptr;
+				self.exactMethod = nullptr;
 				self.type = IS_CLASS_VALUE_TYPE(self.klass) ? &self.klass->this_arg : &self.klass->byval_arg;
 				self.argOffset = idx;
 				self.argLocOffset = localVarOffset + totalArgSize;
@@ -2933,6 +3201,8 @@ else \
 				ArgVarInfo& arg = args[idx + i];
 				arg.type = GET_METHOD_PARAMETER_TYPE(methodInfo->parameters[i]);
 				arg.klass = il2cpp::vm::Class::FromIl2CppType(arg.type);
+				arg.exactClass = nullptr;
+				arg.exactMethod = nullptr;
 				arg.argOffset = idx + i;
 				arg.argLocOffset = localVarOffset + totalArgSize;
 				il2cpp::vm::Class::SetupFields(arg.klass);
@@ -2946,9 +3216,138 @@ else \
 			LocVarInfo& local = locals[i];
 			local.type = InflateIfNeeded(body.localVars[i], genericContext, true);
 			local.klass = il2cpp::vm::Class::FromIl2CppType(local.type);
+			local.exactClass = nullptr;
+			local.exactMethod = nullptr;
+			local.storeCount = 0;
+			local.loadCount = 0;
+			local.storeInEntryBlock = false;
+			local.hasLocalAddress = false;
+			local.elideInt32Box = false;
+			local.boxOffset = body.codeSize;
+			local.boxStoreNextOffset = body.codeSize;
+			local.unboxOffset = body.codeSize;
+			local.boxToken = 0;
+			local.unboxToken = 0;
 			il2cpp::vm::Class::SetupFields(local.klass);
 			local.locOffset = localVarOffset + totalArgLocalSize;
 			totalArgLocalSize += GetTypeValueStackObjectCount(local.type);
+		}
+		{
+			const byte* scanIp = body.ilcodes;
+			const byte* scanEnd = body.ilcodes + body.codeSize;
+			OpcodeEnum previousOpcode = OpcodeEnum::__Count;
+			uint32_t previousOffset = body.codeSize;
+			uint32_t previousToken = 0;
+			while (scanIp < scanEnd)
+			{
+				const byte* opcodeStart = scanIp;
+				const byte* decodedIp = scanIp;
+				const OpCodeInfo* opcode = DecodeOpCodeInfo(decodedIp, scanEnd);
+				IL2CPP_ASSERT(opcode);
+				const byte* nextIp = decodedIp + GetOpCodeSize(decodedIp, opcode);
+				int32_t localIdx = -1;
+				bool loadsLocal = false;
+				bool storesLocal = false;
+				bool takesLocalAddress = false;
+				switch (opcode->id)
+				{
+				case OpcodeEnum::LDLOC_0:
+				case OpcodeEnum::LDLOC_1:
+				case OpcodeEnum::LDLOC_2:
+				case OpcodeEnum::LDLOC_3:
+					localIdx = opcode->constValue;
+					loadsLocal = true;
+					break;
+				case OpcodeEnum::LDLOC_S:
+					localIdx = *(decodedIp + 1);
+					loadsLocal = true;
+					break;
+				case OpcodeEnum::LDLOC:
+					localIdx = GetU2LittleEndian(decodedIp + 1);
+					loadsLocal = true;
+					break;
+				case OpcodeEnum::STLOC_0:
+				case OpcodeEnum::STLOC_1:
+				case OpcodeEnum::STLOC_2:
+				case OpcodeEnum::STLOC_3:
+					localIdx = opcode->constValue;
+					storesLocal = true;
+					break;
+				case OpcodeEnum::STLOC_S:
+					localIdx = *(decodedIp + 1);
+					storesLocal = true;
+					break;
+				case OpcodeEnum::STLOC:
+					localIdx = GetU2LittleEndian(decodedIp + 1);
+					storesLocal = true;
+					break;
+				case OpcodeEnum::LDLOCA_S:
+					localIdx = *(decodedIp + 1);
+					takesLocalAddress = true;
+					break;
+				case OpcodeEnum::LDLOCA:
+					localIdx = GetU2LittleEndian(decodedIp + 1);
+					takesLocalAddress = true;
+					break;
+				default:
+					break;
+				}
+				if (localIdx >= 0 && localIdx < (int32_t)body.localVars.size())
+				{
+					LocVarInfo& local = locals[localIdx];
+					if (takesLocalAddress)
+					{
+						local.hasLocalAddress = true;
+						local.storeCount = 2;
+						local.storeInEntryBlock = false;
+					}
+					else if (storesLocal)
+					{
+						if (local.storeCount < 2)
+						{
+							++local.storeCount;
+							local.storeInEntryBlock = local.storeCount == 1 && ip2bb[opcodeStart - body.ilcodes] == irbbs[0];
+						}
+						if (previousOpcode == OpcodeEnum::BOX)
+						{
+							local.boxOffset = previousOffset;
+							local.boxStoreNextOffset = (uint32_t)(nextIp - body.ilcodes);
+							local.boxToken = previousToken;
+						}
+					}
+					else if (loadsLocal)
+					{
+						if (local.loadCount < 2)
+						{
+							++local.loadCount;
+						}
+						if (nextIp < scanEnd)
+						{
+							const byte* nextDecodedIp = nextIp;
+							const OpCodeInfo* nextOpcode = DecodeOpCodeInfo(nextDecodedIp, scanEnd);
+							if (nextOpcode && nextOpcode->id == OpcodeEnum::UNBOX_ANY &&
+								IsSafeBoxElisionGap(body.ilcodes + local.boxStoreNextOffset, opcodeStart, scanEnd))
+							{
+								local.unboxOffset = (uint32_t)(nextIp - body.ilcodes);
+								local.unboxToken = (uint32_t)GetI4LittleEndian(nextDecodedIp + 1);
+							}
+						}
+					}
+				}
+				previousOpcode = opcode->id;
+				previousOffset = (uint32_t)(opcodeStart - body.ilcodes);
+				previousToken = opcode->id == OpcodeEnum::BOX ? (uint32_t)GetI4LittleEndian(decodedIp + 1) : 0;
+				scanIp = nextIp;
+			}
+			IL2CPP_ASSERT(scanIp == scanEnd);
+			for (size_t i = 0; i < body.localVars.size(); i++)
+			{
+				LocVarInfo& local = locals[i];
+				local.elideInt32Box = local.klass == il2cpp_defaults.object_class &&
+					local.storeCount == 1 && local.loadCount == 1 && !local.hasLocalAddress &&
+					local.boxOffset < body.codeSize && local.unboxOffset < body.codeSize &&
+					local.boxToken == local.unboxToken && ip2bb[local.boxOffset] == ip2bb[local.unboxOffset];
+			}
 		}
 
 		evalStackBaseOffset = localVarOffset + totalArgLocalSize;
@@ -2972,6 +3371,7 @@ else \
 		int32_t brOffset = 0;
 
 		shareMethod = nullptr;
+		directDelegateReceiverOffset = -1;
 
 		Token2RuntimeHandleMap tokenCache(64);
 
@@ -3105,6 +3505,7 @@ else \
 			curbb = ip2bb[ipOffset];
 			if (curbb != lastBb)
 			{
+				ClearEvalStackExactState();
 				if (curbb && !curbb->visited)
 				{
 					curbb->visited = true;
@@ -3374,6 +3775,7 @@ else \
 			}
 			case OpcodeValue::CALL:
 			{
+				directDelegateReceiverOffset = -1;
 				uint32_t token = (uint32_t)GetI4LittleEndian(ip + 1);
 				ip += 5;
 				shareMethod = const_cast<MethodInfo*>(image->GetMethodInfoFromToken(tokenCache, token, klassContainer, methodContainer, genericContext));
@@ -3382,7 +3784,7 @@ else \
 
 		LabelCall:
 			{
-				if (TryAddInstinctInstruments(shareMethod))
+				if (directDelegateReceiverOffset < 0 && TryAddInstinctInstruments(shareMethod))
 				{
 					continue;
 				}
@@ -3447,7 +3849,7 @@ else \
 								ir->pinvokeMethodPointer = pinvokeMethodPointerIdx;
 								ir->managed2NativeFunctionPointerMethod = managed2NativeFunctionPointerMethodIdx;
 								ir->argIdxs = argIdxDataIndex;
-								ir->ret = argBaseOffset;
+								ir->ret = directDelegateReceiverOffset >= 0 ? directDelegateReceiverOffset : argBaseOffset;
 								ir->retLocationType = (uint8_t)locDataType;
 							}
 							else
@@ -3456,13 +3858,17 @@ else \
 								ir->pinvokeMethodPointer = pinvokeMethodPointerIdx;
 								ir->managed2NativeFunctionPointerMethod = managed2NativeFunctionPointerMethodIdx;
 								ir->argIdxs = argIdxDataIndex;
-								ir->ret = argBaseOffset;
+								ir->ret = directDelegateReceiverOffset >= 0 ? directDelegateReceiverOffset : argBaseOffset;
 							}
 						}
 					}
 					else if (ShouldBeInlined(shareMethod, depth) && TransformSubMethodBody(*this, shareMethod, depth + 1, argBaseOffset))
 					{
-
+						if (directDelegateReceiverOffset >= 0 && !IsReturnVoidMethod(shareMethod))
+						{
+							IRCommon* moveRet = CreateAssignVarVar(pool, directDelegateReceiverOffset, argBaseOffset, GetTypeValueSize(shareMethod->return_type));
+							AddInst(moveRet);
+						}
 					}
 					else
 					{
@@ -3477,21 +3883,26 @@ else \
 							CreateAddIR(ir, CallInterp_ret);
 							ir->methodInfo = methodDataIndex;
 							ir->argBase = argBaseOffset;
-							ir->ret = argBaseOffset;
+							ir->ret = directDelegateReceiverOffset >= 0 ? directDelegateReceiverOffset : argBaseOffset;
 						}
 					}
 					PopStackN(resolvedTotalArgNum);
+					if (directDelegateReceiverOffset >= 0)
+					{
+						curStackSize = directDelegateReceiverOffset;
+					}
 					if (!IsReturnVoidMethod(shareMethod))
 					{
 						PushStackByType(shareMethod->return_type);
 					}
+					directDelegateReceiverOffset = -1;
 					continue;
 				}
 #if HYBRIDCLR_UNITY_2021_OR_NEW
 				if (!shareMethod->has_full_generic_sharing_signature)
 #endif
 				{
-					if (TryAddCallCommonInstruments(shareMethod, methodDataIndex))
+					if (directDelegateReceiverOffset < 0 && TryAddCallCommonInstruments(shareMethod, methodDataIndex))
 					{
 						continue;
 					}
@@ -3518,6 +3929,10 @@ else \
 					__argIdxs[curArgIdx] = evalStack[callArgEvalStackIdxBase + curArgIdx].locOffset;
 				}
 				PopStackN(resolvedTotalArgNum);
+				if (directDelegateReceiverOffset >= 0)
+				{
+					curStackSize = directDelegateReceiverOffset;
+				}
 
 				if (!IsReturnVoidMethod(shareMethod))
 				{
@@ -3551,10 +3966,12 @@ else \
 					ir->methodInfo = methodDataIndex;
 					ir->argIdxs = argIdxDataIndex;
 				}
+				directDelegateReceiverOffset = -1;
 				continue;
 			}
 			case OpcodeValue::CALLVIRT:
 			{
+				directDelegateReceiverOffset = -1;
 				uint32_t token = (uint32_t)GetI4LittleEndian(ip + 1);
 				ip += 5;
 				shareMethod = image->GetMethodInfoFromToken(tokenCache, token, klassContainer, methodContainer, genericContext);
@@ -3570,6 +3987,31 @@ else \
 
 				int32_t resolvedTotalArgNum = shareMethod->parameters_count + 1;
 				int32_t callArgEvalStackIdxBase = evalStackTop - resolvedTotalArgNum;
+				if (IsChildTypeOfMulticastDelegate(shareMethod->klass) && std::strcmp(shareMethod->name, "Invoke") == 0)
+				{
+					const MethodInfo* directMethod = evalStack[callArgEvalStackIdxBase].exactMethod;
+					// A single static target has no receiver state to preserve; bypass delegate dispatch.
+					if (IsExactStaticDelegateTarget(shareMethod, directMethod))
+					{
+						directDelegateReceiverOffset = evalStack[callArgEvalStackIdxBase].locOffset;
+						RemoveEvalStackEntry(callArgEvalStackIdxBase);
+						shareMethod = const_cast<MethodInfo*>(directMethod);
+						goto LabelCall;
+					}
+				}
+				if (IsInterface(shareMethod->klass->flags))
+				{
+					Il2CppClass* exactClass = evalStack[callArgEvalStackIdxBase].exactClass;
+					if (exactClass && !IS_CLASS_VALUE_TYPE(exactClass))
+					{
+						const MethodInfo* implMethod = image->FindImplMethod(exactClass, shareMethod);
+						if (implMethod)
+						{
+							shareMethod = const_cast<MethodInfo*>(implMethod);
+							goto LabelCall;
+						}
+					}
+				}
 				uint32_t methodDataIndex = GetOrAddResolveDataIndex(shareMethod);
 
 				bool isMultiDelegate = IsChildTypeOfMulticastDelegate(shareMethod->klass);
@@ -4726,6 +5168,7 @@ else \
 							ir->obj = GetEvalStackNewTopOffset();
 							ir->method = methodDataIndex;
 							PushStackByReduceType(NATIVE_INT_REDUCE_TYPE);
+							evalStack[evalStackTop - 1].exactClass = klass;
 							ir->ctorFrameBase = GetEvalStackNewTopOffset();
 							maxStackSize = std::max(maxStackSize, curStackSize + 1); // 1 for __this
 						}
@@ -4739,6 +5182,7 @@ else \
 							IL2CPP_ASSERT(ir->argStackObjectNum > 0);
 							PopStackN(shareMethod->parameters_count);
 							PushStackByReduceType(NATIVE_INT_REDUCE_TYPE);
+							evalStack[evalStackTop - 1].exactClass = klass;
 							ir->ctorFrameBase = GetEvalStackNewTopOffset();
 							maxStackSize = std::max(maxStackSize, curStackSize + ir->argStackObjectNum + 1); // 1 for __this
 						}
@@ -4771,6 +5215,7 @@ else \
 				}
 				PopStackN(resolvedTotalArgNum + 1); // args + obj + this
 				PushStackByType(&klass->byval_arg);
+				evalStack[evalStackTop - 1].exactClass = klass;
 				CreateAddIR(ir, NewClassVar);
 				ir->type = IS_CLASS_VALUE_TYPE(shareMethod->klass) ? HiOpcodeEnum::NewValueTypeVar : HiOpcodeEnum::NewClassVar;
 				ir->managed2NativeMethod = GetOrAddResolveDataIndex((void*)managed2NativeMethod);
@@ -4815,6 +5260,8 @@ else \
 				CreateAddIR(ir, IsInstVar);
 				ir->obj = GetEvalStackTopOffset();
 				ir->klass = klassDataIdx;
+				evalStack[evalStackTop - 1].exactClass = nullptr;
+				evalStack[evalStackTop - 1].exactMethod = nullptr;
 				ip += 5;
 				continue;
 			}
@@ -5177,6 +5624,11 @@ else \
 				IL2CPP_ASSERT(evalStackTop > 0);
 				uint32_t token = (uint32_t)GetI4LittleEndian(ip + 1);
 				Il2CppClass* objKlass = image->GetClassFromToken(tokenCache, token, klassContainer, methodContainer, genericContext);
+				if (objKlass == il2cpp_defaults.int32_class && CanElideInt32BoxAtOffset(ipOffset, false))
+				{
+					ip += 5;
+					continue;
+				}
 				/*	if (il2cpp::vm::Class::IsNullable(objKlass))
 					{
 						objKlass = il2cpp::vm::Class::GetNullableArgument(objKlass);
@@ -5573,6 +6025,13 @@ ir->ele = ele.locOffset;
 
 				if (IS_CLASS_VALUE_TYPE(objKlass))
 				{
+					if (objKlass == il2cpp_defaults.int32_class && CanElideInt32BoxAtOffset(ipOffset, true))
+					{
+						PopStack();
+						PushStackByType(&objKlass->byval_arg);
+						ip += 5;
+						continue;
+					}
 					CreateAddIR(ir, UnBoxAnyVarVar);
 					ir->dst = ir->obj = GetEvalStackTopOffset();
 					ir->klass = GetOrAddResolveDataIndex(objKlass);
@@ -5852,6 +6311,7 @@ ir->ele = ele.locOffset;
 					ir->dst = GetEvalStackNewTopOffset();
 					ir->src = (uint64_t)methodInfo;
 					PushStackByReduceType(NATIVE_INT_REDUCE_TYPE);
+					evalStack[evalStackTop - 1].exactMethod = methodInfo;
 					ip += 6;
 					continue;
 				}

@@ -24,6 +24,15 @@ namespace interpreter
 	class MachineState
 	{
 	public:
+		struct VirtualMethodCacheEntry
+		{
+			const Il2CppClass* klass;
+			const MethodInfo* method;
+			MethodInfo* actualMethod;
+		};
+
+		static constexpr uint32_t kVirtualMethodCacheSize = 16;
+
 		MachineState()
 		{
 			_stackSize = -1;
@@ -38,6 +47,7 @@ namespace interpreter
 			_exceptionFlowBase = nullptr;
 			_exceptionFlowCount = -1;
 			_exceptionFlowTopIdx = 0;
+			std::memset(_virtualMethodCache, 0, sizeof(_virtualMethodCache));
 		}
 
 		~MachineState()
@@ -246,6 +256,11 @@ namespace interpreter
 		void CollectFrames(il2cpp::vm::StackFrames* stackFrames);
 		void SetupFramesDebugInfo(il2cpp::vm::StackFrames* stackFrames);
 
+		VirtualMethodCacheEntry& GetVirtualMethodCacheEntry(uint32_t index)
+		{
+			return _virtualMethodCache[index & (kVirtualMethodCacheSize - 1)];
+		}
+
 	private:
 
 
@@ -284,6 +299,8 @@ namespace interpreter
 		ExceptionFlowInfo* _exceptionFlowBase;
 		int32_t _exceptionFlowTopIdx;
 		int32_t _exceptionFlowCount;
+
+		VirtualMethodCacheEntry _virtualMethodCache[kVirtualMethodCacheSize];
 
 
 		std::stack<const Il2CppImage*> _executingImageStack;

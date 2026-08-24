@@ -673,6 +673,11 @@ namespace transform
 	{
 		Il2CppClass* klass = method->klass;
 		IL2CPP_ASSERT(ctx.GetEvalStackTop() >= 2);
+		const MethodInfo* delegateTargetMethod = ctx.GetEvalStackExactMethod(ctx.GetEvalStackTop() - 1);
+		if (delegateTargetMethod && hybridclr::metadata::IsInstanceMethod(delegateTargetMethod))
+		{
+			delegateTargetMethod = nullptr;
+		}
 #if HYBRIDCLR_UNITY_2021_OR_NEW
 		const MethodInfo* ctor = il2cpp::vm::Class::GetMethodFromName(method->klass, ".ctor", 2);
 		if (ctor && ctor->methodPointer && !ctor->isInterpterImpl)
@@ -697,6 +702,7 @@ namespace transform
 #endif
 		ctx.PopStackN(2);
 		ctx.PushStackByReduceType(NATIVE_INT_REDUCE_TYPE);
+		ctx.SetEvalStackExactMethod(ctx.GetEvalStackTop() - 1, delegateTargetMethod);
 		return true;
 	}
 

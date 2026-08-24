@@ -31,12 +31,19 @@ namespace transform
 		uint32_t ilOffset;
 		uint32_t codeOffset;
 		std::vector<interpreter::IRCommon*> insts;
+		Il2CppClass** exactLocals;
+		Il2CppClass** exactArgs;
+		const MethodInfo** exactLocalMethods;
+		const MethodInfo** exactArgMethods;
+		bool exactStateInitialized;
 	};
 
 	struct ArgVarInfo
 	{
 		const Il2CppType* type;
 		Il2CppClass* klass;
+		Il2CppClass* exactClass;
+		const MethodInfo* exactMethod;
 		int32_t argOffset; // StackObject index
 		int32_t argLocOffset;
 	};
@@ -45,6 +52,18 @@ namespace transform
 	{
 		const Il2CppType* type;
 		Il2CppClass* klass;
+		Il2CppClass* exactClass;
+		const MethodInfo* exactMethod;
+		uint8_t storeCount;
+		uint8_t loadCount;
+		bool storeInEntryBlock;
+		bool hasLocalAddress;
+		bool elideInt32Box;
+		uint32_t boxOffset;
+		uint32_t boxStoreNextOffset;
+		uint32_t unboxOffset;
+		uint32_t boxToken;
+		uint32_t unboxToken;
 		int32_t locOffset;
 	};
 
@@ -62,6 +81,8 @@ namespace transform
 		EvalStackReduceDataType reduceType;
 		int32_t byteSize;
 		int32_t locOffset;
+		Il2CppClass* exactClass;
+		const MethodInfo* exactMethod;
 	};
 
 #if HYBRIDCLR_ARCH_64
@@ -153,6 +174,7 @@ namespace transform
 		int32_t prefixFlags;
 
 		const MethodInfo* shareMethod;
+		int32_t directDelegateReceiverOffset;
 
 		std::vector<IRBasicBlock*> irbbs;
 		il2cpp::utils::dynamic_array<InterpExceptionClause> exClauses;
@@ -251,6 +273,27 @@ namespace transform
 			return evalStack[evalStackTop - 1].locOffset;
 		}
 
+		const MethodInfo* GetEvalStackExactMethod(int32_t idx) const
+		{
+			return idx >= 0 && idx < evalStackTop ? evalStack[idx].exactMethod : nullptr;
+		}
+
+		void SetEvalStackExactMethod(int32_t idx, const MethodInfo* method)
+		{
+			IL2CPP_ASSERT(idx >= 0 && idx < evalStackTop);
+			evalStack[idx].exactMethod = method;
+		}
+
+		void RemoveEvalStackEntry(int32_t idx)
+		{
+			IL2CPP_ASSERT(idx >= 0 && idx < evalStackTop);
+			for (int32_t i = idx; i + 1 < evalStackTop; i++)
+			{
+				evalStack[i] = evalStack[i + 1];
+			}
+			--evalStackTop;
+		}
+
 		void PushStackByType(const Il2CppType* type);
 
 		void PushStackByReduceType(EvalStackReduceDataType t);
@@ -274,6 +317,10 @@ namespace transform
 		void PushOffset(int32_t* offsetPtr);
 
 		void PushBranch(int32_t targetOffset);
+
+		void ClearEvalStackExactState();
+		void ClearExactClassState();
+		bool CanElideInt32BoxAtOffset(uint32_t offset, bool isUnbox) const;
 
 		bool FindNextFlow();
 

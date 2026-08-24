@@ -664,29 +664,44 @@ namespace interpreter
 		}
 	}
 
-	inline MethodInfo* GET_OBJECT_VIRTUAL_METHOD(Il2CppObject* obj, const MethodInfo* method)
+	inline MethodInfo* GET_OBJECT_VIRTUAL_METHOD(MachineState& machine, Il2CppObject* obj, const MethodInfo* method)
 	{
 		CHECK_NOT_NULL_THROW(obj);
-		const MethodInfo* result;
-		if (hybridclr::metadata::IsVirtualMethod(method->flags))
+		if (!hybridclr::metadata::IsVirtualMethod(method->flags))
 		{
-			if (hybridclr::metadata::IsInterface(method->klass->flags))
-			{
-				result = il2cpp_codegen_get_interface_invoke_data(method->slot, obj, method->klass).method;
-			}
-			else
-			{
-				result = il2cpp_codegen_get_virtual_invoke_data(method->slot, obj).method;
-			}
-			IL2CPP_ASSERT(!method->genericMethod || method->is_inflated);
-			if (method->genericMethod && method->genericMethod->context.method_inst/* && method->genericMethod*/) // means it's genericInstance method 或generic method
-			{
-				result = GetGenericVirtualMethod(result, method);
-			}
+			return const_cast<MethodInfo*>(method);
+		}
+		const Il2CppClass* klass = obj->klass;
+		// COM/WinRT interface dispatch can depend on the individual RCW identity and
+		// its queried-interface cache, so a class/method cache entry is not valid.
+		const bool cacheable = !klass->is_import_or_windows_runtime;
+		uint32_t cacheIndex = (uint32_t)(((uintptr_t)klass >> 4) ^ ((uintptr_t)method >> 4));
+		MachineState::VirtualMethodCacheEntry& cache = machine.GetVirtualMethodCacheEntry(cacheIndex);
+		if (cacheable && cache.klass == klass && cache.method == method)
+		{
+			return cache.actualMethod;
+		}
+
+		const MethodInfo* result;
+		if (hybridclr::metadata::IsInterface(method->klass->flags))
+		{
+			result = il2cpp_codegen_get_interface_invoke_data(method->slot, obj, method->klass).method;
 		}
 		else
 		{
-			result = method;
+			result = il2cpp_codegen_get_virtual_invoke_data(method->slot, obj).method;
+		}
+		IL2CPP_ASSERT(!method->genericMethod || method->is_inflated);
+		if (method->genericMethod && method->genericMethod->context.method_inst/* && method->genericMethod*/) // means it's genericInstance method 或generic method
+		{
+			result = GetGenericVirtualMethod(result, method);
+		}
+		if (cacheable)
+		{
+			cache.klass = klass;
+			cache.method = method;
+			cache.actualMethod = const_cast<MethodInfo*>(result);
+			return cache.actualMethod;
 		}
 		return const_cast<MethodInfo*>(result);
 	}
@@ -4859,7 +4874,7 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 					uint16_t __resultMethod = *(uint16_t*)(ip + 2);
 					uint16_t __obj = *(uint16_t*)(ip + 4);
 					MethodInfo* __virtualMethod = ((MethodInfo*)imi->resolveDatas[*(uint32_t*)(ip + 8)]);
-				    (*(MethodInfo**)(localVarBase + __resultMethod)) = GET_OBJECT_VIRTUAL_METHOD((*(Il2CppObject**)(localVarBase + __obj)), __virtualMethod);
+				    (*(MethodInfo**)(localVarBase + __resultMethod)) = GET_OBJECT_VIRTUAL_METHOD(machine, (*(Il2CppObject**)(localVarBase + __obj)), __virtualMethod);
 				    ip += 16;
 				    continue;
 				}
@@ -5050,7 +5065,7 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 					uint32_t __argIdxs = *(uint32_t*)(ip + 12);
 				    uint16_t* _argIdxData = ((uint16_t*)&imi->resolveDatas[__argIdxs]);
 					StackObject* _objPtr = localVarBase + _argIdxData[0];
-				    MethodInfo* _actualMethod = GET_OBJECT_VIRTUAL_METHOD( _objPtr->obj, ((MethodInfo*)imi->resolveDatas[__methodInfo]));
+				    MethodInfo* _actualMethod = GET_OBJECT_VIRTUAL_METHOD(machine, _objPtr->obj, ((MethodInfo*)imi->resolveDatas[__methodInfo]));
 				    if (IS_CLASS_VALUE_TYPE(_actualMethod->klass))
 				    {
 				        _objPtr->obj += 1;
@@ -5079,7 +5094,7 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 					uint16_t __ret = *(uint16_t*)(ip + 2);
 				    uint16_t* _argIdxData = ((uint16_t*)&imi->resolveDatas[__argIdxs]);
 					StackObject* _objPtr = localVarBase + _argIdxData[0];
-				    MethodInfo* _actualMethod = GET_OBJECT_VIRTUAL_METHOD(_objPtr->obj, ((MethodInfo*)imi->resolveDatas[__methodInfo]));
+				    MethodInfo* _actualMethod = GET_OBJECT_VIRTUAL_METHOD(machine, _objPtr->obj, ((MethodInfo*)imi->resolveDatas[__methodInfo]));
 				    void* _ret = (void*)(localVarBase + __ret);
 				    if (IS_CLASS_VALUE_TYPE(_actualMethod->klass))
 				    {
@@ -5110,7 +5125,7 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 					uint8_t __retLocationType = *(uint8_t*)(ip + 2);
 				    uint16_t* _argIdxData = ((uint16_t*)&imi->resolveDatas[__argIdxs]);
 					StackObject* _objPtr = localVarBase + _argIdxData[0];
-				    MethodInfo* _actualMethod = GET_OBJECT_VIRTUAL_METHOD(_objPtr->obj, ((MethodInfo*)imi->resolveDatas[__methodInfo]));
+				    MethodInfo* _actualMethod = GET_OBJECT_VIRTUAL_METHOD(machine, _objPtr->obj, ((MethodInfo*)imi->resolveDatas[__methodInfo]));
 				    void* _ret = (void*)(localVarBase + __ret);
 				    if (IS_CLASS_VALUE_TYPE(_actualMethod->klass))
 				    {
@@ -5138,7 +5153,7 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 					MethodInfo* __method = ((MethodInfo*)imi->resolveDatas[*(uint32_t*)(ip + 4)]);
 					uint16_t __argBase = *(uint16_t*)(ip + 2);
 				    StackObject* _argBasePtr = (StackObject*)(void*)(localVarBase + __argBase);
-				    MethodInfo* _actualMethod = GET_OBJECT_VIRTUAL_METHOD(_argBasePtr->obj, __method);
+				    MethodInfo* _actualMethod = GET_OBJECT_VIRTUAL_METHOD(machine, _argBasePtr->obj, __method);
 				    if (IS_CLASS_VALUE_TYPE(_actualMethod->klass))
 				    {
 				        _argBasePtr->obj += 1;
@@ -5152,7 +5167,7 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 					uint16_t __argBase = *(uint16_t*)(ip + 2);
 					uint16_t __ret = *(uint16_t*)(ip + 4);
 				    StackObject* _argBasePtr = (StackObject*)(void*)(localVarBase + __argBase);
-				    MethodInfo* _actualMethod = GET_OBJECT_VIRTUAL_METHOD(_argBasePtr->obj, __method);
+				    MethodInfo* _actualMethod = GET_OBJECT_VIRTUAL_METHOD(machine, _argBasePtr->obj, __method);
 				    if (IS_CLASS_VALUE_TYPE(_actualMethod->klass))
 				    {
 				        _argBasePtr->obj += 1;
