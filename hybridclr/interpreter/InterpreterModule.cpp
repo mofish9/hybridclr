@@ -19,6 +19,7 @@
 #include "../transform/Transform.h"
 
 #include "MethodBridge.h"
+#include "InterpreterProfile.h"
 #include "InterpreterUtil.h"
 
 namespace hybridclr
@@ -293,21 +294,25 @@ namespace interpreter
 
 	void InterpreterModule::Managed2NativeCallByReflectionInvoke(const MethodInfo* method, uint16_t* argVarIndexs, StackObject* localVarBase, void* ret)
 	{
+		if (IsFullGenericSharingMethod(method))
+		{
+			FullGenericSharingDiagnostics::RecordDispatch();
+		}
 		if (hybridclr::metadata::IsInterpreterImplement(method))
 		{
 			Interpreter::Execute(method,  localVarBase + argVarIndexs[0], ret);
 			return;
 		}
-		if (method->invoker_method == nullptr)
+		if (!PrepareInterpreterManaged2NativeCall(method))
 		{
-			char sigName[kMaxSignatureNameLength];
-			ComputeSignature(method, true, sigName, sizeof(sigName) - 1);
+			if (method->invoker_method == nullptr)
+			{
+				char sigName[kMaxSignatureNameLength];
+				ComputeSignature(method, true, sigName, sizeof(sigName) - 1);
 
-			TEMP_FORMAT(errMsg, "GetManaged2NativeMethodPointer. sinature:%s not support.", sigName);
-			RaiseMethodNotSupportException(method, errMsg);
-		}
-		if (!InitAndGetInterpreterDirectlyCallMethodPointer(method))
-		{
+				TEMP_FORMAT(errMsg, "GetManaged2NativeMethodPointer. sinature:%s not support.", sigName);
+				RaiseMethodNotSupportException(method, errMsg);
+			}
 			RaiseAOTGenericMethodNotInstantiatedException(method);
 		}
 		void* thisPtr;
@@ -337,9 +342,9 @@ namespace interpreter
 			}
 		}
 #if HYBRIDCLR_UNITY_2021_OR_NEW
-		method->invoker_method(method->methodPointerCallByInterp, method, thisPtr, invokeParams, ret);
+		method->invoker_method(GetInterpreterInvokerMethodPointer(method), method, thisPtr, invokeParams, ret);
 #else
-		void* retObj = method->invoker_method(method->methodPointerCallByInterp, method, thisPtr, invokeParams);
+		void* retObj = method->invoker_method(GetInterpreterInvokerMethodPointer(method), method, thisPtr, invokeParams);
 		if (ret)
 		{
 			const Il2CppType* returnType = method->return_type;
@@ -365,11 +370,7 @@ namespace interpreter
 
 	Managed2NativeCallMethod InterpreterModule::GetManaged2NativeMethodPointer(const MethodInfo* method, bool forceStatic)
 	{
-		if (method->methodPointerCallByInterp == NotSupportNative2Managed 
-#if HYBRIDCLR_UNITY_2021_OR_NEW
-			|| method->has_full_generic_sharing_signature
-#endif
-			)
+		if (ReadPublishedPointer(&const_cast<MethodInfo*>(method)->methodPointerCallByInterp) == NotSupportNative2Managed || IsFullGenericSharingMethod(method))
 		{
 			return Managed2NativeCallByReflectionInvoke;
 		}
@@ -418,6 +419,10 @@ namespace interpreter
 	
 	static void InterpreterInvoke(Il2CppMethodPointer methodPointer, const MethodInfo* method, void* __this, void** __args, void* __ret)
 	{
+		if (method->is_inflated)
+		{
+			FullGenericSharingDiagnostics::RecordInterpreterInvoker();
+		}
 		InterpMethodInfo* imi = method->interpData ? (InterpMethodInfo*)method->interpData : InterpreterModule::GetInterpMethodInfo(method);
 		bool isInstanceMethod = metadata::IsInstanceMethod(method);
 		StackObject* args = (StackObject*)alloca(sizeof(StackObject) * imi->argStackObjectSize);
@@ -425,7 +430,9 @@ namespace interpreter
 		{
 			if (IS_CLASS_VALUE_TYPE(method->klass))
 			{
-				__this = (Il2CppObject*)__this + (methodPointer != method->methodPointerCallByInterp);
+				Il2CppMethodPointer methodPointerCallByInterp = ReadPublishedPointer(
+					&const_cast<MethodInfo*>(method)->methodPointerCallByInterp);
+				__this = (Il2CppObject*)__this + (methodPointer != methodPointerCallByInterp);
 			}
 			args[0].ptr = __this;
 		}
@@ -437,6 +444,10 @@ namespace interpreter
 
 	static void InterpreterDelegateInvoke(Il2CppMethodPointer, const MethodInfo* method, void* __this, void** __args, void* __ret)
 	{
+		if (method->is_inflated)
+		{
+			FullGenericSharingDiagnostics::RecordInterpreterInvoker();
+		}
 		Il2CppMulticastDelegate* del = (Il2CppMulticastDelegate*)__this;
 		Il2CppDelegate** firstSubDel;
 		int32_t subDelCount;
@@ -457,12 +468,16 @@ namespace interpreter
 			Il2CppDelegate* cur = firstSubDel[i];
 			const MethodInfo* curMethod = cur->method;
 			Il2CppObject* curTarget = cur->target;
-			if (curMethod->invoker_method == nullptr)
+			if (IsFullGenericSharingMethod(curMethod))
 			{
-				RaiseExecutionEngineExceptionMethodIsNotFound(curMethod);
+				FullGenericSharingDiagnostics::RecordDispatch();
 			}
-			if (!InitAndGetInterpreterDirectlyCallMethodPointer(curMethod))
+			if (!PrepareInterpreterManaged2NativeCall(curMethod))
 			{
+				if (curMethod->invoker_method == nullptr)
+				{
+					RaiseExecutionEngineExceptionMethodIsNotFound(curMethod);
+				}
 				RaiseAOTGenericMethodNotInstantiatedException(curMethod);
 			}
 			switch ((int)(method->parameters_count - curMethod->parameters_count))
@@ -474,7 +489,7 @@ namespace interpreter
 					il2cpp::vm::Exception::RaiseNullReferenceException();
 				}
 				curTarget += (IS_CLASS_VALUE_TYPE(curMethod->klass));
-				curMethod->invoker_method(curMethod->methodPointerCallByInterp, curMethod, curTarget, __args, __ret);
+				curMethod->invoker_method(GetInterpreterInvokerMethodPointer(curMethod), curMethod, curTarget, __args, __ret);
 				break;
 			}
 			case -1:
@@ -486,7 +501,7 @@ namespace interpreter
 				{
 					newArgs[k + 1] = __args[k];
 				}
-				curMethod->invoker_method(curMethod->methodPointerCallByInterp, curMethod, nullptr, newArgs, __ret);
+				curMethod->invoker_method(GetInterpreterInvokerMethodPointer(curMethod), curMethod, nullptr, newArgs, __ret);
 				break;
 			}
 			case 1:
@@ -497,7 +512,7 @@ namespace interpreter
 				{
 					il2cpp::vm::Exception::RaiseNullReferenceException();
 				}
-				curMethod->invoker_method(curMethod->methodPointerCallByInterp, curMethod, curTarget, __args + 1, __ret);
+				curMethod->invoker_method(GetInterpreterInvokerMethodPointer(curMethod), curMethod, curTarget, __args + 1, __ret);
 				break;
 			}
 			default:
@@ -511,6 +526,10 @@ namespace interpreter
 	#else
 	static void* InterpreterInvoke(Il2CppMethodPointer methodPointer, const MethodInfo* method, void* __this, void** __args)
 	{
+		if (method->is_inflated)
+		{
+			FullGenericSharingDiagnostics::RecordInterpreterInvoker();
+		}
 		InterpMethodInfo* imi = method->interpData ? (InterpMethodInfo*)method->interpData : InterpreterModule::GetInterpMethodInfo(method);
 		StackObject* args = (StackObject*)alloca(sizeof(StackObject) * imi->argStackObjectSize);
 		bool isInstanceMethod = metadata::IsInstanceMethod(method);
@@ -518,7 +537,9 @@ namespace interpreter
 		{
 			if (IS_CLASS_VALUE_TYPE(method->klass))
 			{
-				__this = (Il2CppObject*)__this + (methodPointer != method->methodPointerCallByInterp);
+				Il2CppMethodPointer methodPointerCallByInterp = ReadPublishedPointer(
+					&const_cast<MethodInfo*>(method)->methodPointerCallByInterp);
+				__this = (Il2CppObject*)__this + (methodPointer != methodPointerCallByInterp);
 			}
 			args[0].ptr = __this;
 		}
@@ -539,6 +560,10 @@ namespace interpreter
 
 	static void* InterpreterDelegateInvoke(Il2CppMethodPointer, const MethodInfo* method, void* __this, void** __args)
 	{
+		if (method->is_inflated)
+		{
+			FullGenericSharingDiagnostics::RecordInterpreterInvoker();
+		}
 		Il2CppMulticastDelegate* del = (Il2CppMulticastDelegate*)__this;
 		Il2CppDelegate** firstSubDel;
 		int32_t subDelCount;
@@ -559,12 +584,16 @@ namespace interpreter
 			Il2CppDelegate* cur = firstSubDel[i];
 			const MethodInfo* curMethod = cur->method;
 			Il2CppObject* curTarget = cur->target;
-			if (curMethod->invoker_method == nullptr)
+			if (IsFullGenericSharingMethod(curMethod))
 			{
-				RaiseExecutionEngineExceptionMethodIsNotFound(curMethod);
+				FullGenericSharingDiagnostics::RecordDispatch();
 			}
-			if (!InitAndGetInterpreterDirectlyCallMethodPointer(curMethod))
+			if (!PrepareInterpreterManaged2NativeCall(curMethod))
 			{
+				if (curMethod->invoker_method == nullptr)
+				{
+					RaiseExecutionEngineExceptionMethodIsNotFound(curMethod);
+				}
 				RaiseAOTGenericMethodNotInstantiatedException(curMethod);
 			}
 			switch ((int)(method->parameters_count - curMethod->parameters_count))
@@ -576,7 +605,7 @@ namespace interpreter
 					il2cpp::vm::Exception::RaiseNullReferenceException();
 				}
 				curTarget += (IS_CLASS_VALUE_TYPE(curMethod->klass));
-				ret = curMethod->invoker_method(curMethod->methodPointerCallByInterp, curMethod, curTarget, __args);
+				ret = curMethod->invoker_method(GetInterpreterInvokerMethodPointer(curMethod), curMethod, curTarget, __args);
 				break;
 			}
 			case -1:
@@ -588,7 +617,7 @@ namespace interpreter
 				{
 					newArgs[k + 1] = __args[k];
 				}
-				ret = curMethod->invoker_method(curMethod->methodPointerCallByInterp, curMethod, nullptr, newArgs);
+				ret = curMethod->invoker_method(GetInterpreterInvokerMethodPointer(curMethod), curMethod, nullptr, newArgs);
 				break;
 			}
 			case 1:
@@ -599,7 +628,7 @@ namespace interpreter
 				{
 					il2cpp::vm::Exception::RaiseNullReferenceException();
 				}
-				ret = curMethod->invoker_method(curMethod->methodPointerCallByInterp, curMethod, curTarget, __args + 1);
+				ret = curMethod->invoker_method(GetInterpreterInvokerMethodPointer(curMethod), curMethod, curTarget, __args + 1);
 				break;
 			}
 			default:
@@ -650,4 +679,3 @@ namespace interpreter
 	}
 }
 }
-

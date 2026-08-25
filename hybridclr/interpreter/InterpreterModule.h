@@ -5,6 +5,7 @@
 #include "../CommonDef.h"
 #include "MethodBridge.h"
 #include "Engine.h"
+#include "InterpreterProfile.h"
 #include "../metadata/Image.h"
 
 namespace hybridclr
@@ -48,6 +49,15 @@ namespace interpreter
 		static Il2CppMethodPointer GetAdjustThunkMethodPointer(const MethodInfo* method);
 		static Managed2NativeCallMethod GetManaged2NativeMethodPointer(const MethodInfo* method, bool forceStatic);
 		static Managed2NativeCallMethod GetManaged2NativeMethodPointer(const metadata::ResolveStandAloneMethodSig& methodSig);
+		static Managed2NativeCallMethod ResolveRuntimeManaged2NativeMethodPointer(
+			const MethodInfo* method, Managed2NativeCallMethod fallback)
+		{
+			if (IsFullGenericSharingMethod(method))
+			{
+				return Managed2NativeCallByReflectionInvoke;
+			}
+			return fallback;
+		}
 		static Managed2NativeFunctionPointerCallMethod GetManaged2NativeFunctionPointerMethodPointer(const MethodInfo* method, Il2CppCallConvention callConvention);
 		static Managed2NativeFunctionPointerCallMethod GetManaged2NativeFunctionPointerMethodPointer(const metadata::ResolveStandAloneMethodSig& methodSig);
 
@@ -58,14 +68,18 @@ namespace interpreter
 
 		static bool HasImplementCallNative2Managed(const MethodInfo* method)
 		{
-			IL2CPP_ASSERT(method->methodPointerCallByInterp != NotSupportAdjustorThunk);
-			return method->methodPointerCallByInterp != (Il2CppMethodPointer)NotSupportNative2Managed;
+			Il2CppMethodPointer methodPointer = ReadPublishedPointer(
+				&const_cast<MethodInfo*>(method)->methodPointerCallByInterp);
+			IL2CPP_ASSERT(methodPointer != NotSupportAdjustorThunk);
+			return methodPointer != (Il2CppMethodPointer)NotSupportNative2Managed;
 		}
 
 		static bool HasImplementCallVirtualNative2Managed(const MethodInfo* method)
 		{
-			IL2CPP_ASSERT(method->virtualMethodPointerCallByInterp != NotSupportNative2Managed);
-			return method->virtualMethodPointerCallByInterp != (Il2CppMethodPointer)NotSupportAdjustorThunk;
+			Il2CppMethodPointer methodPointer = ReadPublishedPointer(
+				&const_cast<MethodInfo*>(method)->virtualMethodPointerCallByInterp);
+			IL2CPP_ASSERT(methodPointer != NotSupportNative2Managed);
+			return methodPointer != (Il2CppMethodPointer)NotSupportAdjustorThunk;
 		}
 
 		static void Managed2NativeCallByReflectionInvoke(const MethodInfo* method, uint16_t* argVarIndexs, StackObject* localVarBase, void* ret);

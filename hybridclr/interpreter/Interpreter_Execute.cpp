@@ -1358,7 +1358,7 @@ namespace interpreter
 
 inline void InvokeSingleDelegate(uint16_t invokeParamCount, const MethodInfo * method, Il2CppObject * obj, Managed2NativeCallMethod staticM2NMethod, Managed2NativeCallMethod instanceM2NMethod, uint16_t * argIdxs, StackObject * localVarBase, void* ret)
 {
-	if (!InitAndGetInterpreterDirectlyCallMethodPointer(method))
+	if (!PrepareInterpreterManaged2NativeCall(method))
 	{
 		RaiseAOTGenericMethodNotInstantiatedException(method);
 	}
@@ -1376,11 +1376,13 @@ inline void InvokeSingleDelegate(uint16_t invokeParamCount, const MethodInfo * m
 			CHECK_NOT_NULL_THROW(obj);
 			target = localVarBase + argIdxs[0];
 			target->obj = obj + IS_CLASS_VALUE_TYPE(method->klass);
+			instanceM2NMethod = InterpreterModule::ResolveRuntimeManaged2NativeMethodPointer(method, instanceM2NMethod);
 			instanceM2NMethod(method, argIdxs, localVarBase, ret);
 		}
 		else
 		{
 			RuntimeInitClassCCtor(method);
+			staticM2NMethod = InterpreterModule::ResolveRuntimeManaged2NativeMethodPointer(method, staticM2NMethod);
 			staticM2NMethod(method, argIdxs + 1, localVarBase, ret);
 		}
 		break;
@@ -1390,6 +1392,7 @@ inline void InvokeSingleDelegate(uint16_t invokeParamCount, const MethodInfo * m
 		IL2CPP_ASSERT(!hybridclr::metadata::IsInstanceMethod(method));
 		target = localVarBase + argIdxs[0];
 		target->obj = obj;
+		instanceM2NMethod = InterpreterModule::ResolveRuntimeManaged2NativeMethodPointer(method, instanceM2NMethod);
 		instanceM2NMethod(method, argIdxs, localVarBase, ret);
 		break;
 	}
@@ -1399,6 +1402,7 @@ inline void InvokeSingleDelegate(uint16_t invokeParamCount, const MethodInfo * m
 		IL2CPP_ASSERT(hybridclr::metadata::IsInstanceMethod(method));
 		target = localVarBase + argIdxs[1];
 		CHECK_NOT_NULL_THROW(target->obj);
+		staticM2NMethod = InterpreterModule::ResolveRuntimeManaged2NativeMethodPointer(method, staticM2NMethod);
 		staticM2NMethod(method, argIdxs + 1, localVarBase, ret);
 		break;
 	}
@@ -5077,11 +5081,14 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 				    else 
 				    {
 				        frame->ip = ip + 2;
-				        if (!InitAndGetInterpreterDirectlyCallMethodPointer(_actualMethod))
+				        if (!PrepareInterpreterManaged2NativeCall(_actualMethod))
 				        {
 				            RaiseAOTGenericMethodNotInstantiatedException(_actualMethod);
 				        }
-				        ((Managed2NativeCallMethod)imi->resolveDatas[__managed2NativeMethod])(_actualMethod, _argIdxData, localVarBase, nullptr);
+				        InterpreterModule::ResolveRuntimeManaged2NativeMethodPointer(
+				            _actualMethod,
+				            (Managed2NativeCallMethod)imi->resolveDatas[__managed2NativeMethod])(
+				                _actualMethod, _argIdxData, localVarBase, nullptr);
 				        ip += 16;
 				    }
 				    continue;
@@ -5107,11 +5114,14 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 				    else 
 				    {
 				        frame->ip = ip + 2;
-				        if (!InitAndGetInterpreterDirectlyCallMethodPointer(_actualMethod))
+				        if (!PrepareInterpreterManaged2NativeCall(_actualMethod))
 				        {
 				            RaiseAOTGenericMethodNotInstantiatedException(_actualMethod);
 				        }
-				        ((Managed2NativeCallMethod)imi->resolveDatas[__managed2NativeMethod])(_actualMethod, _argIdxData, localVarBase, _ret);
+				        InterpreterModule::ResolveRuntimeManaged2NativeMethodPointer(
+				            _actualMethod,
+				            (Managed2NativeCallMethod)imi->resolveDatas[__managed2NativeMethod])(
+				                _actualMethod, _argIdxData, localVarBase, _ret);
 				        ip += 16;
 				    }
 				    continue;
@@ -5138,11 +5148,14 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 				    else 
 				    {
 				        frame->ip = ip + 2;
-				        if (!InitAndGetInterpreterDirectlyCallMethodPointer(_actualMethod))
+				        if (!PrepareInterpreterManaged2NativeCall(_actualMethod))
 				        {
 				            RaiseAOTGenericMethodNotInstantiatedException(_actualMethod);
 				        }
-				        ((Managed2NativeCallMethod)imi->resolveDatas[__managed2NativeMethod])(_actualMethod, _argIdxData, localVarBase, _ret);
+				        InterpreterModule::ResolveRuntimeManaged2NativeMethodPointer(
+				            _actualMethod,
+				            (Managed2NativeCallMethod)imi->resolveDatas[__managed2NativeMethod])(
+				                _actualMethod, _argIdxData, localVarBase, _ret);
 				        ExpandLocationData2StackDataByType(_ret, (LocationDataType)__retLocationType);
 				        ip += 24;
 				    }
@@ -5204,11 +5217,12 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 				            CALL_INTERP_VOID((ip + 24), _method, _argBasePtr);
 				            continue;
 					    }
-					    if (!InitAndGetInterpreterDirectlyCallMethodPointer(_method))
+					    if (!PrepareInterpreterManaged2NativeCall(_method))
 					    {
 				            RaiseAOTGenericMethodNotInstantiatedException(_method);
 					    }
-				        _nativeMethodPointer(_method, _argIdxsPtr, localVarBase, nullptr);
+				        InterpreterModule::ResolveRuntimeManaged2NativeMethodPointer(
+				            _method, _nativeMethodPointer)(_method, _argIdxsPtr, localVarBase, nullptr);
 				    }
 				    else
 				    {
@@ -5248,11 +5262,12 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 				            CALL_INTERP_RET((ip + 24), _method, _argBasePtr, _ret);
 				            continue;
 					    }
-					    if (!InitAndGetInterpreterDirectlyCallMethodPointer(_method))
+					    if (!PrepareInterpreterManaged2NativeCall(_method))
 					    {
 				            RaiseAOTGenericMethodNotInstantiatedException(_method);
 					    }
-				        _nativeMethodPointer(_method, _argIdxsPtr, localVarBase, _ret);
+				        InterpreterModule::ResolveRuntimeManaged2NativeMethodPointer(
+				            _method, _nativeMethodPointer)(_method, _argIdxsPtr, localVarBase, _ret);
 				    }
 				    else
 				    {
@@ -5293,11 +5308,12 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 				            CALL_INTERP_RET((ip + 24), _method, _argBasePtr, _ret);
 				            continue;
 					    }
-					    if (!InitAndGetInterpreterDirectlyCallMethodPointer(_method))
+					    if (!PrepareInterpreterManaged2NativeCall(_method))
 					    {
 				            RaiseAOTGenericMethodNotInstantiatedException(_method);
 					    }
-				        _nativeMethodPointer(_method, _argIdxsPtr, localVarBase, _ret);
+				        InterpreterModule::ResolveRuntimeManaged2NativeMethodPointer(
+				            _method, _nativeMethodPointer)(_method, _argIdxsPtr, localVarBase, _ret);
 				    }
 				    else
 				    {

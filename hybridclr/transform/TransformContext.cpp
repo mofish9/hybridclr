@@ -3789,9 +3789,7 @@ else \
 					continue;
 				}
 
-#if HYBRIDCLR_UNITY_2021_OR_NEW
-				if (!shareMethod->has_full_generic_sharing_signature)
-#endif
+				if (!IsFullGenericSharingMethod(shareMethod))
 				{
 					if (!InitAndGetInterpreterDirectlyCallMethodPointer(shareMethod))
 					{
@@ -3898,9 +3896,7 @@ else \
 					directDelegateReceiverOffset = -1;
 					continue;
 				}
-#if HYBRIDCLR_UNITY_2021_OR_NEW
-				if (!shareMethod->has_full_generic_sharing_signature)
-#endif
+				if (!IsFullGenericSharingMethod(shareMethod))
 				{
 					if (directDelegateReceiverOffset < 0 && TryAddCallCommonInstruments(shareMethod, methodDataIndex))
 					{
@@ -5132,7 +5128,7 @@ else \
 					}
 				}
 
-				if (!InitAndGetInterpreterDirectlyCallMethodPointer(shareMethod))
+				if (!PrepareInterpreterManaged2NativeCall(shareMethod))
 				{
 					RaiseAOTGenericMethodNotInstantiatedException(shareMethod);
 				}

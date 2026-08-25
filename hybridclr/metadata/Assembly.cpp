@@ -218,10 +218,10 @@ namespace metadata
         }
         image->InitRuntimeMetadatas();
         AOTHomologousImage::RegisterLocked(image, lock);
+		NotifyAOTMetadataLoaded();
         return LoadImageErrorCode::OK;
     }
 
 
 }
 }
-

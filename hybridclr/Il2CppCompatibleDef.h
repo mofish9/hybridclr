@@ -7,6 +7,7 @@
 #include "vm/Array.h"
 #include "vm/Type.h"
 #include "vm/Runtime.h"
+#include "os/Atomic.h"
 #include "vm/GlobalMetadataFileInternals.h"
 #include "vm/MetadataAlloc.h"
 #include "icalls/mscorlib/System/Type.h"
@@ -93,34 +94,85 @@ namespace hybridclr
 	extern const char* g_placeHolderAssemblies[];
 
 	Il2CppMethodPointer InitAndGetInterpreterDirectlyCallMethodPointerSlow(MethodInfo* method);
+	bool PrepareFullGenericSharingMethod(const MethodInfo* method);
+	void NotifyAOTMetadataLoaded();
+	void CopyMethodInfo(MethodInfo* destination, const MethodInfo* source, size_t size);
+
+	inline bool IsFullGenericSharingMethod(const MethodInfo* method)
+	{
+#if HYBRIDCLR_UNITY_2021_OR_NEW
+		return method->has_full_generic_sharing_signature;
+#else
+		return false;
+#endif
+	}
+
+	inline InvokerMethod NormalizeFullGenericSharingAotInvoker(InvokerMethod invoker)
+	{
+#if HYBRIDCLR_UNITY_2021_OR_NEW
+		return invoker ? invoker : il2cpp::vm::Runtime::GetMissingMethodInvoker();
+#else
+		return invoker;
+#endif
+	}
+
+	inline bool IsValidFullGenericSharingAotInvoker(InvokerMethod invoker)
+	{
+#if HYBRIDCLR_UNITY_2021_OR_NEW
+		return invoker != nullptr && invoker != il2cpp::vm::Runtime::GetMissingMethodInvoker();
+#else
+		return invoker != nullptr;
+#endif
+	}
+
+	template<typename T>
+	inline T* ReadPublishedPointer(T** pointer)
+	{
+		T* value = il2cpp::os::Atomic::ReadPointer(pointer);
+		// PublishPointer uses a release fence followed by a relaxed store. Match
+		// the IL2CPP InitOnce pattern with a relaxed load followed by an acquire
+		// fence so this works with both pinned Atomic.h versions.
+		Baselib_atomic_thread_fence_acquire();
+		return value;
+	}
 
 	inline Il2CppMethodPointer InitAndGetInterpreterDirectlyCallMethodPointer(const MethodInfo* method)
 	{
-		Il2CppMethodPointer methodPointer = method->methodPointerCallByInterp;
-		if (methodPointer)
+		if (IsFullGenericSharingMethod(method))
 		{
-			return methodPointer;
+			PrepareFullGenericSharingMethod(method);
+			return ReadPublishedPointer(&const_cast<MethodInfo*>(method)->methodPointerCallByInterp);
 		}
-		if (method->initInterpCallMethodPointer)
+		Il2CppMethodPointer methodPointer = ReadPublishedPointer(&const_cast<MethodInfo*>(method)->methodPointerCallByInterp);
+		if (methodPointer)
 		{
 			return methodPointer;
 		}
 		return InitAndGetInterpreterDirectlyCallMethodPointerSlow(const_cast<MethodInfo*>(method));
 	}
 
+	inline bool PrepareInterpreterManaged2NativeCall(const MethodInfo* method)
+	{
+		if (IsFullGenericSharingMethod(method))
+		{
+			return PrepareFullGenericSharingMethod(method);
+		}
+		return InitAndGetInterpreterDirectlyCallMethodPointer(method) != nullptr;
+	}
+
+	inline Il2CppMethodPointer GetInterpreterInvokerMethodPointer(const MethodInfo* method)
+	{
+		if (IsFullGenericSharingMethod(method))
+		{
+			return ReadPublishedPointer(&const_cast<MethodInfo*>(method)->methodPointer);
+		}
+		return ReadPublishedPointer(&const_cast<MethodInfo*>(method)->methodPointerCallByInterp);
+	}
+
 	inline Il2CppMethodPointer InitAndGetInterpreterDirectlyCallVirtualMethodPointer(const MethodInfo* method)
 	{
-		Il2CppMethodPointer methodPointer = method->virtualMethodPointerCallByInterp;
-		if (methodPointer)
-		{
-			return methodPointer;
-		}
-		if (method->initInterpCallMethodPointer)
-		{
-			return methodPointer;
-		}
-		InitAndGetInterpreterDirectlyCallMethodPointerSlow(const_cast<MethodInfo*>(method));
-		return method->virtualMethodPointerCallByInterp;
+		InitAndGetInterpreterDirectlyCallMethodPointer(method);
+		return ReadPublishedPointer(&const_cast<MethodInfo*>(method)->virtualMethodPointerCallByInterp);
 	}
 
 	inline void HYBRIDCLR_SET_WRITE_BARRIER(void** ptr)

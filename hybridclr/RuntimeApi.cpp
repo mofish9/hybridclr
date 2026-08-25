@@ -12,10 +12,13 @@
 #include "interpreter/InterpreterProfile.h"
 #include "RuntimeConfig.h"
 
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED) || defined(HYBRIDCLR_LAB_FGS_TESTS)
+#include <atomic>
+#endif
+
 #if defined(HYBRIDCLR_LAB_INSTRUMENTED)
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -29,6 +32,45 @@
 
 namespace hybridclr
 {
+#if defined(HYBRIDCLR_LAB_FGS_TESTS)
+
+	namespace interpreter
+	{
+		namespace
+		{
+			std::atomic<int64_t> s_fullGenericSharingDispatchCount{ 0 };
+			std::atomic<int64_t> s_fullGenericSharingInterpreterInvokerCount{ 0 };
+		}
+
+		void FullGenericSharingDiagnostics::Reset()
+		{
+			s_fullGenericSharingDispatchCount.store(0, std::memory_order_relaxed);
+			s_fullGenericSharingInterpreterInvokerCount.store(0, std::memory_order_relaxed);
+		}
+
+		void FullGenericSharingDiagnostics::RecordDispatch()
+		{
+			s_fullGenericSharingDispatchCount.fetch_add(1, std::memory_order_relaxed);
+		}
+
+		void FullGenericSharingDiagnostics::RecordInterpreterInvoker()
+		{
+			s_fullGenericSharingInterpreterInvokerCount.fetch_add(1, std::memory_order_relaxed);
+		}
+
+		int64_t FullGenericSharingDiagnostics::GetDispatchCount()
+		{
+			return s_fullGenericSharingDispatchCount.load(std::memory_order_relaxed);
+		}
+
+		int64_t FullGenericSharingDiagnostics::GetInterpreterInvokerCount()
+		{
+			return s_fullGenericSharingInterpreterInvokerCount.load(std::memory_order_relaxed);
+		}
+	}
+
+#endif
+
 #if defined(HYBRIDCLR_LAB_INSTRUMENTED)
 
 	namespace interpreter
@@ -293,6 +335,11 @@ namespace hybridclr
 	#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
 		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.Instrumentation::Reset()", (Il2CppMethodPointer)interpreter::InterpreterProfile::Reset);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.Instrumentation::Snapshot()", (Il2CppMethodPointer)interpreter::InterpreterProfile::Snapshot);
+	#endif
+	#if defined(HYBRIDCLR_LAB_FGS_TESTS)
+		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.Instrumentation::ResetFullGenericSharing()", (Il2CppMethodPointer)interpreter::FullGenericSharingDiagnostics::Reset);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.Instrumentation::GetFullGenericSharingDispatchCount()", (Il2CppMethodPointer)interpreter::FullGenericSharingDiagnostics::GetDispatchCount);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.Instrumentation::GetFullGenericSharingInterpreterInvokerCount()", (Il2CppMethodPointer)interpreter::FullGenericSharingDiagnostics::GetInterpreterInvokerCount);
 	#endif
 	}
 

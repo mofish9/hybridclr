@@ -37,5 +37,23 @@ namespace interpreter
 
 #endif
 
+	class FullGenericSharingDiagnostics
+	{
+	public:
+#if defined(HYBRIDCLR_LAB_FGS_TESTS)
+		static void Reset();
+		static void RecordDispatch();
+		static void RecordInterpreterInvoker();
+		static int64_t GetDispatchCount();
+		static int64_t GetInterpreterInvokerCount();
+#else
+		static void Reset() {}
+		static void RecordDispatch() {}
+		static void RecordInterpreterInvoker() {}
+		static int64_t GetDispatchCount() { return 0; }
+		static int64_t GetInterpreterInvokerCount() { return 0; }
+#endif
+	};
+
 }
 }
