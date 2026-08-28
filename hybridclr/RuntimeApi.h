@@ -15,7 +15,17 @@ namespace hybridclr
 		static int32_t GetRuntimeOption(int32_t optionId);
 		static void SetRuntimeOption(int32_t optionId, int32_t value);
 
+		static int32_t PrewarmMethod(Il2CppReflectionMethod* method);
+		static int32_t PrewarmMethodBase(Il2CppReflectionMethod* method);
+		static int32_t PrewarmMethodBaseBatch(Il2CppArray* methods, int32_t count);
+		static int32_t PrewarmMethodBaseBatchResultMask(Il2CppArray* methods, int32_t count);
+		static int32_t PrewarmMethodToken(Il2CppReflectionType* declaringType, int32_t metadataToken);
+		static int32_t PrewarmMethodTokenBatch(Il2CppArray* declaringTypes, Il2CppArray* metadataTokens, int32_t count);
+		static int32_t PrewarmMethodTokenBatchResultMask(Il2CppArray* declaringTypes, Il2CppArray* metadataTokens, int32_t count);
 		static int32_t PreJitClass(Il2CppReflectionType* type);
 		static int32_t PreJitMethod(Il2CppReflectionMethod* method);
+		static int32_t PrewarmClass(Il2CppReflectionType* type);
+		static int32_t PrewarmClassBatch(Il2CppArray* types, int32_t count);
+		static int32_t PrewarmClassBatchResultMask(Il2CppArray* types, int32_t count);
 	};
 }

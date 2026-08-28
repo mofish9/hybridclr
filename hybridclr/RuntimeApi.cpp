@@ -1,10 +1,17 @@
 #include "RuntimeApi.h"
 
+#if defined(__has_include)
+#if __has_include("lab/InstrumentationConfig.h")
+#include "lab/InstrumentationConfig.h"
+#endif
+#endif
+
 #include "codegen/il2cpp-codegen.h"
 #include "vm/InternalCalls.h"
 #include "vm/Array.h"
 #include "vm/Exception.h"
 #include "vm/Class.h"
+#include "vm/MetadataLock.h"
 
 #include "metadata/MetadataModule.h"
 #include "metadata/MetadataUtil.h"
@@ -29,7 +36,7 @@
 #include "interpreter/Instruction.h"
 #include "vm/String.h"
 #endif
-
+#include <vector>
 namespace hybridclr
 {
 #if defined(HYBRIDCLR_LAB_FGS_TESTS)
@@ -330,6 +337,13 @@ namespace hybridclr
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadMetadataForAOTAssembly(System.Byte[],HybridCLR.HomologousImageMode)", (Il2CppMethodPointer)LoadMetadataForAOTAssembly);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetRuntimeOption(HybridCLR.RuntimeOptionId)", (Il2CppMethodPointer)GetRuntimeOption);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::SetRuntimeOption(HybridCLR.RuntimeOptionId,System.Int32)", (Il2CppMethodPointer)SetRuntimeOption);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::PrewarmMethod(System.Reflection.MethodInfo)", (Il2CppMethodPointer)PrewarmMethod);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::PrewarmMethodBase(System.Reflection.MethodBase)", (Il2CppMethodPointer)PrewarmMethodBase);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::PrewarmMethodBaseBatch(System.Reflection.MethodBase[],System.Int32)", (Il2CppMethodPointer)PrewarmMethodBaseBatch);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::PrewarmMethodBaseBatchResultMask(System.Reflection.MethodBase[],System.Int32)", (Il2CppMethodPointer)PrewarmMethodBaseBatchResultMask);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::PrewarmMethodToken(System.Type,System.Int32)", (Il2CppMethodPointer)PrewarmMethodToken);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::PrewarmMethodTokenBatch(System.Type[],System.Int32[],System.Int32)", (Il2CppMethodPointer)PrewarmMethodTokenBatch);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::PrewarmMethodTokenBatchResultMask(System.Type[],System.Int32[],System.Int32)", (Il2CppMethodPointer)PrewarmMethodTokenBatchResultMask);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::PreJitClass(System.Type)", (Il2CppMethodPointer)PreJitClass);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::PreJitMethod(System.Reflection.MethodInfo)", (Il2CppMethodPointer)PreJitMethod);
 	#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
@@ -341,6 +355,12 @@ namespace hybridclr
 		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.Instrumentation::GetFullGenericSharingDispatchCount()", (Il2CppMethodPointer)interpreter::FullGenericSharingDiagnostics::GetDispatchCount);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.Instrumentation::GetFullGenericSharingInterpreterInvokerCount()", (Il2CppMethodPointer)interpreter::FullGenericSharingDiagnostics::GetInterpreterInvokerCount);
 	#endif
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::PrewarmClass(System.Type)", (Il2CppMethodPointer)PrewarmClass);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::PrewarmClassBatch(System.Type[],System.Int32)", (Il2CppMethodPointer)PrewarmClassBatch);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::PrewarmClassBatchResultMask(System.Type[],System.Int32)", (Il2CppMethodPointer)PrewarmClassBatchResultMask);
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.Instrumentation::FlushMetadataProfile()", (Il2CppMethodPointer)metadata::FlushMetadataProfile);
+#endif
 	}
 
 	int32_t RuntimeApi::LoadMetadataForAOTAssembly(Il2CppArray* dllBytes, int32_t mode)
@@ -363,28 +383,138 @@ namespace hybridclr
 	}
 
 	int32_t PreJitMethod0(const MethodInfo* methodInfo);
+	bool PreJitMethodEligible(const MethodInfo* methodInfo);
+	bool PrewarmMethodEligible(const MethodInfo* methodInfo);
+	int32_t PrewarmMethod0(const MethodInfo* methodInfo, bool metadataLockHeld = false);
 
-	int32_t RuntimeApi::PreJitClass(Il2CppReflectionType* type)
+	static Il2CppClass* ResolvePrewarmClass(Il2CppReflectionType* type)
 	{
+		if (!type || !type->type)
+			return nullptr;
 		if (metadata::HasNotInstantiatedGenericType(type->type))
-		{
-			return false;
-		}
+			return nullptr;
 		Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(type->type, false);
 		if (!klass)
-		{
-			return false;
-		}
+			return nullptr;
 		metadata::Image* image = metadata::MetadataModule::GetImage(klass->image);
 		if (!image)
 		{
 			image = (metadata::Image*)hybridclr::metadata::AOTHomologousImage::FindImageByAssembly(
 				klass->rank ? il2cpp_defaults.corlib->assembly : klass->image->assembly);
 			if (!image)
-			{
-				return false;
-			}
+				return nullptr;
 		}
+		return klass;
+	}
+
+	static int32_t PrewarmClassInternal(Il2CppReflectionType* type)
+	{
+		Il2CppClass* klass = ResolvePrewarmClass(type);
+		if (!klass)
+			return false;
+
+		il2cpp::vm::Class::Init(klass);
+		if (klass->initializationExceptionGCHandle)
+			return false;
+		// Tuanjie's lazy-init mode intentionally leaves these tables unresolved
+		// after Class::Init. Prewarm must force the same metadata that reflection
+		// and the first interpreter call would otherwise initialize on demand.
+		il2cpp::vm::Class::SetupFields(klass);
+		il2cpp::vm::Class::SetupMethods(klass);
+		il2cpp::vm::Class::SetupVTable(klass);
+		il2cpp::vm::Class::SetupInterfaces(klass);
+		il2cpp::vm::Class::SetupNestedTypes(klass);
+		il2cpp::vm::Class::SetupProperties(klass);
+		il2cpp::vm::Class::SetupEvents(klass);
+		if (klass->method_count != 0 && !klass->methods)
+			return false;
+
+		bool allMethodsReady = true;
+		// Keep interpreter transformations in one lock scope for this class.
+		il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
+		for (uint16_t i = 0; i < klass->method_count; i++)
+		{
+			const MethodInfo* methodInfo = klass->methods[i];
+			if (!methodInfo)
+				allMethodsReady = false;
+			else if (PrewarmMethodEligible(methodInfo) && !PrewarmMethod0(methodInfo, true))
+				allMethodsReady = false;
+		}
+		return allMethodsReady;
+	}
+
+	int32_t RuntimeApi::PrewarmClass(Il2CppReflectionType* type)
+	{
+		return PrewarmClassInternal(type);
+	}
+
+	int32_t RuntimeApi::PrewarmClassBatch(Il2CppArray* types, int32_t count)
+	{
+		if (!types)
+		{
+			il2cpp::vm::Exception::RaiseNullReferenceException();
+		}
+		uint32_t length = il2cpp::vm::Array::GetLength(types);
+		if (count < 0 || static_cast<uint32_t>(count) > length)
+		{
+			il2cpp::vm::Exception::RaiseArgumentOutOfRangeException("count");
+		}
+
+		Il2CppReflectionType** typeArray = reinterpret_cast<Il2CppReflectionType**>(
+			il2cpp::vm::Array::GetFirstElementAddress(types));
+		bool allReady = true;
+		for (int32_t index = 0; index < count; index++)
+		{
+			if (!PrewarmClassInternal(typeArray[index]))
+				allReady = false;
+		}
+		return allReady;
+	}
+
+	int32_t RuntimeApi::PrewarmClassBatchResultMask(Il2CppArray* types, int32_t count)
+	{
+		if (!types)
+		{
+			il2cpp::vm::Exception::RaiseNullReferenceException();
+		}
+		uint32_t length = il2cpp::vm::Array::GetLength(types);
+		if (count < 0 || count > 32 || static_cast<uint32_t>(count) > length)
+		{
+			il2cpp::vm::Exception::RaiseArgumentOutOfRangeException("count");
+		}
+
+		Il2CppReflectionType** typeArray = reinterpret_cast<Il2CppReflectionType**>(
+			il2cpp::vm::Array::GetFirstElementAddress(types));
+		uint32_t failureMask = 0;
+		for (int32_t index = 0; index < count; index++)
+		{
+			if (!PrewarmClassInternal(typeArray[index]))
+				failureMask |= (uint32_t)1 << index;
+		}
+		return static_cast<int32_t>(failureMask);
+	}
+
+	int32_t RuntimeApi::PreJitClass(Il2CppReflectionType* type)
+	{
+		if (!type || !type->type || metadata::HasNotInstantiatedGenericType(type->type))
+			return false;
+		Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(type->type, false);
+		if (!klass)
+			return false;
+		metadata::Image* image = metadata::MetadataModule::GetImage(klass->image);
+		if (!image)
+		{
+			image = (metadata::Image*)hybridclr::metadata::AOTHomologousImage::FindImageByAssembly(
+				klass->rank ? il2cpp_defaults.corlib->assembly : klass->image->assembly);
+			if (!image)
+				return false;
+		}
+		// In lazy-init players Class::Init does not materialize the method table.
+		// Keep the legacy PreJitClass API safe when it is called before reflection
+		// has touched the type.
+		il2cpp::vm::Class::SetupMethods(klass);
+		if (klass->method_count != 0 && !klass->methods)
+			return false;
 		for (uint16_t i = 0; i < klass->method_count; i++)
 		{
 			const MethodInfo* methodInfo = klass->methods[i];
@@ -393,37 +523,368 @@ namespace hybridclr
 		return true;
 	}
 
-	int32_t PreJitMethod0(const MethodInfo* methodInfo)
+	bool PrewarmMethodEligible(const MethodInfo* methodInfo)
 	{
-		if (!methodInfo->isInterpterImpl)
-		{
+		if (!methodInfo || !methodInfo->klass)
 			return false;
-		}
-		if (methodInfo->klass->is_generic)
-		{
+		if (metadata::HasNotInstantiatedGenericType(&methodInfo->klass->byval_arg))
 			return false;
-		}
 		if (!methodInfo->is_inflated)
+			return !methodInfo->is_generic;
+		const Il2CppGenericMethod* genericMethod = methodInfo->genericMethod;
+		return genericMethod &&
+			!metadata::HasNotInstantiatedGenericType(genericMethod->context.class_inst) &&
+			!metadata::HasNotInstantiatedGenericType(genericMethod->context.method_inst);
+	}
+
+	int32_t PrewarmMethod0(const MethodInfo* methodInfo, bool metadataLockHeld)
+	{
+		if (!PrewarmMethodEligible(methodInfo))
+			return false;
+		// AOT methods already have a native entry point. Class::Init still makes
+		// the declaring type's metadata state safe for a subsequent first call.
+		if (!metadataLockHeld)
 		{
-			if (methodInfo->is_generic)
-			{
+			il2cpp::vm::Class::Init(methodInfo->klass);
+			if (methodInfo->klass->initializationExceptionGCHandle)
 				return false;
+		}
+		if (!methodInfo->isInterpterImpl)
+			return true;
+		return interpreter::InterpreterModule::GetInterpMethodInfo(methodInfo, metadataLockHeld) != nullptr;
+	}
+
+	int32_t RuntimeApi::PrewarmMethod(Il2CppReflectionMethod* method)
+	{
+		if (!method || !method->method)
+			return false;
+		return PrewarmMethod0(method->method);
+	}
+
+	int32_t RuntimeApi::PrewarmMethodBase(Il2CppReflectionMethod* method)
+	{
+		if (!method || !method->method)
+			return false;
+		return PrewarmMethod0(method->method);
+	}
+
+	int32_t RuntimeApi::PrewarmMethodBaseBatch(Il2CppArray* methods, int32_t count)
+	{
+		if (!methods)
+		{
+			il2cpp::vm::Exception::RaiseNullReferenceException();
+		}
+		uint32_t length = il2cpp::vm::Array::GetLength(methods);
+		if (count < 0 || static_cast<uint32_t>(count) > length)
+		{
+			il2cpp::vm::Exception::RaiseArgumentOutOfRangeException("count");
+		}
+
+		Il2CppReflectionMethod** methodArray = reinterpret_cast<Il2CppReflectionMethod**>(
+			il2cpp::vm::Array::GetFirstElementAddress(methods));
+		std::vector<const MethodInfo*> eligibleMethods;
+		eligibleMethods.reserve(static_cast<size_t>(count));
+		std::vector<Il2CppClass*> initializedClasses;
+		initializedClasses.reserve(static_cast<size_t>(count));
+		bool allReady = true;
+		for (int32_t index = 0; index < count; index++)
+		{
+			Il2CppReflectionMethod* reflectionMethod = methodArray[index];
+			if (!reflectionMethod || !reflectionMethod->method ||
+				!PrewarmMethodEligible(reflectionMethod->method))
+			{
+				allReady = false;
+				continue;
+			}
+
+			const MethodInfo* methodInfo = reflectionMethod->method;
+			bool classInitialized = false;
+			for (Il2CppClass* initializedClass : initializedClasses)
+			{
+				if (initializedClass == methodInfo->klass)
+				{
+					classInitialized = true;
+					break;
+				}
+			}
+			if (!classInitialized)
+			{
+				il2cpp::vm::Class::Init(methodInfo->klass);
+				initializedClasses.push_back(methodInfo->klass);
+			}
+			if (methodInfo->klass->initializationExceptionGCHandle)
+			{
+				allReady = false;
+				continue;
+			}
+			eligibleMethods.push_back(methodInfo);
+		}
+
+		if (!eligibleMethods.empty())
+		{
+			il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
+			for (const MethodInfo* methodInfo : eligibleMethods)
+			{
+				if (!PrewarmMethod0(methodInfo, true))
+					allReady = false;
 			}
 		}
-		else
+		return allReady;
+	}
+
+	int32_t RuntimeApi::PrewarmMethodBaseBatchResultMask(Il2CppArray* methods, int32_t count)
+	{
+		if (!methods)
 		{
-			const Il2CppGenericMethod* genericMethod = methodInfo->genericMethod;
-			if (metadata::HasNotInstantiatedGenericType(genericMethod->context.class_inst) || metadata::HasNotInstantiatedGenericType(genericMethod->context.method_inst))
+			il2cpp::vm::Exception::RaiseNullReferenceException();
+		}
+		uint32_t length = il2cpp::vm::Array::GetLength(methods);
+		if (count < 0 || count > 32 || static_cast<uint32_t>(count) > length)
+		{
+			il2cpp::vm::Exception::RaiseArgumentOutOfRangeException("count");
+		}
+
+		Il2CppReflectionMethod** methodArray = reinterpret_cast<Il2CppReflectionMethod**>(
+			il2cpp::vm::Array::GetFirstElementAddress(methods));
+		std::vector<const MethodInfo*> resolvedMethods(static_cast<size_t>(count), nullptr);
+		std::vector<Il2CppClass*> initializedClasses;
+		initializedClasses.reserve(static_cast<size_t>(count));
+		uint32_t failureMask = 0;
+		for (int32_t index = 0; index < count; index++)
+		{
+			Il2CppReflectionMethod* reflectionMethod = methodArray[index];
+			if (!reflectionMethod || !reflectionMethod->method ||
+				!PrewarmMethodEligible(reflectionMethod->method))
 			{
-				return false;
+				failureMask |= (uint32_t)1 << index;
+				continue;
+			}
+
+			const MethodInfo* methodInfo = reflectionMethod->method;
+			bool classInitialized = false;
+			for (Il2CppClass* initializedClass : initializedClasses)
+			{
+				if (initializedClass == methodInfo->klass)
+				{
+					classInitialized = true;
+					break;
+				}
+			}
+			if (!classInitialized)
+			{
+				il2cpp::vm::Class::Init(methodInfo->klass);
+				initializedClasses.push_back(methodInfo->klass);
+			}
+			if (methodInfo->klass->initializationExceptionGCHandle)
+			{
+				failureMask |= (uint32_t)1 << index;
+				continue;
+			}
+			resolvedMethods[index] = methodInfo;
+		}
+
+		if (count != 0)
+		{
+			il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
+			for (int32_t index = 0; index < count; index++)
+			{
+				const MethodInfo* methodInfo = resolvedMethods[index];
+				if (methodInfo && !PrewarmMethod0(methodInfo, true))
+					failureMask |= (uint32_t)1 << index;
+			}
+		}
+		return static_cast<int32_t>(failureMask);
+	}
+
+	static const MethodInfo* ResolvePrewarmMethodToken(Il2CppReflectionType* type, int32_t metadataToken)
+	{
+		if (metadataToken <= 0 || metadata::DecodeTokenTableType(static_cast<uint32_t>(metadataToken)) != metadata::TableType::METHOD)
+			return nullptr;
+		Il2CppClass* klass = ResolvePrewarmClass(type);
+		if (!klass || klass->generic_class || !metadata::IsInterpreterType(klass))
+			return nullptr;
+
+		const Il2CppTypeDefinition* typeDefinition = reinterpret_cast<const Il2CppTypeDefinition*>(klass->typeMetadataHandle);
+		if (!typeDefinition || typeDefinition->genericContainerIndex != kGenericContainerIndexInvalid)
+			return nullptr;
+		metadata::InterpreterImage* image = metadata::MetadataModule::GetImage(klass);
+		if (!image)
+			return nullptr;
+
+		const uint32_t methodRow = metadata::DecodeTokenRowIndex(static_cast<uint32_t>(metadataToken));
+		if (methodRow == 0)
+			return nullptr;
+		const uint32_t methodIndex = methodRow - 1;
+		const uint32_t methodStart = metadata::DecodeMetadataIndex(typeDefinition->methodStart);
+		if (methodIndex < methodStart || methodIndex - methodStart >= typeDefinition->method_count)
+			return nullptr;
+
+		const Il2CppMethodDefinition* methodDefinition = image->GetMethodDefinitionFromRawIndex(methodIndex);
+		if (methodDefinition->token != static_cast<uint32_t>(metadataToken) ||
+			methodDefinition->genericContainerIndex != kGenericContainerIndexInvalid)
+		{
+			return nullptr;
+		}
+		return metadata::MetadataModule::GetMethodInfoFromMethodDefinition(methodDefinition);
+	}
+
+	int32_t RuntimeApi::PrewarmMethodToken(Il2CppReflectionType* declaringType, int32_t metadataToken)
+	{
+		const MethodInfo* methodInfo = ResolvePrewarmMethodToken(declaringType, metadataToken);
+		return methodInfo ? PrewarmMethod0(methodInfo) : false;
+	}
+
+	int32_t RuntimeApi::PrewarmMethodTokenBatch(Il2CppArray* declaringTypes, Il2CppArray* metadataTokens, int32_t count)
+	{
+		if (!declaringTypes || !metadataTokens)
+		{
+			il2cpp::vm::Exception::RaiseNullReferenceException();
+		}
+		uint32_t typeLength = il2cpp::vm::Array::GetLength(declaringTypes);
+		uint32_t tokenLength = il2cpp::vm::Array::GetLength(metadataTokens);
+		if (count < 0 || static_cast<uint32_t>(count) > typeLength || static_cast<uint32_t>(count) > tokenLength)
+		{
+			il2cpp::vm::Exception::RaiseArgumentOutOfRangeException("count");
+		}
+
+		Il2CppReflectionType** typeArray = reinterpret_cast<Il2CppReflectionType**>(
+			il2cpp::vm::Array::GetFirstElementAddress(declaringTypes));
+		int32_t* tokenArray = reinterpret_cast<int32_t*>(
+			il2cpp::vm::Array::GetFirstElementAddress(metadataTokens));
+		std::vector<const MethodInfo*> methods;
+		methods.reserve(static_cast<size_t>(count));
+		std::vector<Il2CppClass*> initializedClasses;
+		initializedClasses.reserve(static_cast<size_t>(count));
+		bool allReady = true;
+		for (int32_t index = 0; index < count; index++)
+		{
+			const MethodInfo* methodInfo = ResolvePrewarmMethodToken(typeArray[index], tokenArray[index]);
+			if (!methodInfo)
+			{
+				allReady = false;
+				continue;
+			}
+			bool classInitialized = false;
+			for (Il2CppClass* initializedClass : initializedClasses)
+			{
+				if (initializedClass == methodInfo->klass)
+				{
+					classInitialized = true;
+					break;
+				}
+			}
+			if (!classInitialized)
+			{
+				il2cpp::vm::Class::Init(methodInfo->klass);
+				initializedClasses.push_back(methodInfo->klass);
+			}
+			if (methodInfo->klass->initializationExceptionGCHandle)
+			{
+				allReady = false;
+				continue;
+			}
+			methods.push_back(methodInfo);
+		}
+
+		if (!methods.empty())
+		{
+			il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
+			for (const MethodInfo* methodInfo : methods)
+			{
+				if (!PrewarmMethod0(methodInfo, true))
+					allReady = false;
+			}
+		}
+		return allReady;
+	}
+
+	int32_t RuntimeApi::PrewarmMethodTokenBatchResultMask(Il2CppArray* declaringTypes, Il2CppArray* metadataTokens, int32_t count)
+	{
+		if (!declaringTypes || !metadataTokens)
+		{
+			il2cpp::vm::Exception::RaiseNullReferenceException();
+		}
+		uint32_t typeLength = il2cpp::vm::Array::GetLength(declaringTypes);
+		uint32_t tokenLength = il2cpp::vm::Array::GetLength(metadataTokens);
+		if (count < 0 || count > 32 || static_cast<uint32_t>(count) > typeLength || static_cast<uint32_t>(count) > tokenLength)
+		{
+			il2cpp::vm::Exception::RaiseArgumentOutOfRangeException("count");
+		}
+
+		Il2CppReflectionType** typeArray = reinterpret_cast<Il2CppReflectionType**>(
+			il2cpp::vm::Array::GetFirstElementAddress(declaringTypes));
+		int32_t* tokenArray = reinterpret_cast<int32_t*>(
+			il2cpp::vm::Array::GetFirstElementAddress(metadataTokens));
+		std::vector<const MethodInfo*> methods(static_cast<size_t>(count), nullptr);
+		std::vector<Il2CppClass*> initializedClasses;
+		initializedClasses.reserve(static_cast<size_t>(count));
+		uint32_t failureMask = 0;
+		for (int32_t index = 0; index < count; index++)
+		{
+			methods[index] = ResolvePrewarmMethodToken(typeArray[index], tokenArray[index]);
+			if (!methods[index])
+			{
+				failureMask |= (uint32_t)1 << index;
+				continue;
+			}
+			Il2CppClass* klass = methods[index]->klass;
+			bool classInitialized = false;
+			for (Il2CppClass* initializedClass : initializedClasses)
+			{
+				if (initializedClass == klass)
+				{
+					classInitialized = true;
+					break;
+				}
+			}
+			if (!classInitialized)
+			{
+				il2cpp::vm::Class::Init(klass);
+				initializedClasses.push_back(klass);
+			}
+			if (klass->initializationExceptionGCHandle)
+			{
+				failureMask |= (uint32_t)1 << index;
+				methods[index] = nullptr;
 			}
 		}
 
+		if (count != 0)
+		{
+			il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
+			for (int32_t index = 0; index < count; index++)
+			{
+				const MethodInfo* methodInfo = methods[index];
+				if (methodInfo && !PrewarmMethod0(methodInfo, true))
+					failureMask |= (uint32_t)1 << index;
+			}
+		}
+		return static_cast<int32_t>(failureMask);
+	}
+
+	bool PreJitMethodEligible(const MethodInfo* methodInfo)
+	{
+		if (!methodInfo || !methodInfo->isInterpterImpl || !methodInfo->klass || methodInfo->klass->is_generic)
+			return false;
+		if (!methodInfo->is_inflated)
+			return !methodInfo->is_generic;
+		const Il2CppGenericMethod* genericMethod = methodInfo->genericMethod;
+		return genericMethod &&
+			!metadata::HasNotInstantiatedGenericType(genericMethod->context.class_inst) &&
+			!metadata::HasNotInstantiatedGenericType(genericMethod->context.method_inst);
+	}
+
+	int32_t PreJitMethod0(const MethodInfo* methodInfo)
+	{
+		if (!PreJitMethodEligible(methodInfo))
+			return false;
 		return interpreter::InterpreterModule::GetInterpMethodInfo(methodInfo) != nullptr;
 	}
 
 	int32_t RuntimeApi::PreJitMethod(Il2CppReflectionMethod* method)
 	{
+		if (!method || !method->method)
+			return false;
 		return PreJitMethod0(method->method);
 	}
 }

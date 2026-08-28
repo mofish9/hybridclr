@@ -80,7 +80,26 @@ namespace metadata
                 return false;
             }
             const char* typeName = _rawImage->GetStringFromRawIndex(r.typeName);
-            return std::strcmp(typeName, "ValueType") == 0 || std::strcmp(typeName, "Enum") == 0;
+			if (std::strcmp(typeName, "ValueType") != 0 && std::strcmp(typeName, "Enum") != 0)
+			{
+				return false;
+			}
+			TableType scopeType;
+			uint32_t scopeRowIndex;
+			DecodeResolutionScopeCodedIndex(r.resolutionScope, scopeType, scopeRowIndex);
+			if (scopeType != TableType::ASSEMBLYREF || scopeRowIndex == 0 ||
+				scopeRowIndex > _rawImage->GetTable(TableType::ASSEMBLYREF).rowNum)
+			{
+				return false;
+			}
+			const Il2CppType* resolvedType = ReadTypeFromTypeRef(rowIndex);
+			if (!resolvedType)
+			{
+				return false;
+			}
+			const Il2CppMetadataTypeHandle handle = resolvedType->data.typeHandle;
+			return handle == il2cpp_defaults.value_type_class->typeMetadataHandle ||
+				handle == il2cpp_defaults.enum_class->typeMetadataHandle;
         }
         default:
         {
@@ -95,21 +114,48 @@ namespace metadata
         {
             return false;
         }
-        TbMemberRef data = _rawImage->ReadMemberRef(rowIndex);
-        TableType parentTableType = DecodeMemberRefParentType(data.classIdx);
-        if (parentTableType != TableType::TYPEREF)
+		const Table& memberRefTable = _rawImage->GetTable(TableType::MEMBERREF);
+		if (rowIndex == 0 || rowIndex > memberRefTable.rowNum)
+		{
+			return false;
+		}
+		TbMemberRef data = _rawImage->ReadMemberRef(rowIndex);
+		const char* memberName = _rawImage->GetStringFromRawIndex(data.name);
+		if (std::strcmp(memberName, ".ctor") != 0)
+		{
+			return false;
+		}
+		TableType parentTableType = DecodeMemberRefParentType(data.classIdx);
+		if (parentTableType != TableType::TYPEREF)
         {
             return false;
         }
-        const Il2CppType* type = ReadTypeFromTypeRef(DecodeMemberRefParentRowIndex(data.classIdx));
-        const Il2CppTypeDefinition* typeDef = GetUnderlyingTypeDefinition(type);
-        const char* strNamespace = il2cpp::vm::GlobalMetadata::GetStringFromIndex(typeDef->namespaceIndex);
+		uint32_t typeRefRowIndex = DecodeMemberRefParentRowIndex(data.classIdx);
+		const Table& typeRefTable = _rawImage->GetTable(TableType::TYPEREF);
+		if (typeRefRowIndex == 0 || typeRefRowIndex > typeRefTable.rowNum)
+		{
+			return false;
+		}
+		TbTypeRef typeRef = _rawImage->ReadTypeRef(typeRefRowIndex);
+		const char* strNamespace = _rawImage->GetStringFromRawIndex(typeRef.typeNamespace);
         if (std::strcmp(strNamespace, "System"))
         {
             return false;
         }
-        const char* strName = il2cpp::vm::GlobalMetadata::GetStringFromIndex(typeDef->nameIndex);
-        return std::strcmp(strName, "ThreadStaticAttribute") == 0;
+		const char* strName = _rawImage->GetStringFromRawIndex(typeRef.typeName);
+		if (std::strcmp(strName, "ThreadStaticAttribute") != 0)
+		{
+			return false;
+		}
+
+		// Namespace and name alone are not enough for hand-authored metadata: a
+		// TypeRef can point at a different assembly that defines the same name.
+		// Resolve the reference and accept only the runtime's actual corlib type.
+		const Il2CppType* resolvedType = ReadTypeFromTypeRef(typeRefRowIndex);
+		Il2CppClass* resolvedClass = resolvedType
+			? il2cpp::vm::Class::FromIl2CppType(resolvedType, false)
+			: nullptr;
+		return resolvedClass && resolvedClass->image == il2cpp_defaults.corlib;
     }
 
     void Image::ReadMemberRefParentFromToken(const Il2CppGenericContainer* klassGenericContainer, const Il2CppGenericContainer* methodGenericContainer, TableType tableType, uint32_t rowIndex, ResolveMemberRefParent& ret)

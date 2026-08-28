@@ -9,6 +9,7 @@
 #include "metadata/GenericMetadata.h"
 
 #include "Image.h"
+#include "MetadataModule.h"
 #include "MetadataPool.h"
 
 namespace hybridclr
@@ -701,6 +702,10 @@ namespace metadata
 	{
 		const Il2CppTypeDefinition* typeDef = GetUnderlyingTypeDefinition(type);
 		const Il2CppGenericContainer* klassGenericContainer = GetGenericContainerFromIl2CppType(type);
+		if (IsInterpreterType(typeDef))
+		{
+			MetadataModule::GetImage(typeDef)->EnsureTypeFieldMetadataInitializedLocked(typeDef);
+		}
 		for (uint16_t i = 0; i < typeDef->field_count; i++)
 		{
 			const Il2CppFieldDefinition* fieldDef = il2cpp::vm::GlobalMetadata::GetFieldDefinitionFromTypeDefAndFieldIndex(typeDef, i);

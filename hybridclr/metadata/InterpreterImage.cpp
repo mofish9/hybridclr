@@ -2,11 +2,23 @@
 
 #include <cstring>
 #include <cmath>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <mutex>
 #include <iostream>
 #include <algorithm>
+#include <limits>
+
+#if defined(__has_include)
+#if __has_include("../lab/InstrumentationConfig.h")
+#include "../lab/InstrumentationConfig.h"
+#endif
+#endif
 
 #include "il2cpp-class-internals.h"
 #include "vm/GlobalMetadata.h"
+#include "vm/Class.h"
 #include "vm/Type.h"
 #include "vm/Field.h"
 #include "vm/Object.h"
@@ -38,10 +50,167 @@ namespace hybridclr
 {
 namespace metadata
 {
+	// Il2CppTypeDefinition::bitfield stores the reflection-visible packing size
+	// in bits 13-16 in both Unity 2021 and Unity/Tuanjie 2022 metadata layouts.
+	static const uint32_t kSpecifiedPackingSizeBit = 13;
+
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+	static FILE* s_metadataProfileFile = nullptr;
+	static bool s_metadataProfileOpenAttempted = false;
+	static std::mutex s_metadataProfileMutex;
+	struct MetadataStageAggregate
+	{
+		uint32_t imageIndex;
+		const char* stage;
+		uint64_t elapsedNanoseconds;
+	};
+	static std::vector<MetadataStageAggregate> s_metadataStageAggregates;
+
+	void RecordMetadataInitStage(uint32_t imageIndex, const char* stage, uint64_t elapsedNanoseconds)
+	{
+		std::lock_guard<std::mutex> lock(s_metadataProfileMutex);
+		if (!s_metadataProfileOpenAttempted)
+		{
+			s_metadataProfileOpenAttempted = true;
+			const char* path = std::getenv("HYBRIDCLR_METADATA_PROFILE");
+			if (path && *path)
+			{
+				s_metadataProfileFile = std::fopen(path, "a");
+				if (s_metadataProfileFile)
+				{
+					// Player shutdown may bypass the normal stdio flush path. The
+					// instrumented profile is diagnostic-only, so keep each CSV row
+					// durable as soon as it is recorded.
+					std::setvbuf(s_metadataProfileFile, nullptr, _IONBF, 0);
+				}
+			}
+		}
+		if (!s_metadataProfileFile)
+		{
+			return;
+		}
+		std::fprintf(s_metadataProfileFile, "%u,%s,%llu\n", imageIndex, stage, (unsigned long long)elapsedNanoseconds);
+	}
+
+	void AccumulateMetadataInitStage(uint32_t imageIndex, const char* stage, uint64_t elapsedNanoseconds)
+	{
+		std::lock_guard<std::mutex> lock(s_metadataProfileMutex);
+		if (!s_metadataProfileFile)
+		{
+			return;
+		}
+		for (MetadataStageAggregate& aggregate : s_metadataStageAggregates)
+		{
+			if (aggregate.imageIndex == imageIndex && !std::strcmp(aggregate.stage, stage))
+			{
+				aggregate.elapsedNanoseconds += elapsedNanoseconds;
+				return;
+			}
+		}
+		s_metadataStageAggregates.push_back({ imageIndex, stage, elapsedNanoseconds });
+	}
+
+	void FlushMetadataProfile()
+	{
+		for (uint32_t imageIndex = 0; imageIndex < kMaxMetadataImageCount; ++imageIndex)
+		{
+			InterpreterImage* image = InterpreterImage::GetImage(imageIndex);
+			if (image)
+			{
+				image->FlushClassLayoutCacheInstrumentation();
+			}
+		}
+		std::lock_guard<std::mutex> lock(s_metadataProfileMutex);
+		if (s_metadataProfileFile)
+		{
+			for (const MetadataStageAggregate& aggregate : s_metadataStageAggregates)
+			{
+				std::fprintf(s_metadataProfileFile, "%u,%s,%llu\n", aggregate.imageIndex, aggregate.stage, (unsigned long long)aggregate.elapsedNanoseconds);
+			}
+			s_metadataStageAggregates.clear();
+			std::fflush(s_metadataProfileFile);
+		}
+	}
+
+#define HC_METADATA_STAGE(imageIndex, stageName, expression) \
+	do \
+	{ \
+		auto _metadataStageStart = std::chrono::steady_clock::now(); \
+		expression; \
+		auto _metadataStageEnd = std::chrono::steady_clock::now(); \
+		RecordMetadataInitStage((imageIndex), (stageName), (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(_metadataStageEnd - _metadataStageStart).count()); \
+	} while (false)
+#else
+#define HC_METADATA_STAGE(imageIndex, stageName, expression) do { expression; } while (false)
+#endif
 
 	static uint32_t s_nextImageIndexByKind[4] = { (1u << kMetadataImageIndexExtraShiftBitsA), 0, 0, 0};
 
+	static void ValidateCustomAttributeCodedIndexes(const RawImageBase& rawImage, uint32_t parent, uint32_t type)
+	{
+		const uint32_t parentTag = parent & 0x1f;
+		if (parentTag > 21)
+		{
+			RaiseBadImageException("custom attribute parent coded index is invalid");
+		}
+		TableType parentTable = DecodeHasCustomAttributeCodedIndexTableType(parent);
+		uint32_t parentRow = DecodeHasCustomAttributeCodedIndexRowIndex(parent);
+		if (parentRow == 0 || parentRow > rawImage.GetTable(parentTable).rowNum)
+		{
+			RaiseBadImageException("custom attribute parent row index is out of range");
+		}
+
+		const uint32_t typeTag = type & 0x7;
+		if (typeTag != 2 && typeTag != 3)
+		{
+			RaiseBadImageException("custom attribute constructor coded index is invalid");
+		}
+		TableType ctorTable = DecodeCustomAttributeTypeCodedIndexTableType(type);
+		uint32_t ctorRow = DecodeCustomAttributeTypeCodedIndexRowIndex(type);
+		if (ctorRow == 0 || ctorRow > rawImage.GetTable(ctorTable).rowNum)
+		{
+			RaiseBadImageException("custom attribute constructor row index is out of range");
+		}
+	}
+
+	static TableType ValidateTypeDefOrRefOrSpecCodedIndex(const RawImageBase& rawImage, uint32_t codedIndex, const char* error)
+	{
+		if ((codedIndex & 0x3) == 0x3)
+		{
+			RaiseBadImageException(error);
+		}
+		TableType tableType = DecodeTypeDefOrRefOrSpecCodedIndexTableType(codedIndex);
+		uint32_t rowIndex = DecodeTypeDefOrRefOrSpecCodedIndexRowIndex(codedIndex);
+		if (rowIndex == 0 || rowIndex > rawImage.GetTable(tableType).rowNum)
+		{
+			RaiseBadImageException(error);
+		}
+		return tableType;
+	}
+
+	static TableType ValidateMethodDefOrRefCodedIndex(const RawImageBase& rawImage, uint32_t codedIndex, const char* error)
+	{
+		TableType tableType = DecodeMethodDefOrRefCodedIndexTableType(codedIndex);
+		uint32_t rowIndex = DecodeMethodDefOrRefCodedIndexRowIndex(codedIndex);
+		if ((tableType != TableType::METHOD && tableType != TableType::MEMBERREF) ||
+			rowIndex == 0 || rowIndex > rawImage.GetTable(tableType).rowNum)
+		{
+			RaiseBadImageException(error);
+		}
+		return tableType;
+	}
+
 	InterpreterImage* InterpreterImage::s_images[kMaxMetadataImageCount] = {};
+
+	void InterpreterImage::FlushClassLayoutCacheInstrumentation()
+	{
+	#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		if (_classLayoutCalculator)
+		{
+			_classLayoutCalculator->FlushInstrumentation();
+		}
+	#endif
+	}
 
 	static int32_t GetImageKindByDllLength(uint32_t dllLength)
 	{
@@ -84,9 +253,8 @@ namespace metadata
 
 	void InterpreterImage::RegisterImage(InterpreterImage* image)
 	{
-		il2cpp::os::Atomic::FullMemoryBarrier();
 		IL2CPP_ASSERT(image->GetIndex() > 0);
-		s_images[image->GetIndex()] = image;
+		il2cpp::os::Atomic::PublishPointer(&s_images[image->GetIndex()], image);
 	}
 
 	void InterpreterImage::InitBasic(Il2CppImage* image)
@@ -146,43 +314,40 @@ namespace metadata
 	{
 		IL2CPP_ASSERT(_rawImage->GetTable(TableType::EXPORTEDTYPE).rowNum == 0);
 
-		InitGenericParamDefs0();
-		InitTypeDefs_0();
-		InitMethodDefs0();
-		InitGenericParamDefs();
-		InitNestedClass(); // must before typedefs1, because parent may be nested class
-		InitTypeDefs_1();
+		HC_METADATA_STAGE(_index, "InitGenericParamDefs0", InitGenericParamDefs0());
+		HC_METADATA_STAGE(_index, "InitTypeDefs_0", InitTypeDefs_0());
+		HC_METADATA_STAGE(_index, "InitMethodDefs0", InitMethodDefs0());
+		HC_METADATA_STAGE(_index, "InitGenericParamDefs", InitGenericParamDefs());
+		HC_METADATA_STAGE(_index, "InitNestedClass", InitNestedClass()); // must before typedefs1, because parent may be nested class
+		HC_METADATA_STAGE(_index, "InitTypeDefs_1", InitTypeDefs_1());
 
-		InitGenericParamConstraintDefs();
+		HC_METADATA_STAGE(_index, "InitGenericParamConstraintDefs", InitGenericParamConstraintDefs());
 
-		InitParamDefs();
-		InitMethodDefs();
-		InitFieldDefs();
-		InitFieldLayouts();
-		InitFieldRVAs();
-		InitBlittables();
-		InitMethodImpls0();
-		InitProperties();
-		InitEvents();
-		InitMethodSemantics();
-		InitConsts();
-		InitCustomAttributes();
-		InitModuleRefs();
-		InitImplMaps();
-		InitClassLayouts0();
-		InitHasFinalizers();
-		InitTypeDefs_2();
-		InitClassLayouts();
-		InitInterfaces();
-		InitClass();
-		InitVTables();
+		HC_METADATA_STAGE(_index, "InitParamDefs", InitParamDefs());
+		HC_METADATA_STAGE(_index, "InitMethodDefs", InitMethodDefs());
+		HC_METADATA_STAGE(_index, "InitFieldDefs", InitFieldDefs());
+		HC_METADATA_STAGE(_index, "InitFieldLayouts", InitFieldLayouts());
+		HC_METADATA_STAGE(_index, "InitFieldRVAs", InitFieldRVAs());
+		HC_METADATA_STAGE(_index, "InitMethodImpls0", InitMethodImpls0());
+		HC_METADATA_STAGE(_index, "InitProperties", InitProperties());
+		HC_METADATA_STAGE(_index, "InitEvents", InitEvents());
+		HC_METADATA_STAGE(_index, "InitConsts", InitConsts());
+		HC_METADATA_STAGE(_index, "InitCustomAttributes", InitCustomAttributes());
+		HC_METADATA_STAGE(_index, "InitModuleRefs", InitModuleRefs());
+		HC_METADATA_STAGE(_index, "InitImplMaps", InitImplMaps());
+		HC_METADATA_STAGE(_index, "InitClassLayouts0", InitClassLayouts0());
+		HC_METADATA_STAGE(_index, "InitHasFinalizers", InitHasFinalizers());
+		HC_METADATA_STAGE(_index, "InitTypeDefs_2", InitTypeDefs_2());
+		HC_METADATA_STAGE(_index, "InitClassLayouts", InitClassLayoutsLazy());
+		HC_METADATA_STAGE(_index, "InitInterfaces", InitInterfaces());
+		HC_METADATA_STAGE(_index, "InitClass", InitClass());
+		HC_METADATA_STAGE(_index, "InitVTables", InitVTables());
 
-		Il2CppHashMap<const Il2CppType*, uint32_t, Il2CppTypeHashShallow, Il2CppTypeEqualityComparerShallow> temp;
-		_type2Indexs.swap(temp);
+		FreezeIl2CppTypeCache();
 
-		delete _paramRawIndex2ActualParamIndex;
-		_paramRawIndex2ActualParamIndex = nullptr;
 	}
+
+#undef HC_METADATA_STAGE
 
 	void InterpreterImage::InitTypeDefs_0()
 	{
@@ -219,7 +384,8 @@ namespace metadata
 			cur.byrefTypeIndex = AddIl2CppTypeCache(byRefType);
 #endif
 
-			if (IsInterface(cur.flags))
+			// The first TypeDef is <Module>, which is not returned by Assembly.GetTypes().
+			if (rowIndex == 1 || IsInterface(cur.flags))
 			{
 				cur.interfaceOffsetsStart = EncodeWithIndex(0);
 				cur.interface_offsets_count = 0;
@@ -239,6 +405,18 @@ namespace metadata
 	void InterpreterImage::InitTypeDefs_1()
 	{
 		const Table& typeDefTb = _rawImage->GetTable(TableType::TYPEDEF);
+		const Table& typeRefTb = _rawImage->GetTable(TableType::TYPEREF);
+		const uint32_t fieldRowCount = _rawImage->GetTableRowNum(TableType::FIELD);
+		const uint32_t methodRowCount = _rawImage->GetTableRowNum(TableType::METHOD);
+		// TypeRef resolution is independent of the declaring type's generic
+		// context. Cache it for the common case where many types inherit from
+		// the same external base (usually System.Object). TypeSpec is deliberately
+		// left uncached because its result may depend on the current generic
+		// container.
+		std::vector<const Il2CppType*> typeRefCache(typeRefTb.rowNum + 1, nullptr);
+		const Il2CppType* classifiedParent = nullptr;
+		bool classifiedParentIsEnum = false;
+		bool classifiedParentIsValueType = false;
 		for (uint32_t i = 0, n = typeDefTb.rowNum; i < n; i++)
 		{
 			Il2CppTypeDefinition& last = _typesDefines[i > 0 ? i - 1 : 0];
@@ -250,41 +428,87 @@ namespace metadata
 			cur.nameIndex = EncodeWithIndex(data.typeName);
 			cur.namespaceIndex = EncodeWithIndex(data.typeNamespace);
 
-			cur.fieldStart = EncodeWithIndex(data.fieldList - 1);
-			cur.methodStart = EncodeWithIndex(data.methodList - 1);
+			if (data.fieldList == 0 || data.fieldList - 1 > fieldRowCount ||
+				data.methodList == 0 || data.methodList - 1 > methodRowCount)
+			{
+				RaiseBadImageException("type field or method list index is out of range");
+			}
+			const uint32_t rawFieldStart = data.fieldList - 1;
+			const uint32_t rawMethodStart = data.methodList - 1;
+			if (i == 0 && (rawFieldStart != 0 || rawMethodStart != 0))
+			{
+				RaiseBadImageException("type field or method ownership does not start at the first row");
+			}
+			cur.fieldStart = EncodeWithIndex(rawFieldStart);
+			cur.methodStart = EncodeWithIndex(rawMethodStart);
 
 			if (i > 0)
 			{
-				last.field_count = (uint16_t)(cur.fieldStart - last.fieldStart);
-				last.method_count = (uint16_t)(cur.methodStart - last.methodStart);
+				const uint32_t lastFieldStart = DecodeMetadataIndex(last.fieldStart);
+				const uint32_t lastMethodStart = DecodeMetadataIndex(last.methodStart);
+				if (rawFieldStart < lastFieldStart || rawMethodStart < lastMethodStart)
+				{
+					RaiseBadImageException("type field or method list is not monotonic");
+				}
+				const uint32_t fieldCount = rawFieldStart - lastFieldStart;
+				const uint32_t methodCount = rawMethodStart - lastMethodStart;
+				if (fieldCount > std::numeric_limits<uint16_t>::max() || methodCount > std::numeric_limits<uint16_t>::max())
+				{
+					RaiseBadImageException("type field or method count exceeds runtime limits");
+				}
+				last.field_count = static_cast<uint16_t>(fieldCount);
+				last.method_count = static_cast<uint16_t>(methodCount);
 			}
 			if (i == n - 1)
 			{
-				cur.field_count = (uint16_t)(_rawImage->GetTableRowNum(TableType::FIELD) - DecodeMetadataIndex(cur.fieldStart));
-				cur.method_count = (uint16_t)(_rawImage->GetTableRowNum(TableType::METHOD) - DecodeMetadataIndex(cur.methodStart));
+				const uint32_t fieldCount = fieldRowCount - rawFieldStart;
+				const uint32_t methodCount = methodRowCount - rawMethodStart;
+				if (fieldCount > std::numeric_limits<uint16_t>::max() || methodCount > std::numeric_limits<uint16_t>::max())
+				{
+					RaiseBadImageException("type field or method count exceeds runtime limits");
+				}
+				cur.field_count = static_cast<uint16_t>(fieldCount);
+				cur.method_count = static_cast<uint16_t>(methodCount);
 			}
 
 			if (data.extends != 0)
 			{
-				const Il2CppType* parentType = ReadTypeFromToken(GetGenericContainerByTypeDefinition(&cur), nullptr, DecodeTypeDefOrRefOrSpecCodedIndexTableType(data.extends), DecodeTypeDefOrRefOrSpecCodedIndexRowIndex(data.extends));
+				TableType parentTableType = ValidateTypeDefOrRefOrSpecCodedIndex(*_rawImage, data.extends,
+					"type parent coded index is invalid");
+				uint32_t parentRowIndex = DecodeTypeDefOrRefOrSpecCodedIndexRowIndex(data.extends);
+				const Il2CppType* parentType = nullptr;
+				if (parentTableType == TableType::TYPEREF && parentRowIndex < typeRefCache.size())
+				{
+					parentType = typeRefCache[parentRowIndex];
+					if (!parentType)
+					{
+						parentType = ReadTypeFromToken(GetGenericContainerByTypeDefinition(&cur), nullptr, parentTableType, parentRowIndex);
+						typeRefCache[parentRowIndex] = parentType;
+					}
+				}
+				else
+				{
+					parentType = ReadTypeFromToken(GetGenericContainerByTypeDefinition(&cur), nullptr, parentTableType, parentRowIndex);
+				}
 
 				if (parentType->type == IL2CPP_TYPE_CLASS || parentType->type == IL2CPP_TYPE_VALUETYPE)
 				{
-					Il2CppTypeDefinition* parentDef = (Il2CppTypeDefinition*)parentType->data.typeHandle;
-					// FIXE ME . check mscorelib
-					const char* parentNs = il2cpp::vm::GlobalMetadata::GetStringFromIndex(parentDef->namespaceIndex);
-					if (std::strcmp(parentNs, "System") == 0)
+					if (parentType != classifiedParent)
 					{
-						const char* parentName = il2cpp::vm::GlobalMetadata::GetStringFromIndex(parentDef->nameIndex);
-						if (std::strcmp(parentName, "Enum") == 0)
-						{
-							cur.bitfield |= (1 << (il2cpp::vm::kBitIsValueType - 1));
-							cur.bitfield |= (1 << (il2cpp::vm::kBitIsEnum - 1));
-						}
-						else if (std::strcmp(parentName, "ValueType") == 0)
-						{
-							cur.bitfield |= (1 << (il2cpp::vm::kBitIsValueType - 1));
-						}
+						classifiedParent = parentType;
+						const Il2CppMetadataTypeHandle parentHandle = parentType->data.typeHandle;
+						classifiedParentIsEnum = parentHandle == il2cpp_defaults.enum_class->typeMetadataHandle;
+						classifiedParentIsValueType = classifiedParentIsEnum ||
+							parentHandle == il2cpp_defaults.value_type_class->typeMetadataHandle;
+					}
+					if (classifiedParentIsEnum)
+					{
+						cur.bitfield |= (1 << (il2cpp::vm::kBitIsValueType - 1));
+						cur.bitfield |= (1 << (il2cpp::vm::kBitIsEnum - 1));
+					}
+					else if (classifiedParentIsValueType)
+					{
+						cur.bitfield |= (1 << (il2cpp::vm::kBitIsValueType - 1));
 					}
 				}
 				cur.parentIndex = AddIl2CppTypeCache(parentType);
@@ -351,6 +575,11 @@ namespace metadata
 			// enum element_type == 
 			if (IsEnumType(&cur))
 			{
+				if (cur.field_count == 0)
+				{
+					RaiseBadImageException("enum type has no underlying value field");
+				}
+				EnsureFieldMetadataInitializedLocked(DecodeMetadataIndex(cur.fieldStart));
 				cur.elementTypeIndex = _fieldDetails[DecodeMetadataIndex(cur.fieldStart)].fieldDef.typeIndex;
 			}
 
@@ -369,7 +598,7 @@ namespace metadata
 			{
 				il2cpp::vm::PackingSize packingSizeEnum = il2cpp::vm::GlobalMetadata::ConvertPackingSizeToEnum((uint8_t)packingSize);
 				cur.bitfield |= ((uint32_t)packingSizeEnum << (il2cpp::vm::kPackingSize - 1));
-				cur.bitfield |= ((uint32_t)packingSizeEnum << (il2cpp::vm::kSpecifiedPackingSize - 1));
+				cur.bitfield |= ((uint32_t)packingSizeEnum << (kSpecifiedPackingSizeBit - 1));
 			}
 			else
 			{
@@ -380,21 +609,6 @@ namespace metadata
 
 	void InterpreterImage::InitParamDefs()
 	{
-		const Table& tb = _rawImage->GetTable(TableType::PARAM);
-
-		// extra 16 for not name params
-		_params.reserve(tb.rowNum + 16);
-		_paramRawIndex2ActualParamIndex = new std::vector<TypeIndex>(tb.rowNum);
-		//for (uint32_t i = 0; i < tb.rowNum; i++)
-		//{
-		//	uint32_t rowIndex = i + 1;
-		//	Il2CppParameterDefinition& pd = _params[i].paramDef;
-		//	TbParam data = _rawImage->ReadParam(rowIndex);
-
-		//	pd.nameIndex = EncodeWithIndex(data.name);
-		//	pd.token = EncodeToken(TableType::PARAM, rowIndex);
-		//	// pd.typeIndex 在InitMethodDefs中解析signature后填充。
-		//}
 	}
 
 
@@ -425,39 +639,52 @@ namespace metadata
 			uint32_t rowIndex = i + 1;
 			TbField data = _rawImage->ReadField(rowIndex);
 
-			BlobReader br = _rawImage->GetBlobReaderByRawIndex(data.signature);
-			FieldRefSig frs;
-			ReadFieldRefSig(br, GetGenericContainerByTypeDefRawIndex(DecodeMetadataIndex(fd.typeDefIndex)), frs);
-			if (data.flags != 0)
-			{
-				Il2CppType typeWithAttrs = *frs.type;
-				typeWithAttrs.attrs = data.flags;
-				frs.type = MetadataPool::GetPooledIl2CppType(typeWithAttrs);
-			}
-
-			//cur = {};
 			cur.nameIndex = EncodeWithIndex(data.name);
+			cur.typeIndex = kTypeIndexInvalid;
 			cur.token = EncodeToken(TableType::FIELD, rowIndex);
-			cur.typeIndex = AddIl2CppTypeCache(frs.type);
 		}
 	}
 
 	void InterpreterImage::InitFieldLayouts()
 	{
 		const Table& tb = _rawImage->GetTable(TableType::FIELDLAYOUT);
+		uint32_t lastField = 0;
 		for (uint32_t i = 0; i < tb.rowNum; i++)
 		{
 			TbFieldLayout data = _rawImage->ReadFieldLayout(i + 1);
+			if (data.field == 0 || data.field > _fieldDetails.size())
+			{
+				RaiseBadImageException("field layout row index is out of range");
+			}
+			if (data.field <= lastField)
+			{
+				RaiseBadImageException("field layout rows are duplicated or not sorted");
+			}
+			if (data.offset > std::numeric_limits<uint32_t>::max() - sizeof(Il2CppObject))
+			{
+				RaiseBadImageException("field layout offset exceeds runtime limits");
+			}
 			_fieldDetails[data.field - 1].offset = sizeof(Il2CppObject) + data.offset;
+			lastField = data.field;
 		}
 	}
 
 	void InterpreterImage::InitFieldRVAs()
 	{
 		const Table& tb = _rawImage->GetTable(TableType::FIELDRVA);
+		uint32_t lastField = 0;
 		for (uint32_t i = 0; i < tb.rowNum; i++)
 		{
 			TbFieldRVA data = _rawImage->ReadFieldRVA(i + 1);
+			if (data.field == 0 || data.field > _fieldDetails.size())
+			{
+				RaiseBadImageException("field RVA row index is out of range");
+			}
+			if (data.field <= lastField)
+			{
+				RaiseBadImageException("field RVA rows are duplicated or not sorted");
+			}
+			EnsureFieldMetadataInitializedLocked(data.field - 1);
 			FieldDetail& fd = _fieldDetails[data.field - 1];
 			fd.defaultValueIndex = (uint32_t)_fieldDefaultValues.size();
 
@@ -466,102 +693,17 @@ namespace metadata
 			fdv.typeIndex = fd.fieldDef.typeIndex;
 
 			uint32_t dataImageOffset = (uint32_t)-1;
-			bool ret = _rawImage->TranslateRVAToImageOffset(data.rva, dataImageOffset);
-			IL2CPP_ASSERT(ret);
+			if (!_rawImage->TranslateRVAToImageOffset(data.rva, dataImageOffset))
+			{
+				RaiseBadImageException("field RVA is outside the image");
+			}
 #if HYBRIDCLR_UNITY_2021_OR_NEW
 			fdv.dataIndex = (DefaultValueDataIndex)EncodeWithIndex(EncodeWithBlobSource(dataImageOffset, BlobSource::RAW_IMAGE));
 #else
 			fdv.dataIndex = (DefaultValueDataIndex)EncodeWithIndex(dataImageOffset);
 #endif
 			_fieldDefaultValues.push_back(fdv);
-		}
-	}
-
-	void InterpreterImage::InitBlittables()
-	{
-		const Table& typeDefTb = _rawImage->GetTable(TableType::TYPEDEF);
-
-		std::vector<bool> computFlags(typeDefTb.rowNum, false);
-
-		for (uint32_t i = 0, n = typeDefTb.rowNum; i < n; i++)
-		{
-			ComputeBlittable(&_typesDefines[i], computFlags);
-		}
-	}
-
-	void InterpreterImage::ComputeBlittable(Il2CppTypeDefinition* def, std::vector<bool>& computFlags)
-	{
-		if (DecodeImageIndex(def->byvalTypeIndex) != GetIndex())
-		{
-			return;
-		}
-		uint32_t typeIndex = GetTypeRawIndex(def);
-		if (computFlags[typeIndex])
-		{
-			return;
-		}
-		computFlags[typeIndex] = true;
-
-		const Il2CppType* type = GetIl2CppTypeFromRawIndex(DecodeMetadataIndex(def->byvalTypeIndex));
-
-		const char* typeName = il2cpp::vm::GlobalMetadata::GetStringFromIndex(def->nameIndex);
-
-
-		bool blittable = false;
-		if (type->type == IL2CPP_TYPE_VALUETYPE)
-		{
-			blittable = true;
-			for (int i = 0; i < def->field_count; i++)
-			{
-				const Il2CppFieldDefinition* field = GetFieldDefinitionFromRawIndex(DecodeMetadataIndex(def->fieldStart + i));
-				const Il2CppType* fieldType = il2cpp::vm::GlobalMetadata::GetIl2CppTypeFromIndex(field->typeIndex);
-				if (!hybridclr::metadata::IsInstanceField(fieldType))
-				{
-					continue;
-				}
-
-				switch (fieldType->type)
-				{
-				case IL2CPP_TYPE_BOOLEAN:
-				case IL2CPP_TYPE_CHAR:
-				case IL2CPP_TYPE_I1:
-				case IL2CPP_TYPE_U1:
-				case IL2CPP_TYPE_I2:
-				case IL2CPP_TYPE_U2:
-				case IL2CPP_TYPE_I4:
-				case IL2CPP_TYPE_U4:
-				case IL2CPP_TYPE_I:
-				case IL2CPP_TYPE_U:
-				case IL2CPP_TYPE_I8:
-				case IL2CPP_TYPE_U8:
-				case IL2CPP_TYPE_R4:
-				case IL2CPP_TYPE_R8:
-				case IL2CPP_TYPE_PTR:
-				case IL2CPP_TYPE_FNPTR:
-				{
-					break;
-				}
-				case IL2CPP_TYPE_VALUETYPE:
-				{
-					Il2CppTypeDefinition* fieldDef = (Il2CppTypeDefinition*)fieldType->data.typeHandle;
-					ComputeBlittable(fieldDef, computFlags);
-					blittable = fieldDef->bitfield & (1 << (il2cpp::vm::kBitIsBlittable - 1));
-					break;
-				}
-				default:
-				{
-					blittable = false;
-				}
-				}
-				if (!blittable)
-				{
-					break;
-				}
-			}
-		}
-		if (blittable)
-		{
-			def->bitfield |= (1 << (il2cpp::vm::kBitIsBlittable - 1));
+			lastField = data.field;
 		}
 	}
 
@@ -635,11 +777,20 @@ namespace metadata
 	void InterpreterImage::InitConsts()
 	{
 		const Table& tb = _rawImage->GetTable(TableType::CONSTANT);
+		uint32_t lastParent = 0;
 		for (uint32_t i = 0; i < tb.rowNum; i++)
 		{
 			TbConstant data = _rawImage->ReadConstant(i + 1);
+			if ((data.parent & 0x3) == 0x3 || data.parent <= lastParent)
+			{
+				RaiseBadImageException("constant parents are invalid, duplicated, or not sorted");
+			}
 			TableType parentType = DecodeHasConstantType(data.parent);
 			uint32_t rowIndex = DecodeHashConstantIndex(data.parent);
+			if (rowIndex == 0 || rowIndex > _rawImage->GetTable(parentType).rowNum)
+			{
+				RaiseBadImageException("constant parent row index is out of range");
+			}
 
 			Il2CppType tempType = {};
 			tempType.type = (Il2CppTypeEnum)data.type;
@@ -669,20 +820,19 @@ namespace metadata
 			}
 			case TableType::PARAM:
 			{
-				int32_t actualIndex = (*_paramRawIndex2ActualParamIndex)[rowIndex - 1];
-				ParamDetail& fd = _params[actualIndex];
-				fd.defaultValueIndex = (uint32_t)_paramDefaultValues.size();
-
 				Il2CppParameterDefaultValue pdv = {};
 				pdv.typeIndex = dataTypeIndex;
-				pdv.parameterIndex = fd.parameterIndex;
+				TbParam paramData = _rawImage->ReadParam(rowIndex);
+				pdv.parameterIndex = paramData.sequence > 0 ? paramData.sequence - 1 : 0;
 #if HYBRIDCLR_UNITY_2021_OR_NEW
 				pdv.dataIndex = ConvertConstValue(_constValues, data.value, &type);
 #else
 				uint32_t dataImageOffset = _rawImage->GetImageOffsetOfBlob(type.type, data.value);
 				pdv.dataIndex = isNullValue ? kDefaultValueIndexNull : (DefaultValueDataIndex)EncodeWithIndex(dataImageOffset);
 #endif
+				uint32_t defaultValueIndex = (uint32_t)_paramDefaultValues.size();
 				_paramDefaultValues.push_back(pdv);
+				_rawParamDefaultValueIndexes.emplace(rowIndex - 1, defaultValueIndex);
 				break;
 			}
 			case TableType::PROPERTY:
@@ -696,29 +846,133 @@ namespace metadata
 				break;
 			}
 			}
+			lastParent = data.parent;
 		}
 	}
 
 	void InterpreterImage::InitCustomAttributes()
 	{
-		const Table& tb = _rawImage->GetTable(TableType::CUSTOMATTRIBUTE);
-		_tokenCustomAttributes.reserve(tb.rowNum);
+	}
 
-
-		uint32_t threadStaticMethodToken = 0;
-		Il2CppCustomAttributeTypeRange* curTypeRange = nullptr;
-		for (uint32_t rowIndex = 1; rowIndex <= tb.rowNum; rowIndex++)
+	void InterpreterImage::InitThreadStaticFields()
+	{
+		// Most hot-update assemblies have no ThreadStaticAttribute at all. The
+		// custom-attribute table can be very large, so first inspect the much
+		// smaller MemberRef table for the attribute constructor. This keeps the
+		// negative case out of the first field layout/entry path while preserving
+		// the existing scan for assemblies that can actually contain the marker.
+		const Table& memberRefTable = _rawImage->GetTable(TableType::MEMBERREF);
+		bool hasThreadStaticCtor = false;
+		for (uint32_t rowIndex = 1; rowIndex <= memberRefTable.rowNum; ++rowIndex)
 		{
-			TbCustomAttribute data = _rawImage->ReadCustomAttribute(rowIndex);
-			TableType parentType = DecodeHasCustomAttributeCodedIndexTableType(data.parent);
-			uint32_t parentRowIndex = DecodeHasCustomAttributeCodedIndexRowIndex(data.parent);
+			if (IsThreadStaticCtorToken(TableType::MEMBERREF, rowIndex))
+			{
+				hasThreadStaticCtor = true;
+				break;
+			}
+		}
+		if (!hasThreadStaticCtor)
+		{
+			_customAttributeRangeCount = 0;
+			return;
+		}
+
+		_customAttributeRangeCount = 0;
+		uint32_t previousParent = 0;
+		_rawImage->VisitCustomAttributeParentAndType([this, &previousParent](uint32_t, uint32_t parent, uint32_t type)
+		{
+			ValidateCustomAttributeCodedIndexes(*_rawImage, parent, type);
+			if (_customAttributeRangeCount == 0 || parent != previousParent)
+			{
+				++_customAttributeRangeCount;
+				previousParent = parent;
+			}
+			if (DecodeHasCustomAttributeCodedIndexTableType(parent) == TableType::FIELD)
+			{
+				TableType ctorMethodTableType = DecodeCustomAttributeTypeCodedIndexTableType(type);
+				uint32_t ctorMethodRowIndex = DecodeCustomAttributeTypeCodedIndexRowIndex(type);
+				if (IsThreadStaticCtorToken(ctorMethodTableType, ctorMethodRowIndex))
+				{
+					uint32_t parentRowIndex = DecodeHasCustomAttributeCodedIndexRowIndex(parent);
+					if (parentRowIndex == 0 || parentRowIndex > _fieldDetails.size())
+					{
+						RaiseBadImageException("thread static custom attribute field index is invalid");
+					}
+					_fieldDetails[parentRowIndex - 1].offset = THREAD_LOCAL_STATIC_MASK;
+				}
+			}
+		});
+	}
+
+	void InterpreterImage::EnsureThreadStaticFieldsInitializedLocked()
+	{
+		if (_threadStaticFieldsInitialized)
+		{
+			return;
+		}
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		auto stageStart = std::chrono::steady_clock::now();
+#endif
+		InitThreadStaticFields();
+		_threadStaticFieldsInitialized = true;
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		RecordMetadataInitStage(_index, "LazyThreadStaticFields", (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - stageStart).count());
+#endif
+	}
+
+	void InterpreterImage::EnsureCustomAttributesInitialized()
+	{
+		if (IsMetadataPublished(&_customAttributesInitialized))
+		{
+			return;
+		}
+		il2cpp::os::FastAutoLock metaLock(&il2cpp::vm::g_MetadataLock);
+		if (IsMetadataPublished(&_customAttributesInitialized))
+		{
+			return;
+		}
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		auto stageStart = std::chrono::steady_clock::now();
+#endif
+		BuildCustomAttributeIndexes();
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		RecordMetadataInitStage(_index, "LazyCustomAttributeIndexes", (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - stageStart).count());
+#endif
+		PublishMetadata(&_customAttributesInitialized);
+	}
+
+	void InterpreterImage::BuildCustomAttributeIndexes()
+	{
+		EnsureThreadStaticFieldsInitializedLocked();
+		const Table& tb = _rawImage->GetTable(TableType::CUSTOMATTRIBUTE);
+		// If no ThreadStatic constructor exists, InitThreadStaticFields avoids
+		// scanning the table and therefore cannot count distinct parents. The row
+		// count is a conservative capacity for the deferred index and is paid only
+		// when custom attributes are actually requested.
+		uint32_t rangeCapacity = _customAttributeRangeCount != 0 ? _customAttributeRangeCount : tb.rowNum;
+		_tokenCustomAttributes.Reset(rangeCapacity);
+		_customAttributeInfos.reserve(rangeCapacity);
+		_customAttributeHandles.reserve(rangeCapacity + 1);
+		_customAttribues.reserve(tb.rowNum);
+
+		Il2CppCustomAttributeTypeRange* curTypeRange = nullptr;
+		_rawImage->VisitCustomAttributes([this, &curTypeRange](uint32_t, uint32_t parent, uint32_t type, uint32_t value)
+		{
+			ValidateCustomAttributeCodedIndexes(*_rawImage, parent, type);
+			TableType parentType = DecodeHasCustomAttributeCodedIndexTableType(parent);
+			uint32_t parentRowIndex = DecodeHasCustomAttributeCodedIndexRowIndex(parent);
 			uint32_t token = EncodeToken(parentType, parentRowIndex);
 			if (curTypeRange == nullptr || curTypeRange->token != token)
 			{
-				IL2CPP_ASSERT(_tokenCustomAttributes.find(token) == _tokenCustomAttributes.end());
+				uint32_t existingHandleIndex;
+				if (_tokenCustomAttributes.TryGet(token, existingHandleIndex))
+				{
+					RaiseBadImageException("custom attributes for one parent are not contiguous");
+				}
 				int32_t attributeStartIndex = EncodeWithIndex((int32_t)_customAttribues.size());
-				int32_t handleIndex = (int32_t)_customAttributeHandles.size();
-				_tokenCustomAttributes[token] = { (int32_t)EncodeWithIndex(handleIndex), false, nullptr, nullptr };
+				uint32_t handleIndex = (uint32_t)_customAttributeHandles.size();
+				_tokenCustomAttributes.Insert(token, handleIndex);
+				_customAttributeInfos.push_back({ (int32_t)EncodeWithIndex(handleIndex), false, nullptr, nullptr });
 #ifdef HYBRIDCLR_UNITY_2021_OR_NEW
 				_customAttributeHandles.push_back({ token, (uint32_t)attributeStartIndex });
 #else
@@ -729,39 +983,19 @@ namespace metadata
 #if !HYBRIDCLR_UNITY_2021_OR_NEW
 			++curTypeRange->count;
 #endif
-			TableType ctorMethodTableType = DecodeCustomAttributeTypeCodedIndexTableType(data.type);
-			uint32_t ctorMethodRowIndex = DecodeCustomAttributeTypeCodedIndexRowIndex(data.type);
+			TableType ctorMethodTableType = DecodeCustomAttributeTypeCodedIndexTableType(type);
+			uint32_t ctorMethodRowIndex = DecodeCustomAttributeTypeCodedIndexRowIndex(type);
 			uint32_t ctorMethodToken = EncodeToken(ctorMethodTableType, ctorMethodRowIndex);
-			//CustomAttribute ca = { ctorMethodToken, data.value };
-			//ca.value = data.value;
-			//ReadMethodRefInfoFromToken(nullptr, nullptr, , ca.attrCtorMethod);
-			_customAttribues.push_back({ ctorMethodToken, data.value });
-
-			if (parentType == TableType::FIELD)
-			{
-				// try set thread static flags
-				if (threadStaticMethodToken == 0)
-				{
-					if (IsThreadStaticCtorToken(ctorMethodTableType, ctorMethodRowIndex))
-					{
-						threadStaticMethodToken = ctorMethodToken;
-					}
-				}
-				if (ctorMethodToken == threadStaticMethodToken)
-				{
-					IL2CPP_ASSERT(threadStaticMethodToken != 0);
-					_fieldDetails[parentRowIndex - 1].offset = THREAD_LOCAL_STATIC_MASK;
-				}
-			}
-
-		}
-		IL2CPP_ASSERT(_tokenCustomAttributes.size() == _customAttributeHandles.size());
+			_customAttribues.push_back({ ctorMethodToken, value });
+		});
+		IL2CPP_ASSERT(_tokenCustomAttributes.Size() == _customAttributeHandles.size()
+			&& _customAttributeInfos.size() == _customAttributeHandles.size());
 #ifdef HYBRIDCLR_UNITY_2021_OR_NEW
 		// add extra Il2CppCustomAttributeTypeRange for compute count
 		_customAttributeHandles.push_back({ 0, EncodeWithIndex((int32_t)_customAttribues.size()) });
 #endif
 #if !HYBRIDCLR_UNITY_2022_OR_NEW
-		_customAttribtesCaches.resize(_tokenCustomAttributes.size());
+		_customAttribtesCaches.resize(_tokenCustomAttributes.Size());
 #endif
 	}
 
@@ -770,13 +1004,39 @@ namespace metadata
 	void InterpreterImage::InitCustomAttributeData(CustomAttributesInfo& cai, const Il2CppCustomAttributeTypeRange& dataRange)
 	{
 		il2cpp::os::FastAutoLock metaLock(&il2cpp::vm::g_MetadataLock);
-		if (cai.inited)
+		if (IsMetadataPublished(&cai.inited))
 		{
 			return;
 		}
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		auto stageStart = std::chrono::steady_clock::now();
+#endif
 		BuildCustomAttributesData(cai, dataRange);
-		il2cpp::os::Atomic::FullMemoryBarrier();
-		cai.inited = true;
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		AccumulateMetadataInitStage(_index, "LazyCustomAttributeData", (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - stageStart).count());
+#endif
+		PublishMetadata(&cai.inited);
+	}
+
+	const CustomAttributeCtorInfo& InterpreterImage::GetOrCreateCustomAttributeCtorInfo(uint32_t ctorMethodToken)
+	{
+		auto it = _customAttributeCtorInfos.find(ctorMethodToken);
+		if (it != _customAttributeCtorInfos.end())
+		{
+			return it->second;
+		}
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		auto stageStart = std::chrono::steady_clock::now();
+#endif
+		MethodRefInfo mri = {};
+		ReadMethodRefInfoFromToken(nullptr, nullptr, DecodeTokenTableType(ctorMethodToken), DecodeTokenRowIndex(ctorMethodToken), mri);
+		const MethodInfo* ctorMethod = GetMethodInfoFromMethodDef(mri.containerType, mri.methodDef);
+		MethodIndex ctorIndex = il2cpp::vm::GlobalMetadata::GetMethodIndexFromDefinition(mri.methodDef);
+		auto result = _customAttributeCtorInfos.emplace(ctorMethodToken, CustomAttributeCtorInfo{ ctorMethod, ctorIndex, mri.methodDef->parameterCount });
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		RecordMetadataInitStage(_index, "LazyCustomAttributeCtorResolve", (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - stageStart).count());
+#endif
+		return result.first->second;
 	}
 
 	void InterpreterImage::BuildCustomAttributesData(CustomAttributesInfo& cai, const Il2CppCustomAttributeTypeRange& curTypeRange)
@@ -793,20 +1053,17 @@ namespace metadata
 		for (uint32_t i = 0; i < attrCount; i++)
 		{
 			const CustomAttribute& ca = _customAttribues[attrStartOffset + (int32_t)i];
-			MethodRefInfo mri = {};
-			ReadMethodRefInfoFromToken(nullptr, nullptr, DecodeTokenTableType(ca.ctorMethodToken), DecodeTokenRowIndex(ca.ctorMethodToken), mri);
-			const MethodInfo* ctorMethod = GetMethodInfoFromMethodDef(mri.containerType, mri.methodDef);
-			MethodIndex ctorIndex = il2cpp::vm::GlobalMetadata::GetMethodIndexFromDefinition(mri.methodDef);
-			_il2cppFormatCustomDataBlob.WriteMethodIndex(methodIndexDataOffset, ctorIndex);
+			const CustomAttributeCtorInfo& ctorInfo = GetOrCreateCustomAttributeCtorInfo(ca.ctorMethodToken);
+			_il2cppFormatCustomDataBlob.WriteMethodIndex(methodIndexDataOffset, ctorInfo.methodIndex);
 			methodIndexDataOffset += sizeof(int32_t);
 			if (ca.value != 0)
 			{
 				BlobReader reader = _rawImage->GetBlobReaderByRawIndex(ca.value);
-				ConvertILCustomAttributeData2Il2CppFormat(ctorMethod, reader);
+				ConvertILCustomAttributeData2Il2CppFormat(ctorInfo.method, reader);
 			}
 			else
 			{
-				IL2CPP_ASSERT(mri.methodDef->parameterCount == 0);
+				IL2CPP_ASSERT(ctorInfo.parameterCount == 0);
 				_il2cppFormatCustomDataBlob.WriteCompressedUint32(0);
 				_il2cppFormatCustomDataBlob.WriteCompressedUint32(0);
 				_il2cppFormatCustomDataBlob.WriteCompressedUint32(0);
@@ -1286,7 +1543,7 @@ namespace metadata
 	{
 		IL2CPP_ASSERT(index != kCustomAttributeIndexInvalid);
 		IL2CPP_ASSERT(index < (CustomAttributeIndex)_customAttributeHandles.size());
-		CustomAttributesCache* cache = _customAttribtesCaches[index];
+		CustomAttributesCache* cache = il2cpp::os::Atomic::LoadPointerAcquire(&_customAttribtesCaches[index]);
 		if (cache)
 		{
 			return cache;
@@ -1330,7 +1587,7 @@ namespace metadata
 		}
 
 		il2cpp::os::FastAutoLock metaLock(&il2cpp::vm::g_MetadataLock);
-		CustomAttributesCache* original = _customAttribtesCaches[index];
+		CustomAttributesCache* original = il2cpp::os::Atomic::LoadPointerAcquire(&_customAttribtesCaches[index]);
 		if (original)
 		{
 			// A non-NULL return value indicates some other thread already generated this cache.
@@ -1339,8 +1596,7 @@ namespace metadata
 			HYBRIDCLR_FREE(cache);
 			return original;
 		}
-		il2cpp::os::Atomic::FullMemoryBarrier();
-		_customAttribtesCaches[index] = cache;
+		il2cpp::os::Atomic::PublishPointer(&_customAttribtesCaches[index], cache);
 		return cache;
 	}
 #elif HYBRIDCLR_UNITY_2021
@@ -1348,7 +1604,7 @@ namespace metadata
 	{
 		IL2CPP_ASSERT(index != kCustomAttributeIndexInvalid);
 		IL2CPP_ASSERT(index < (CustomAttributeIndex)_customAttributeHandles.size());
-		CustomAttributesCache* cache = _customAttribtesCaches[index];
+		CustomAttributesCache* cache = il2cpp::os::Atomic::LoadPointerAcquire(&_customAttribtesCaches[index]);
 		if (cache)
 		{
 			return cache;
@@ -1389,7 +1645,7 @@ namespace metadata
 
 
 		il2cpp::os::FastAutoLock metaLock(&il2cpp::vm::g_MetadataLock);
-		CustomAttributesCache* original = _customAttribtesCaches[index];
+		CustomAttributesCache* original = il2cpp::os::Atomic::LoadPointerAcquire(&_customAttribtesCaches[index]);
 		if (original)
 		{
 			// A non-NULL return value indicates some other thread already generated this cache.
@@ -1398,8 +1654,7 @@ namespace metadata
 			HYBRIDCLR_FREE(cache);
 			return original;
 		}
-		il2cpp::os::Atomic::FullMemoryBarrier();
-		_customAttribtesCaches[index] = cache;
+		il2cpp::os::Atomic::PublishPointer(&_customAttribtesCaches[index], cache);
 		return cache;
 	}
 #endif
@@ -1423,12 +1678,25 @@ namespace metadata
 		for (uint32_t rid = 1; rid <= implMapTb.rowNum; rid++)
 		{
 			TbImplMap implMap = _rawImage->ReadImplMap(rid);
+			if (implMap.importScope == 0 || implMap.importScope > _moduleRefs.size())
+			{
+				RaiseBadImageException("implementation map import scope is out of range");
+			}
+			TableType forwardedTable = (implMap.memberForwarded & 0x1) ? TableType::METHOD : TableType::FIELD;
+			uint32_t forwardedRow = implMap.memberForwarded >> 1;
+			if (forwardedRow == 0 || forwardedRow > _rawImage->GetTable(forwardedTable).rowNum)
+			{
+				RaiseBadImageException("implementation map forwarded member is out of range");
+			}
 			ImplMapInfo info = {};
-			info.moduleName = _moduleRefs[DecodeTokenRowIndex(implMap.importScope) - 1];
+			info.moduleName = _moduleRefs[implMap.importScope - 1];
 			info.importName = _rawImage->GetStringFromRawIndex(implMap.importName);
 			info.mappingFlags = implMap.mappingFlags;
 			uint32_t memberForwardedToken = hybridclr::metadata::ConvertMemberForwardedToken2Token(implMap.memberForwarded);
-			_implMapInfos.insert({ memberForwardedToken, info });
+			if (!_implMapInfos.emplace(memberForwardedToken, info).second)
+			{
+				RaiseBadImageException("member has multiple implementation map rows");
+			}
 		}
 	}
 
@@ -1438,6 +1706,7 @@ namespace metadata
 		const Table& methodTb = _rawImage->GetTable(TableType::METHOD);
 
 		_methodDefines.resize(methodTb.rowNum);
+		_methodMetadataDetails.reset(methodTb.rowNum > 0 ? new MethodMetadataDetail[methodTb.rowNum] : nullptr);
 		for (Il2CppMethodDefinition& md : _methodDefines)
 		{
 			md.genericContainerIndex = kGenericContainerIndexInvalid;
@@ -1461,15 +1730,55 @@ namespace metadata
 			}
 		}
 
-		int32_t paramTableRowNum = _rawImage->GetTable(TableType::PARAM).rowNum;
+		uint32_t paramTableRowNum = _rawImage->GetTable(TableType::PARAM).rowNum;
+		if (methodTb.rowNum == 0 && paramTableRowNum != 0)
+		{
+			RaiseBadImageException("parameter rows exist without a declaring method");
+		}
+		uint32_t parameterStart = 0;
 		for (uint32_t index = 0; index < methodTb.rowNum; index++)
 		{
 			Il2CppMethodDefinition& md = _methodDefines[index];
+			MethodMetadataDetail& detail = _methodMetadataDetails[index];
 			uint32_t rowIndex = index + 1;
 			TbMethod methodData = _rawImage->ReadMethod(rowIndex);
+			if (methodData.paramList == 0 || methodData.paramList - 1 > paramTableRowNum)
+			{
+				RaiseBadImageException("method parameter list index is out of range");
+			}
+			detail.signatureBlobIndex = methodData.signature;
+			detail.rawParameterStart = methodData.paramList - 1;
+			if (index == 0 && detail.rawParameterStart != 0)
+			{
+				RaiseBadImageException("method parameter ownership does not start at the first row");
+			}
+			const byte* signatureBlob = _rawImage->GetBlobFromRawIndex(methodData.signature);
+			uint32_t valueLength;
+			BlobReader::ReadCompressedUint32(signatureBlob, valueLength);
+			const byte* signatureData = signatureBlob + valueLength;
+			uint8_t signatureFlags = *signatureData++;
+			if (signatureFlags & (uint8_t)MethodSigFlags::GENERIC)
+			{
+				BlobReader::ReadCompressedUint32(signatureData, valueLength);
+				signatureData += valueLength;
+			}
+			uint32_t parameterCount = BlobReader::ReadCompressedUint32(signatureData, valueLength);
+			detail.initialized = 0;
+			if (parameterCount >= 256)
+			{
+				const Il2CppTypeDefinition& typeDef = _typesDefines[DecodeMetadataIndex(md.declaringType)];
+				TEMP_FORMAT(errMsg, "method:%s.%s parameter count:%d is too large", _rawImage->GetStringFromRawIndex(DecodeMetadataIndex(typeDef.nameIndex)), _rawImage->GetStringFromRawIndex(methodData.name), parameterCount);
+				RaiseExecutionEngineException(errMsg);
+			}
+			if (parameterStart > std::numeric_limits<uint32_t>::max() - parameterCount)
+			{
+				RaiseBadImageException("method parameter table is too large");
+			}
+			md.parameterStart = parameterStart;
+			md.parameterCount = (uint16_t)parameterCount;
+			parameterStart += parameterCount;
 
 			md.nameIndex = EncodeWithIndex(methodData.name);
-			md.parameterStart = methodData.paramList - 1;
 			//md.genericContainerIndex = kGenericContainerIndexInvalid;
 			md.token = EncodeToken(TableType::METHOD, rowIndex);
 			md.flags = methodData.flags;
@@ -1477,27 +1786,38 @@ namespace metadata
 			md.slot = kInvalidIl2CppMethodSlot;
 			if (index > 0)
 			{
-				auto& last = _methodDefines[index - 1];
-				last.parameterCount = md.parameterStart - last.parameterStart;
+				MethodMetadataDetail& last = _methodMetadataDetails[index - 1];
+				if (detail.rawParameterStart < last.rawParameterStart)
+				{
+					RaiseBadImageException("method parameter list is not monotonic");
+				}
+				last.rawParameterCount = detail.rawParameterStart - last.rawParameterStart;
 			}
 			if (index == methodTb.rowNum - 1)
 			{
-				md.parameterCount = (int)paramTableRowNum - (int32_t)md.parameterStart;
+				detail.rawParameterCount = paramTableRowNum - detail.rawParameterStart;
 			}
-
 			//MethodBody& body = _methodBodies[index];
 			//ReadMethodBody(md, methodData, body);
 		}
+		_paramCount = parameterStart;
+		_params.Reset(parameterStart);
 
 		for (uint32_t i = 0, n = typeDefTb.rowNum; i < n; i++)
 		{
 			Il2CppTypeDefinition& typeDef = _typesDefines[i];
+			TypeDefinitionDetail& typeDetail = _typeDetails[i];
 			uint32_t rawMethodStart = DecodeMetadataIndex(typeDef.methodStart);
 			bool isInterface = IsInterface(typeDef.flags);
 			uint16_t slotIdx = 0;
+			typeDetail.virtualMethodCount = 0;
 			for (int m = 0; m < typeDef.method_count; m++)
 			{
 				Il2CppMethodDefinition& md = _methodDefines[rawMethodStart + m];
+				if (IsVirtualMethod(md.flags))
+				{
+					++typeDetail.virtualMethodCount;
+				}
 				const char* methodName = _rawImage->GetStringFromRawIndex(DecodeMetadataIndex(md.nameIndex));
 				if (!std::strcmp(methodName, ".cctor"))
 				{
@@ -1511,60 +1831,187 @@ namespace metadata
 				{
 					md.slot = slotIdx++;
 				}
-				// TODO 可以考虑优化一下,将 signature在前一步存到暂时不用的 returnType里
-				TbMethod methodData = _rawImage->ReadMethod(rawMethodStart + m + 1);
+			}
+		}
+	}
 
-				BlobReader methodSigReader = _rawImage->GetBlobReaderByRawIndex(methodData.signature);
-				uint32_t namedParamStart = md.parameterStart;
-				uint32_t namedParamCount = md.parameterCount;
+	void InterpreterImage::EnsureMethodMetadataInitialized(uint32_t index)
+	{
+		IL2CPP_ASSERT(index < _methodDefines.size());
+		if (IsMetadataPublished(&_methodMetadataDetails[index].initialized))
+		{
+			return;
+		}
+		il2cpp::os::FastAutoLock metaLock(&il2cpp::vm::g_MetadataLock);
+		EnsureMethodMetadataInitializedLocked(index);
+	}
 
-				uint32_t actualParamStart = (uint32_t)_params.size();
-				ReadMethodDefSig(
-					methodSigReader,
-					GetGenericContainerByTypeDefinition(&typeDef),
-					GetGenericContainerByRawIndex(DecodeMetadataIndex(md.genericContainerIndex)),
-					md,
-					_params);
-				uint32_t actualParamCount = (uint32_t)_params.size() - actualParamStart;
-				md.parameterStart = actualParamStart;
-				md.parameterCount = actualParamCount;
-				if (md.parameterCount >= 256)
-				{
-					TEMP_FORMAT(errMsg, "method:%s.%s parameter count:%d is too large", _rawImage->GetStringFromRawIndex(DecodeMetadataIndex(typeDef.nameIndex)), methodName, md.parameterCount);
-                    RaiseExecutionEngineException(errMsg);
-				}
-				for (uint32_t paramRowIndex = namedParamStart + 1; paramRowIndex <= namedParamStart + namedParamCount; paramRowIndex++)
-				{
-					TbParam data = _rawImage->ReadParam(paramRowIndex);
-					if (data.sequence > 0)
-					{
-						int32_t actualParamIndex = actualParamStart + data.sequence - 1;
-						ParamDetail& paramDetail = _params[actualParamIndex];
-						Il2CppParameterDefinition& pd = paramDetail.paramDef;
-						IL2CPP_ASSERT(paramDetail.parameterIndex == data.sequence - 1);
-						pd.nameIndex = EncodeWithIndex(data.name);
-						pd.token = EncodeToken(TableType::PARAM, paramRowIndex);
-						(*_paramRawIndex2ActualParamIndex)[paramRowIndex - 1] = actualParamIndex;
-						if (data.flags)
-						{
-							const Il2CppType* fieldType = il2cpp::vm::GlobalMetadata::GetIl2CppTypeFromIndex(pd.typeIndex);
-							Il2CppType* newType = MetadataPool::ShallowCloneIl2CppType(fieldType);
-							newType->attrs = data.flags;
-							//paramDetail.type = newType;
-							pd.typeIndex = AddIl2CppTypeCache(newType);
-						}
-					}
-					else
-					{
-						// data.sequence == 0  is for returnType.
-						// used for parent of CustomeAttributes of ReturnType
-						// il2cpp not support ReturnType CustomAttributes. so we just ignore it.
-#if SUPPORT_METHOD_RETURN_TYPE_CUSTOM_ATTRIBUTE
-						md.returnParameterToken = EncodeToken(TableType::PARAM, paramRowIndex);
+	void InterpreterImage::EnsureMethodMetadataInitializedLocked(uint32_t index)
+	{
+		IL2CPP_ASSERT(index < _methodDefines.size());
+		if (IsMetadataPublished(&_methodMetadataDetails[index].initialized))
+		{
+			return;
+		}
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		auto stageStart = std::chrono::steady_clock::now();
 #endif
+		BuildMethodMetadata(index);
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		RecordMetadataInitStage(_index, "LazyMethodMetadata", (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - stageStart).count());
+#endif
+		PublishMetadata(&_methodMetadataDetails[index].initialized);
+		++_methodMetadataInitializedCount;
+		IL2CPP_ASSERT(_methodMetadataInitializedCount <= _methodDefines.size());
+		if (_methodMetadataInitializedCount == _methodDefines.size())
+		{
+			FreezeIl2CppTypeCache();
+			std::unordered_map<uint32_t, uint32_t> emptyDefaultValueIndexes;
+			_rawParamDefaultValueIndexes.swap(emptyDefaultValueIndexes);
+		}
+	}
+
+	void InterpreterImage::EnsureTypeMethodMetadataInitializedLocked(const Il2CppTypeDefinition* typeDef)
+	{
+		IL2CPP_ASSERT(typeDef >= _typesDefines.data() && typeDef < _typesDefines.data() + _typesDefines.size());
+		uint32_t methodStart = DecodeMetadataIndex(typeDef->methodStart);
+		IL2CPP_ASSERT(methodStart <= _methodDefines.size());
+		IL2CPP_ASSERT(typeDef->method_count <= _methodDefines.size() - methodStart);
+		for (uint32_t index = methodStart, end = methodStart + typeDef->method_count; index < end; ++index)
+		{
+			EnsureMethodMetadataInitializedLocked(index);
+		}
+	}
+
+	void InterpreterImage::EnsureFieldMetadataInitialized(uint32_t index)
+	{
+		IL2CPP_ASSERT(index < _fieldDetails.size());
+		if (IsFieldMetadataInitialized(_fieldDetails[index]))
+		{
+			return;
+		}
+		il2cpp::os::FastAutoLock metaLock(&il2cpp::vm::g_MetadataLock);
+		EnsureFieldMetadataInitializedLocked(index);
+	}
+
+	void InterpreterImage::EnsureFieldMetadataInitializedLocked(uint32_t index)
+	{
+		IL2CPP_ASSERT(index < _fieldDetails.size());
+		if (IsFieldMetadataInitialized(_fieldDetails[index]))
+		{
+			return;
+		}
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		auto stageStart = std::chrono::steady_clock::now();
+#endif
+		BuildFieldMetadata(index);
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		RecordMetadataInitStage(_index, "LazyFieldMetadata", (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - stageStart).count());
+#endif
+	}
+
+	void InterpreterImage::EnsureTypeFieldMetadataInitializedLocked(const Il2CppTypeDefinition* typeDef)
+	{
+		IL2CPP_ASSERT(typeDef >= _typesDefines.data() && typeDef < _typesDefines.data() + _typesDefines.size());
+		uint32_t fieldStart = DecodeMetadataIndex(typeDef->fieldStart);
+		IL2CPP_ASSERT(fieldStart <= _fieldDetails.size());
+		IL2CPP_ASSERT(typeDef->field_count <= _fieldDetails.size() - fieldStart);
+		for (uint32_t index = fieldStart, end = fieldStart + typeDef->field_count; index < end; ++index)
+		{
+			EnsureFieldMetadataInitializedLocked(index);
+		}
+	}
+
+	void InterpreterImage::BuildFieldMetadata(uint32_t index)
+	{
+		FieldDetail& field = _fieldDetails[index];
+		TbField rawField = _rawImage->ReadField(index + 1);
+		BlobReader fieldSigReader = _rawImage->GetBlobReaderByRawIndex(rawField.signature);
+		FieldRefSig fieldSig;
+		ReadFieldRefSig(fieldSigReader, GetGenericContainerByTypeDefRawIndex(DecodeMetadataIndex(field.typeDefIndex)), fieldSig);
+		const Il2CppType* fieldType = fieldSig.type;
+		// Field flags are only needed while materializing the type. Keep them out of
+		// the load-time cache and read the compact raw row on first access.
+		if (rawField.flags != 0)
+		{
+			Il2CppType typeWithAttrs = *fieldType;
+			typeWithAttrs.attrs = rawField.flags;
+			fieldType = MetadataPool::GetPooledIl2CppType(typeWithAttrs);
+		}
+		PublishFieldMetadata(field, AddIl2CppTypeCache(fieldType));
+	}
+
+	void InterpreterImage::BuildMethodMetadata(uint32_t index)
+	{
+		Il2CppMethodDefinition& md = _methodDefines[index];
+		MethodMetadataDetail& detail = _methodMetadataDetails[index];
+		Il2CppTypeDefinition& typeDef = _typesDefines[DecodeMetadataIndex(md.declaringType)];
+		BlobReader methodSigReader = _rawImage->GetBlobReaderByRawIndex(detail.signatureBlobIndex);
+		uint32_t rawParameterStart = detail.rawParameterStart;
+		uint32_t rawParameterCount = detail.rawParameterCount;
+		uint32_t paramTableRowNum = _rawImage->GetTable(TableType::PARAM).rowNum;
+		if (rawParameterStart > paramTableRowNum || rawParameterCount > paramTableRowNum - rawParameterStart)
+		{
+			RaiseBadImageException("method parameter range is out of bounds");
+		}
+
+		uint32_t actualParamStart = md.parameterStart;
+		ReadMethodDefSig(
+			methodSigReader,
+			GetGenericContainerByTypeDefinition(&typeDef),
+			GetGenericContainerByRawIndex(DecodeMetadataIndex(md.genericContainerIndex)),
+			md,
+			actualParamStart,
+			md.parameterCount);
+		uint32_t actualParamCount = md.parameterCount;
+		md.parameterStart = actualParamStart;
+		md.parameterCount = (uint16_t)actualParamCount;
+		uint64_t seenSequences[4] = {};
+		for (uint32_t paramIndex = 0; paramIndex < rawParameterCount; ++paramIndex)
+		{
+			uint32_t paramRowIndex = rawParameterStart + paramIndex + 1;
+			TbParam data = _rawImage->ReadParam(paramRowIndex);
+			if (data.sequence > md.parameterCount)
+			{
+				RaiseBadImageException("method parameter sequence exceeds signature parameter count");
+			}
+			uint64_t sequenceMask = (uint64_t)1 << (data.sequence & 63);
+			uint64_t& seenSequenceWord = seenSequences[data.sequence >> 6];
+			if ((seenSequenceWord & sequenceMask) != 0)
+			{
+				RaiseBadImageException("method parameter sequence is duplicated");
+			}
+			seenSequenceWord |= sequenceMask;
+			if (data.sequence > 0)
+			{
+				uint32_t actualParamIndex = actualParamStart + data.sequence - 1;
+				ParamDetail& paramDetail = _params[actualParamIndex];
+				Il2CppParameterDefinition& pd = paramDetail.paramDef;
+				IL2CPP_ASSERT(paramDetail.parameterIndex == data.sequence - 1);
+				pd.nameIndex = EncodeWithIndex(data.name);
+				pd.token = EncodeToken(TableType::PARAM, paramRowIndex);
+				if (data.flags)
+				{
+					const Il2CppType* paramType = il2cpp::vm::GlobalMetadata::GetIl2CppTypeFromIndex(pd.typeIndex);
+					Il2CppType* newType = MetadataPool::ShallowCloneIl2CppType(paramType);
+					newType->attrs = data.flags;
+					pd.typeIndex = AddIl2CppTypeCache(newType);
+				}
+				if (data.flags & PARAM_ATTRIBUTE_HAS_DEFAULT)
+				{
+					auto defaultValue = _rawParamDefaultValueIndexes.find(paramRowIndex - 1);
+					if (defaultValue != _rawParamDefaultValueIndexes.end())
+					{
+						paramDetail.defaultValueIndex = defaultValue->second;
 					}
 				}
 			}
+#if SUPPORT_METHOD_RETURN_TYPE_CUSTOM_ATTRIBUTE
+			else
+			{
+				md.returnParameterToken = EncodeToken(TableType::PARAM, paramRowIndex);
+			}
+#endif
 		}
 	}
 
@@ -1591,22 +2038,30 @@ namespace metadata
 	void InterpreterImage::InitMethodImpls0()
 	{
 		const Table& miTb = _rawImage->GetTable(TableType::METHODIMPL);
+		uint32_t lastType = 0;
 		for (uint32_t i = 0; i < miTb.rowNum; i++)
 		{
 			TbMethodImpl data = _rawImage->ReadMethodImpl(i + 1);
+			if (data.classIdx == 0 || data.classIdx > _typesDefines.size())
+			{
+				RaiseBadImageException("method implementation class index is out of range");
+			}
+			ValidateMethodDefOrRefCodedIndex(*_rawImage, data.methodBody,
+				"method implementation body coded index is invalid");
+			ValidateMethodDefOrRefCodedIndex(*_rawImage, data.methodDeclaration,
+				"method implementation declaration coded index is invalid");
 			uint32_t typeIndex = data.classIdx - 1;
 			TypeDefinitionDetail& tdd = _typeDetails[typeIndex];
-			Il2CppTypeDefinition& typeDef = _typesDefines[typeIndex];
-			Il2CppGenericContainer* gc = GetGenericContainerByTypeDefinition(&typeDef);
 			if (tdd.methodImplCount == 0)
 			{
 				tdd.methodImplStart = i;
 			}
+			else if (lastType != data.classIdx)
+			{
+				RaiseBadImageException("method implementations for one type are not contiguous");
+			}
 			++tdd.methodImplCount;
-			//MethodImpl impl;
-			//ReadMethodRefInfoFromToken(gc, nullptr, DecodeMethodDefOrRefCodedIndexTableType(data.methodBody), DecodeMethodDefOrRefCodedIndexRowIndex(data.methodBody), impl.body);
-			//ReadMethodRefInfoFromToken(gc, nullptr, DecodeMethodDefOrRefCodedIndexTableType(data.methodDeclaration), DecodeMethodDefOrRefCodedIndexRowIndex(data.methodDeclaration), impl.declaration);
-			//tdd.methodImpls.push_back(impl);
+			lastType = data.classIdx;
 		}
 	}
 
@@ -1614,8 +2069,59 @@ namespace metadata
 	{
 		const Table& propertyMapTb = _rawImage->GetTable(TableType::PROPERTYMAP);
 		const Table& propertyTb = _rawImage->GetTable(TableType::PROPERTY);
-		_propeties.reserve(propertyTb.rowNum);
 
+		Il2CppTypeDefinition* last = nullptr;
+		uint32_t lastParent = 0;
+		uint32_t lastPropertyList = 0;
+		for (uint32_t rowIndex = 1; rowIndex <= propertyMapTb.rowNum; rowIndex++)
+		{
+			TbPropertyMap data = _rawImage->ReadPropertyMap(rowIndex);
+			if (data.parent == 0 || data.parent > _typesDefines.size())
+			{
+				RaiseBadImageException("property map parent index is out of range");
+			}
+			if (data.parent <= lastParent)
+			{
+				RaiseBadImageException("property map parents are duplicated or not sorted");
+			}
+			if (data.propertyList == 0 || data.propertyList - 1 > propertyTb.rowNum)
+			{
+				RaiseBadImageException("property map list index is out of range");
+			}
+			if (last != nullptr && data.propertyList < lastPropertyList)
+			{
+				RaiseBadImageException("property map list is not monotonic");
+			}
+			Il2CppTypeDefinition* typeDef = &_typesDefines[data.parent - 1];
+			typeDef->propertyStart = EncodeWithIndex(data.propertyList); // start from 1
+			if (last != nullptr)
+			{
+				uint32_t count = data.propertyList - lastPropertyList;
+				if (count > std::numeric_limits<uint16_t>::max())
+				{
+					RaiseBadImageException("type property count exceeds runtime limits");
+				}
+				last->property_count = static_cast<uint16_t>(count);
+			}
+			last = typeDef;
+			lastParent = data.parent;
+			lastPropertyList = data.propertyList;
+		}
+		if (last)
+		{
+			uint32_t count = propertyTb.rowNum - (lastPropertyList - 1);
+			if (count > std::numeric_limits<uint16_t>::max())
+			{
+				RaiseBadImageException("type property count exceeds runtime limits");
+			}
+			last->property_count = static_cast<uint16_t>(count);
+		}
+	}
+
+	void InterpreterImage::BuildProperties()
+	{
+		const Table& propertyTb = _rawImage->GetTable(TableType::PROPERTY);
+		_propeties.reserve(propertyTb.rowNum);
 		for (uint32_t rowIndex = 1; rowIndex <= propertyTb.rowNum; rowIndex++)
 		{
 			TbProperty data = _rawImage->ReadProperty(rowIndex);
@@ -1623,23 +2129,6 @@ namespace metadata
 				, nullptr
 				, { (StringIndex)EncodeWithIndex(data.name), kMethodIndexInvalid, kMethodIndexInvalid, (uint32_t)data.flags, EncodeToken(TableType::PROPERTY, rowIndex)}
 				});
-		}
-
-		Il2CppTypeDefinition* last = nullptr;
-		for (uint32_t rowIndex = 1; rowIndex <= propertyMapTb.rowNum; rowIndex++)
-		{
-			TbPropertyMap data = _rawImage->ReadPropertyMap(rowIndex);
-			Il2CppTypeDefinition* typeDef = &_typesDefines[data.parent - 1];
-			typeDef->propertyStart = EncodeWithIndex(data.propertyList); // start from 1
-			if (last != nullptr)
-			{
-				last->property_count = data.propertyList - DecodeMetadataIndex(last->propertyStart);
-			}
-			last = typeDef;
-		}
-		if (last)
-		{
-			last->property_count = propertyTb.rowNum - DecodeMetadataIndex(last->propertyStart) + 1;
 		}
 #if HYBRIDCLR_UNITY_2019
 		for (const Il2CppTypeDefinition& typeDef : _typesDefines)
@@ -1660,8 +2149,59 @@ namespace metadata
 	{
 		const Table& eventMapTb = _rawImage->GetTable(TableType::EVENTMAP);
 		const Table& eventTb = _rawImage->GetTable(TableType::EVENT);
-		_events.reserve(eventTb.rowNum);
 
+		Il2CppTypeDefinition* last = nullptr;
+		uint32_t lastParent = 0;
+		uint32_t lastEventList = 0;
+		for (uint32_t rowIndex = 1; rowIndex <= eventMapTb.rowNum; rowIndex++)
+		{
+			TbEventMap data = _rawImage->ReadEventMap(rowIndex);
+			if (data.parent == 0 || data.parent > _typesDefines.size())
+			{
+				RaiseBadImageException("event map parent index is out of range");
+			}
+			if (data.parent <= lastParent)
+			{
+				RaiseBadImageException("event map parents are duplicated or not sorted");
+			}
+			if (data.eventList == 0 || data.eventList - 1 > eventTb.rowNum)
+			{
+				RaiseBadImageException("event map list index is out of range");
+			}
+			if (last != nullptr && data.eventList < lastEventList)
+			{
+				RaiseBadImageException("event map list is not monotonic");
+			}
+			Il2CppTypeDefinition* typeDef = &_typesDefines[data.parent - 1];
+			typeDef->eventStart = EncodeWithIndex(data.eventList); // start from 1
+			if (last != nullptr)
+			{
+				uint32_t count = data.eventList - lastEventList;
+				if (count > std::numeric_limits<uint16_t>::max())
+				{
+					RaiseBadImageException("type event count exceeds runtime limits");
+				}
+				last->event_count = static_cast<uint16_t>(count);
+			}
+			last = typeDef;
+			lastParent = data.parent;
+			lastEventList = data.eventList;
+		}
+		if (last)
+		{
+			uint32_t count = eventTb.rowNum - (lastEventList - 1);
+			if (count > std::numeric_limits<uint16_t>::max())
+			{
+				RaiseBadImageException("type event count exceeds runtime limits");
+			}
+			last->event_count = static_cast<uint16_t>(count);
+		}
+	}
+
+	void InterpreterImage::BuildEvents()
+	{
+		const Table& eventTb = _rawImage->GetTable(TableType::EVENT);
+		_events.reserve(eventTb.rowNum);
 		for (uint32_t rowIndex = 1; rowIndex <= eventTb.rowNum; rowIndex++)
 		{
 			TbEvent data = _rawImage->ReadEvent(rowIndex);
@@ -1671,23 +2211,6 @@ namespace metadata
 				, { (StringIndex)EncodeWithIndex(data.name), kTypeIndexInvalid, kMethodIndexInvalid, kMethodIndexInvalid, kMethodIndexInvalid, EncodeToken(TableType::EVENT, rowIndex)}
 #endif
 				});
-		}
-
-		Il2CppTypeDefinition* last = nullptr;
-		for (uint32_t rowIndex = 1; rowIndex <= eventMapTb.rowNum; rowIndex++)
-		{
-			TbEventMap data = _rawImage->ReadEventMap(rowIndex);
-			Il2CppTypeDefinition* typeDef = &_typesDefines[data.parent - 1];
-			typeDef->eventStart = EncodeWithIndex(data.eventList); // start from 1
-			if (last != nullptr)
-			{
-				last->event_count = data.eventList - DecodeMetadataIndex(last->eventStart);
-			}
-			last = typeDef;
-		}
-		if (last)
-		{
-			last->event_count = eventTb.rowNum - DecodeMetadataIndex(last->eventStart) + 1;
 		}
 #if HYBRIDCLR_UNITY_2019
 		for (const Il2CppTypeDefinition& typeDef : _typesDefines)
@@ -1706,21 +2229,102 @@ namespace metadata
 #endif
 	}
 
+	void InterpreterImage::EnsurePropertyEventMetadataInitialized()
+	{
+		if (IsMetadataPublished(&_propertyEventMetadataInitialized))
+		{
+			return;
+		}
+		il2cpp::os::FastAutoLock metaLock(&il2cpp::vm::g_MetadataLock);
+		if (IsMetadataPublished(&_propertyEventMetadataInitialized))
+		{
+			return;
+		}
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		auto stageStart = std::chrono::steady_clock::now();
+#endif
+		BuildProperties();
+		BuildEvents();
+		InitMethodSemantics();
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		RecordMetadataInitStage(_index, "LazyPropertyEventMetadata", (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - stageStart).count());
+#endif
+		PublishMetadata(&_propertyEventMetadataInitialized);
+	}
+
 
 	void InterpreterImage::InitMethodSemantics()
 	{
 		const Table& msTb = _rawImage->GetTable(TableType::METHODSEMANTICS);
+		const uint16_t propertySemantics =
+			(uint16_t)MethodSemanticsAttributes::Setter |
+			(uint16_t)MethodSemanticsAttributes::Getter |
+			(uint16_t)MethodSemanticsAttributes::Other;
+		const uint16_t eventSemantics =
+			(uint16_t)MethodSemanticsAttributes::AddOn |
+			(uint16_t)MethodSemanticsAttributes::RemoveOn |
+			(uint16_t)MethodSemanticsAttributes::Fire |
+			(uint16_t)MethodSemanticsAttributes::Other;
 		for (uint32_t rowIndex = 1; rowIndex <= msTb.rowNum; rowIndex++)
 		{
 			TbMethodSemantics data = _rawImage->ReadMethodSemantics(rowIndex);
 			uint32_t method = data.method;
 			uint16_t semantics = data.semantics;
+			if (method == 0 || method > _methodDefines.size())
+			{
+				RaiseBadImageException("method semantics method index is out of range");
+			}
 			TableType tableType = DecodeHasSemanticsCodedIndexTableType(data.association);
-			uint32_t propertyOrEventIndex = DecodeHasSemanticsCodedIndexRowIndex(data.association) - 1;
+			uint32_t associationRowIndex = DecodeHasSemanticsCodedIndexRowIndex(data.association);
+			if (semantics == 0 ||
+				(tableType == TableType::PROPERTY && (semantics & ~propertySemantics) != 0) ||
+				(tableType == TableType::EVENT && (semantics & ~eventSemantics) != 0))
+			{
+				RaiseBadImageException("method semantics flags do not match the association type");
+			}
+
+			const Il2CppMethodDefinition& methodDef = _methodDefines[method - 1];
+			uint32_t declaringTypeIndex = DecodeMetadataIndex(methodDef.declaringType);
+			if (declaringTypeIndex >= _typesDefines.size())
+			{
+				RaiseBadImageException("method semantics method has no valid declaring type");
+			}
+			const Il2CppTypeDefinition& declaringType = _typesDefines[declaringTypeIndex];
+			if (tableType == TableType::PROPERTY)
+			{
+				if (associationRowIndex == 0 || associationRowIndex > _propeties.size())
+				{
+					RaiseBadImageException("method semantics property index is out of range");
+				}
+				uint32_t propertyStart = DecodeMetadataIndex(declaringType.propertyStart);
+				if (declaringType.property_count == 0 || associationRowIndex < propertyStart ||
+					associationRowIndex - propertyStart >= declaringType.property_count)
+				{
+					RaiseBadImageException("property accessor method belongs to a different type");
+				}
+			}
+			else
+			{
+				if (associationRowIndex == 0 || associationRowIndex > _events.size())
+				{
+					RaiseBadImageException("method semantics event index is out of range");
+				}
+				uint32_t eventStart = DecodeMetadataIndex(declaringType.eventStart);
+				if (declaringType.event_count == 0 || associationRowIndex < eventStart ||
+					associationRowIndex - eventStart >= declaringType.event_count)
+				{
+					RaiseBadImageException("event accessor method belongs to a different type");
+				}
+			}
+
+			uint32_t propertyOrEventIndex = associationRowIndex - 1;
 			if (semantics & (uint16_t)MethodSemanticsAttributes::Getter)
 			{
-				IL2CPP_ASSERT(tableType == TableType::PROPERTY);
 				PropertyDetail& pd = _propeties[propertyOrEventIndex];
+				if (pd.getterMethodIndex != 0)
+				{
+					RaiseBadImageException("property has multiple getter methods");
+				}
 				pd.getterMethodIndex = method;
 #if HYBRIDCLR_UNITY_2019
 				pd.il2cppDefinition.get = method - DecodeMetadataIndex(pd.declaringType->methodStart) - 1;
@@ -1728,8 +2332,11 @@ namespace metadata
 			}
 			if (semantics & (uint16_t)MethodSemanticsAttributes::Setter)
 			{
-				IL2CPP_ASSERT(tableType == TableType::PROPERTY);
 				PropertyDetail& pd = _propeties[propertyOrEventIndex];
+				if (pd.setterMethodIndex != 0)
+				{
+					RaiseBadImageException("property has multiple setter methods");
+				}
 				pd.setterMethodIndex = method;
 #if HYBRIDCLR_UNITY_2019
 				pd.il2cppDefinition.set = method - DecodeMetadataIndex(pd.declaringType->methodStart) - 1;
@@ -1737,8 +2344,11 @@ namespace metadata
 			}
 			if (semantics & (uint16_t)MethodSemanticsAttributes::AddOn)
 			{
-				IL2CPP_ASSERT(tableType == TableType::EVENT);
 				EventDetail& ed = _events[propertyOrEventIndex];
+				if (ed.addMethodIndex != 0)
+				{
+					RaiseBadImageException("event has multiple add methods");
+				}
 				ed.addMethodIndex = method;
 #if HYBRIDCLR_UNITY_2019
 				ed.il2cppDefinition.add = method - DecodeMetadataIndex(ed.declaringType->methodStart) - 1;
@@ -1746,8 +2356,11 @@ namespace metadata
 			}
 			if (semantics & (uint16_t)MethodSemanticsAttributes::RemoveOn)
 			{
-				IL2CPP_ASSERT(tableType == TableType::EVENT);
 				EventDetail& ed = _events[propertyOrEventIndex];
+				if (ed.removeMethodIndex != 0)
+				{
+					RaiseBadImageException("event has multiple remove methods");
+				}
 				ed.removeMethodIndex = method;
 #if HYBRIDCLR_UNITY_2019
 				ed.il2cppDefinition.remove = method - DecodeMetadataIndex(ed.declaringType->methodStart) - 1;
@@ -1755,8 +2368,11 @@ namespace metadata
 			}
 			if (semantics & (uint16_t)MethodSemanticsAttributes::Fire)
 			{
-				IL2CPP_ASSERT(tableType == TableType::EVENT);
 				EventDetail& ed = _events[propertyOrEventIndex];
+				if (ed.fireMethodIndex != 0)
+				{
+					RaiseBadImageException("event has multiple fire methods");
+				}
 				ed.fireMethodIndex = method;
 #if HYBRIDCLR_UNITY_2019
 				ed.il2cppDefinition.raise = method - DecodeMetadataIndex(ed.declaringType->methodStart) - 1;
@@ -1776,10 +2392,27 @@ namespace metadata
 		const Table& nestedClassTb = _rawImage->GetTable(TableType::NESTEDCLASS);
 		_nestedTypeDefineIndexs.reserve(nestedClassTb.rowNum);
 		std::vector<EnclosingClassInfo> enclosingTypes;
+		const uint32_t noEnclosingType = std::numeric_limits<uint32_t>::max();
+		std::vector<uint32_t> enclosingTypeByNestedType(_typesDefines.size(), noEnclosingType);
+		uint32_t lastNestedClass = 0;
 
 		for (uint32_t i = 0; i < nestedClassTb.rowNum; i++)
 		{
 			TbNestedClass data = _rawImage->ReadNestedClass(i + 1);
+			if (data.nestedClass == 0 || data.nestedClass > _typesDefines.size() ||
+				data.enclosingClass == 0 || data.enclosingClass > _typesDefines.size())
+			{
+				RaiseBadImageException("nested class row index is out of range");
+			}
+			if (data.nestedClass <= lastNestedClass)
+			{
+				RaiseBadImageException("nested class rows are duplicated or not sorted");
+			}
+			if (data.nestedClass == data.enclosingClass)
+			{
+				RaiseBadImageException("type cannot enclose itself");
+			}
+			enclosingTypeByNestedType[data.nestedClass - 1] = data.enclosingClass - 1;
 			Il2CppTypeDefinition& nestedType = _typesDefines[data.nestedClass - 1];
 			Il2CppTypeDefinition& enclosingType = _typesDefines[data.enclosingClass - 1];
 			if (enclosingType.nested_type_count == 0)
@@ -1788,10 +2421,35 @@ namespace metadata
 				enclosingType.nestedTypesStart = (uint32_t)enclosingTypes.size();
 				enclosingTypes.push_back({ data.enclosingClass - 1 });
 			}
+			if (enclosingType.nested_type_count == std::numeric_limits<uint16_t>::max())
+			{
+				RaiseBadImageException("nested type count exceeds runtime limits");
+			}
 			++enclosingType.nested_type_count;
 			enclosingTypes[enclosingType.nestedTypesStart].nestedTypeIndexs.push_back(data.nestedClass - 1);
-			//_nestedTypeDefineIndexs.push_back(data.nestedClass - 1);
 			nestedType.declaringTypeIndex = enclosingType.byvalTypeIndex;
+			lastNestedClass = data.nestedClass;
+		}
+
+		std::vector<uint8_t> visitState(_typesDefines.size(), 0);
+		for (uint32_t typeIndex = 0; typeIndex < _typesDefines.size(); ++typeIndex)
+		{
+			uint32_t current = typeIndex;
+			while (current != noEnclosingType && visitState[current] == 0)
+			{
+				visitState[current] = 1;
+				current = enclosingTypeByNestedType[current];
+			}
+			if (current != noEnclosingType && visitState[current] == 1)
+			{
+				RaiseBadImageException("nested class hierarchy contains a cycle");
+			}
+			current = typeIndex;
+			while (current != noEnclosingType && visitState[current] == 1)
+			{
+				visitState[current] = 2;
+				current = enclosingTypeByNestedType[current];
+			}
 		}
 
 		for (auto& enclosingType : enclosingTypes)
@@ -1810,10 +2468,28 @@ namespace metadata
 		for (uint32_t i = 0; i < classLayoutTb.rowNum; i++)
 		{
 			TbClassLayout data = _rawImage->ReadClassLayout(i + 1);
-			_classLayouts[data.parent - 1] = data;
+			if (data.parent == 0 || data.parent > _typesDefines.size())
+			{
+				RaiseBadImageException("class layout parent index is out of range");
+			}
+			if (data.packingSize != 0 &&
+				(data.packingSize > 128 || (data.packingSize & (data.packingSize - 1)) != 0))
+			{
+				RaiseBadImageException("class layout packing size is invalid");
+			}
+			uint32_t typeIndex = data.parent - 1;
+			if (_classLayouts.find(typeIndex) != _classLayouts.end())
+			{
+				RaiseBadImageException("type has multiple class layout rows");
+			}
+			if (data.classSize > std::numeric_limits<uint32_t>::max() - sizeof(Il2CppObject))
+			{
+				RaiseBadImageException("class layout size exceeds runtime limits");
+			}
+			_classLayouts.emplace(typeIndex, data);
 			if (data.classSize > 0)
 			{
-				Il2CppTypeDefinitionSizes& typeSizes = _typeDetails[data.parent - 1].typeSizes;
+				Il2CppTypeDefinitionSizes& typeSizes = _typeDetails[typeIndex].typeSizes;
 				typeSizes.instance_size = data.classSize + sizeof(Il2CppObject);
 			}
 		}
@@ -1832,8 +2508,8 @@ namespace metadata
 		{
 			const Il2CppTypeDefinition* typeDef = GetTypeDefinitionByTypeDetail(&type);
 			const Il2CppType* il2cppType = GetIl2CppTypeFromTypeDefinition(typeDef);
-			calculator.CalcClassStaticFields(il2cppType);
 			ClassLayoutInfo* layout = calculator.GetClassLayoutInfo(il2cppType);
+			calculator.CalcClassStaticFields(il2cppType);
 
 			auto& sizes = type.typeSizes;
 			sizes.native_size = layout->nativeSize;
@@ -1873,8 +2549,196 @@ namespace metadata
 		}
 	}
 
+	void InterpreterImage::InitClassLayoutsLazy()
+	{
+		_classLayoutInitialized.assign(_typesDefines.size(), 0);
+		_classLayoutInitializableTypeCount = (uint32_t)_typesDefines.size();
+		if (!_classLayoutInitialized.empty())
+		{
+			// <Module> is not returned by Assembly.GetTypes and has no runtime layout.
+			_classLayoutInitialized[0] = 1;
+			_classLayoutInitializedTypeCount = 1;
+		}
+		if (!_classLayoutCalculator)
+		{
+			_classLayoutCalculator = new ClassFieldLayoutCalculator(this);
+		}
+	}
+
+	void InterpreterImage::InitClassLayout(uint32_t index)
+	{
+		IL2CPP_ASSERT(index < _typesDefines.size());
+		if (_classLayoutInitialized[index])
+		{
+			return;
+		}
+		IL2CPP_ASSERT(_classLayoutCalculator);
+
+		Il2CppTypeDefinition* typeDef = &_typesDefines[index];
+		const Il2CppType* il2cppType = GetIl2CppTypeFromTypeDefinition(typeDef);
+		// ThreadStatic markers are only relevant to field-bearing types. Avoid
+		// scanning the entire custom-attribute table when the first touched type
+		// has no fields (the common static-class entry case).
+		if (typeDef->field_count != 0)
+			EnsureThreadStaticFieldsInitializedLocked();
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		auto stageStart = std::chrono::steady_clock::now();
+#endif
+		_classLayoutCalculator->CalcClassNotStaticFields(il2cppType);
+		_classLayoutCalculator->CalcClassStaticFields(il2cppType);
+		ClassLayoutInfo* layout = _classLayoutCalculator->GetClassLayoutInfo(il2cppType);
+		IL2CPP_ASSERT(layout);
+		if (il2cppType->type == IL2CPP_TYPE_VALUETYPE)
+		{
+			const uint32_t blittableBit = 1u << (il2cpp::vm::kBitIsBlittable - 1);
+			if (layout->blittable)
+			{
+				typeDef->bitfield |= blittableBit;
+			}
+			else
+			{
+				typeDef->bitfield &= ~blittableBit;
+			}
+		}
+
+		auto& sizes = _typeDetails[index].typeSizes;
+		sizes.native_size = layout->nativeSize;
+		if (typeDef->genericContainerIndex == kGenericContainerIndexInvalid)
+		{
+			sizes.static_fields_size = layout->staticFieldsSize;
+			sizes.thread_static_fields_size = layout->threadStaticFieldsSize;
+		}
+		else
+		{
+			sizes.static_fields_size = 0;
+			sizes.thread_static_fields_size = 0;
+		}
+		if (sizes.instance_size == 0)
+		{
+			sizes.instance_size = layout->instanceSize;
+		}
+
+		int32_t fieldStart = DecodeMetadataIndex(typeDef->fieldStart);
+		for (int32_t i = 0, end = typeDef->field_count; i < end; i++)
+		{
+			FieldDetail& fd = _fieldDetails[fieldStart + i];
+			FieldLayout& fieldLayout = layout->fields[i];
+			if (fd.offset == 0 || fd.offset == THREAD_LOCAL_STATIC_MASK)
+			{
+				fd.offset = fieldLayout.offset;
+			}
+			else
+			{
+				IL2CPP_ASSERT(fd.offset == fieldLayout.offset);
+			}
+		}
+		_classLayoutInitialized[index] = 1;
+		if (++_classLayoutInitializedTypeCount == _classLayoutInitializableTypeCount)
+		{
+			delete _classLayoutCalculator;
+			_classLayoutCalculator = nullptr;
+		}
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		RecordMetadataInitStage(_index, "LazyClassLayout", (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - stageStart).count());
+#endif
+	}
+
+	bool InterpreterImage::TryApplyClassLayoutLocked(Il2CppClass* klass)
+	{
+		// The calculator is a temporary cache owned by the lazy layout phase. Keep
+		// this fast path deliberately narrow: generic, explicit-size, and static
+		// field layouts still use IL2CPP's canonical layout code.
+		if (!_classLayoutCalculator || !klass || klass->generic_class
+			|| klass->byval_arg.type != IL2CPP_TYPE_CLASS || klass->field_count == 0
+			|| (klass->flags & TYPE_ATTRIBUTE_EXPLICIT_LAYOUT) != 0
+			|| !il2cpp::vm::MetadataCache::StructLayoutSizeIsDefault(klass->typeMetadataHandle))
+		{
+			return false;
+		}
+
+		const Il2CppTypeDefinition* typeDef = reinterpret_cast<const Il2CppTypeDefinition*>(klass->typeMetadataHandle);
+		const Il2CppType* type = GetIl2CppTypeFromTypeDefinition(typeDef);
+		ClassLayoutInfo* layout = _classLayoutCalculator->GetClassLayoutInfo(type);
+		if (!layout || layout->fields.size() != klass->field_count || layout->hasStaticFields)
+		{
+			return false;
+		}
+
+		// SetupFieldsFromDefinitionLocked has already materialized FieldInfo objects.
+		// Reuse the offsets and sizes computed by the interpreter metadata path and
+		// avoid running the same FieldLayout traversal a second time.
+		klass->has_references = klass->parent ? klass->parent->has_references : false;
+		for (uint16_t i = 0; i < klass->field_count; ++i)
+		{
+			FieldInfo* field = klass->fields + i;
+			const FieldLayout& fieldLayout = layout->fields[i];
+			if (fieldLayout.isNormalStatic || fieldLayout.isThreadStatic)
+			{
+				return false;
+			}
+			field->offset = fieldLayout.offset;
+			const Il2CppType* fieldType = il2cpp::vm::Type::GetUnderlyingType(field->type);
+			if (il2cpp::vm::Type::IsReference(fieldType)
+				|| (il2cpp::vm::Type::IsStruct(fieldType)
+					&& il2cpp::vm::Class::HasReferences(il2cpp::vm::Class::FromIl2CppType(fieldType))))
+			{
+				klass->has_references = true;
+			}
+		}
+
+		klass->instance_size = static_cast<uint32_t>(layout->instanceSize);
+		klass->actualSize = static_cast<uint32_t>(layout->actualSize);
+		klass->native_size = layout->nativeSize;
+		klass->minimumAlignment = layout->alignment;
+		klass->static_fields_size = 0;
+		klass->thread_static_fields_size = 0;
+	#if HYBRIDCLR_UNITY_2022_OR_NEW
+		klass->stack_slot_size = sizeof(void*);
+	#endif
+		return true;
+	}
+
+	void InterpreterImage::FreezeIl2CppTypeCache()
+	{
+		if (_type2Indexs.empty())
+		{
+			return;
+		}
+
+		// Once the load-time type graph is complete, retain only a compact sorted
+		// index. Lazy metadata still needs to deduplicate against these entries,
+		// while the unordered map's buckets and node overhead are no longer useful.
+		_frozenTypeIndexes.reserve(_frozenTypeIndexes.size() + _type2Indexs.size());
+		for (auto it = _type2Indexs.begin(); it != _type2Indexs.end(); ++it)
+		{
+			_frozenTypeIndexes.push_back({ it->first, it->second,
+				static_cast<uint32_t>(Il2CppTypeHashShallow()(it->first)) });
+		}
+		std::sort(_frozenTypeIndexes.begin(), _frozenTypeIndexes.end(),
+			[](const FrozenTypeIndex& lhs, const FrozenTypeIndex& rhs)
+			{
+				return lhs.hash < rhs.hash;
+			});
+		Il2CppHashMap<const Il2CppType*, uint32_t, Il2CppTypeHashShallow, Il2CppTypeEqualityComparerShallow> emptyTypeIndexes;
+		_type2Indexs.swap(emptyTypeIndexes);
+	}
+
 	uint32_t InterpreterImage::AddIl2CppTypeCache(const Il2CppType* type)
 	{
+		const uint32_t hash = static_cast<uint32_t>(Il2CppTypeHashShallow()(type));
+		auto frozen = std::lower_bound(_frozenTypeIndexes.begin(), _frozenTypeIndexes.end(), hash,
+			[](const FrozenTypeIndex& entry, uint32_t value)
+			{
+				return entry.hash < value;
+			});
+		for (auto it = frozen; it != _frozenTypeIndexes.end() && it->hash == hash; ++it)
+		{
+			if (Il2CppTypeEqualityComparerShallow()(it->type, type))
+			{
+				return it->index;
+			}
+		}
+
 		auto it = _type2Indexs.find(type);
 		if (it != _type2Indexs.end())
 		{
@@ -1884,6 +2748,30 @@ namespace metadata
 		_types.push_back(type);
 		_type2Indexs.insert({ type, encodeIndex });
 		return encodeIndex;
+	}
+
+	const Il2CppType* InterpreterImage::GetIl2CppTypeFromRawIndex(uint32_t index) const
+	{
+		return _types[index];
+	}
+
+	const Il2CppType* InterpreterImage::GetGenericParameterConstraintFromIndex(GenericParameterConstraintIndex index)
+	{
+		IL2CPP_ASSERT((size_t)index < _genericConstraints.size());
+		il2cpp::os::FastAutoLock metaLock(&il2cpp::vm::g_MetadataLock);
+		TypeIndex typeIndex = _genericConstraints[index];
+		if (typeIndex == kTypeIndexInvalid)
+		{
+			TbGenericParamConstraint data = _rawImage->ReadGenericParamConstraint(index + 1);
+			Il2CppGenericParameter& genericParam = _genericParams[data.owner - 1];
+			const Il2CppGenericContainer* klassGc;
+			const Il2CppGenericContainer* methodGc;
+			GetClassAndMethodGenericContainerFromGenericContainerIndex(genericParam.ownerIndex, klassGc, methodGc);
+			const Il2CppType* paramCons = ReadTypeFromToken(klassGc, methodGc,
+				DecodeTypeDefOrRefOrSpecCodedIndexTableType(data.constraint), DecodeTypeDefOrRefOrSpecCodedIndexRowIndex(data.constraint));
+			_genericConstraints[index] = typeIndex = DecodeMetadataIndex(AddIl2CppTypeCache(paramCons));
+		}
+		return _types[typeIndex];
 	}
 
 	uint32_t InterpreterImage::AddIl2CppGenericContainers(Il2CppGenericContainer& geneContainer)
@@ -1902,27 +2790,39 @@ namespace metadata
 	Il2CppClass* InterpreterImage::GetTypeInfoFromTypeDefinitionRawIndex(uint32_t index)
 	{
 		IL2CPP_ASSERT(index < _classList.size());
-		Il2CppClass* klass = _classList[index];
+		Il2CppClass* klass = il2cpp::os::Atomic::LoadPointerAcquire(&_classList[index]);
 		if (klass)
 		{
 			return klass;
 		}
 		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
-		klass = _classList[index];
+		klass = il2cpp::os::Atomic::LoadPointerAcquire(&_classList[index]);
 		if (klass)
 		{
 			return klass;
 		}
+		InitClassLayout(index);
+		Il2CppTypeDefinition& typeDef = _typesDefines[index];
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		if (!IsInterface(typeDef.flags) && typeDef.interfaceOffsetsStart == 0)
+		{
+			auto stageStart = std::chrono::steady_clock::now();
+			EnsureVTableInitializedLocked(&typeDef);
+			RecordMetadataInitStage(_index, "LazyVTable", (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - stageStart).count());
+		}
+#else
+		EnsureVTableInitializedLocked(&typeDef);
+#endif
 		klass = il2cpp::vm::GlobalMetadata::FromTypeDefinition(EncodeWithIndex(index));
 		IL2CPP_ASSERT(klass->interfaces_count <= klass->interface_offsets_count || _typesDefines[index].interfaceOffsetsStart == 0);
-		il2cpp::os::Atomic::FullMemoryBarrier();
-		_classList[index] = klass;
+		il2cpp::os::Atomic::PublishPointer(&_classList[index], klass);
 		return klass;
 	}
 
 	const Il2CppType* InterpreterImage::GetInterfaceFromGlobalOffset(TypeInterfaceIndex globalOffset)
 	{
 		IL2CPP_ASSERT((uint32_t)globalOffset < (uint32_t)_interfaceDefines.size());
+		il2cpp::os::FastAutoLock metaLock(&il2cpp::vm::g_MetadataLock);
 
 		TypeIndex typeIndex = _interfaceDefines[globalOffset];
 		if (typeIndex == kTypeIndexInvalid)
@@ -2027,6 +2927,7 @@ namespace metadata
 	void InterpreterImage::ReadFieldRefInfoFromFieldDefToken(uint32_t rowIndex, FieldRefInfo& ret)
 	{
 		IL2CPP_ASSERT(rowIndex > 0);
+		EnsureFieldMetadataInitializedLocked(rowIndex - 1);
 		const FieldDetail& fd = GetFieldDetailFromRawIndex(rowIndex - 1);
 		ret.containerType = GetIl2CppTypeFromRawTypeDefIndex(DecodeMetadataIndex(fd.typeDefIndex));
 		ret.field = &fd.fieldDef;
@@ -2053,17 +2954,33 @@ namespace metadata
 	{
 		const Table& tb = _rawImage->GetTable(TableType::GENERICPARAMCONSTRAINT);
 		_genericConstraints.resize(tb.rowNum, kTypeIndexInvalid);
+		uint32_t lastOwner = 0;
 		for (uint32_t i = 0; i < tb.rowNum; i++)
 		{
 			uint32_t rowIndex = i + 1;
 			TbGenericParamConstraint data = _rawImage->ReadGenericParamConstraint(rowIndex);
+			if (data.owner == 0 || data.owner > _genericParams.size())
+			{
+				RaiseBadImageException("generic parameter constraint owner is out of range");
+			}
+			ValidateTypeDefOrRefOrSpecCodedIndex(*_rawImage, data.constraint,
+				"generic parameter constraint type is invalid");
 			Il2CppGenericParameter& genericParam = _genericParams[data.owner - 1];
 
 			if (genericParam.constraintsCount == 0)
 			{
 				genericParam.constraintsStart = EncodeWithIndex(i);
 			}
+			else if (data.owner != lastOwner)
+			{
+				RaiseBadImageException("generic parameter constraints for one owner are not contiguous");
+			}
+			if (genericParam.constraintsCount == std::numeric_limits<int16_t>::max())
+			{
+				RaiseBadImageException("generic parameter constraint count exceeds runtime limits");
+			}
 			++genericParam.constraintsCount;
+			lastOwner = data.owner;
 			//_genericConstraints[i] == kTypeIndexInvalid;
 
 			//Il2CppType paramCons = {};
@@ -2086,6 +3003,7 @@ namespace metadata
 	void InterpreterImage::InitGenericParamDefs()
 	{
 		const Table& tb = _rawImage->GetTable(TableType::GENERICPARAM);
+		uint32_t lastOwner = 0;
 		for (uint32_t i = 0; i < tb.rowNum; i++)
 		{
 			uint32_t rowIndex = i + 1;
@@ -2098,7 +3016,13 @@ namespace metadata
 
 			TableType ownerType = DecodeTypeOrMethodDefCodedIndexTableType(data.owner);
 			uint32_t ownerIndex = DecodeTypeOrMethodDefCodedIndexRowIndex(data.owner);
-			IL2CPP_ASSERT(ownerIndex > 0);
+			const uint32_t ownerCount = ownerType == TableType::TYPEDEF
+				? static_cast<uint32_t>(_typesDefines.size())
+				: static_cast<uint32_t>(_methodDefines.size());
+			if (ownerIndex == 0 || ownerIndex > ownerCount)
+			{
+				RaiseBadImageException("generic parameter owner is out of range");
+			}
 			Il2CppGenericContainer* geneContainer;
 			int32_t interIndex = ownerIndex - 1;
 			if (ownerType == TableType::TYPEDEF)
@@ -2131,7 +3055,16 @@ namespace metadata
 			{
 				geneContainer->genericParameterStart = EncodeWithIndex(i);
 			}
+			else if (data.owner != lastOwner)
+			{
+				RaiseBadImageException("generic parameters for one owner are not contiguous");
+			}
+			if (data.number != static_cast<uint32_t>(geneContainer->type_argc))
+			{
+				RaiseBadImageException("generic parameter number is not sequential");
+			}
 			++geneContainer->type_argc;
+			lastOwner = data.owner;
 		}
 	}
 
@@ -2150,6 +3083,12 @@ namespace metadata
 		{
 			uint32_t rowIndex = i + 1;
 			TbInterfaceImpl data = _rawImage->ReadInterfaceImpl(rowIndex);
+			if (data.classIdx == 0 || data.classIdx > _typesDefines.size())
+			{
+				RaiseBadImageException("interface implementation class index is out of range");
+			}
+			ValidateTypeDefOrRefOrSpecCodedIndex(*_rawImage, data.interfaceIdx,
+				"interface implementation type is invalid");
 
 			Il2CppTypeDefinition& typeDef = _typesDefines[data.classIdx - 1];
 			//Il2CppType intType = {};
@@ -2163,7 +3102,14 @@ namespace metadata
 			else
 			{
 				// 必须连续
-				IL2CPP_ASSERT(data.classIdx == lastClassIdx);
+				if (data.classIdx != lastClassIdx)
+				{
+					RaiseBadImageException("interface implementations for one type are not contiguous");
+				}
+			}
+			if (typeDef.interfaces_count == std::numeric_limits<uint16_t>::max())
+			{
+				RaiseBadImageException("type interface count exceeds runtime limits");
 			}
 			++typeDef.interfaces_count;
 			lastClassIdx = data.classIdx;
@@ -2178,15 +3124,45 @@ namespace metadata
 			return;
 		}
 
+		// A non-generic derived type with no virtual/interface/method-impl additions
+		// has exactly the parent's published vtable. Reuse the parent's stable slab
+		// instead of rebuilding and copying an identical table for every such type.
+		if (typeDef.parentIndex != kInvalidIndex
+			&& typeDef.genericContainerIndex == kGenericContainerIndexInvalid
+			&& typeDef.interfaces_count == 0
+			&& !HasMethodImpls(&typeDef))
+		{
+			const Il2CppType* parentType = il2cpp::vm::GlobalMetadata::GetIl2CppTypeFromIndex(typeDef.parentIndex);
+			const Il2CppTypeDefinition* parentTypeDef = GetUnderlyingTypeDefinition(parentType);
+			const bool hasVirtualMethod = _typeDetails[GetTypeRawIndex(&typeDef)].virtualMethodCount != 0;
+			InterpreterImage* parentImage = IsInterpreterType(parentTypeDef) ? MetadataModule::GetImage(parentTypeDef) : nullptr;
+			if (!hasVirtualMethod && parentImage == this)
+			{
+				if (parentTypeDef->interfaceOffsetsStart == 0)
+				{
+					EnsureVTableInitializedLocked(parentTypeDef);
+				}
+				uint32_t parentVtableCount = 0;
+				const VirtualMethodImpl* parentVtable = GetPublishedVTable(parentTypeDef, parentVtableCount);
+				tdd->vtable = const_cast<VirtualMethodImpl*>(parentVtable);
+				tdd->vtableCount = parentVtableCount;
+				typeDef.vtableStart = parentTypeDef->vtableStart;
+				typeDef.vtable_count = parentTypeDef->vtable_count;
+				typeDef.interfaceOffsetsStart = parentTypeDef->interfaceOffsetsStart;
+				typeDef.interface_offsets_count = parentTypeDef->interface_offsets_count;
+				++_vtableInitializedTypeCount;
+				IL2CPP_ASSERT(_vtableInitializedTypeCount <= _vtableInitializableTypeCount);
+				return;
+			}
+		}
+
 		if (typeDef.parentIndex != kInvalidIndex)
 		{
 			const Il2CppType* parentType = il2cpp::vm::GlobalMetadata::GetIl2CppTypeFromIndex(typeDef.parentIndex);
 			const Il2CppTypeDefinition* parentTypeDef = GetUnderlyingTypeDefinition(parentType);
 			if (IsInterpreterType(parentTypeDef) && parentTypeDef->interfaceOffsetsStart == 0)
 			{
-				IL2CPP_ASSERT(DecodeImageIndex(parentTypeDef->byvalTypeIndex) == this->GetIndex());
-				int32_t typeDefIndex = GetTypeRawIndexByEncodedIl2CppTypeIndex(parentTypeDef->byvalTypeIndex);
-				ComputeVTable(&_typeDetails[typeDefIndex]);
+				MetadataModule::GetImage(parentTypeDef)->EnsureVTableInitializedLocked(parentTypeDef);
 			}
 		}
 
@@ -2218,27 +3194,59 @@ namespace metadata
 		typeDef.vtable_count = (uint16_t)vms.size();
 		typeDef.interfaceOffsetsStart = EncodeWithIndex(offsetsStart);
 		typeDef.interface_offsets_count = (uint16_t)interfaceOffsetInfos.size();
+		++_vtableInitializedTypeCount;
+		IL2CPP_ASSERT(_vtableInitializedTypeCount <= _vtableInitializableTypeCount);
 
 		Il2CppClass* klass = _classList[GetTypeRawIndex(&typeDef)];
 		IL2CPP_ASSERT(!klass);
+
+		if (_vtableInitializedTypeCount == _vtableInitializableTypeCount)
+		{
+			for (VTableSetUp* tree : _vtableTreesByTypeDefinition)
+			{
+				if (tree)
+				{
+					tree->~VTableSetUp();
+					HYBRIDCLR_FREE(tree);
+				}
+			}
+			std::vector<VTableSetUp*> emptyDirectCache;
+			_vtableTreesByTypeDefinition.swap(emptyDirectCache);
+			for (auto& entry : _cacheTrees)
+			{
+				entry.second->~VTableSetUp();
+				HYBRIDCLR_FREE(entry.second);
+			}
+			Il2CppType2TypeDeclaringTreeMap emptyCache;
+			_cacheTrees.swap(emptyCache);
+		}
+	}
+
+	void InterpreterImage::EnsureVTableInitializedLocked(const Il2CppTypeDefinition* typeDef)
+	{
+		IL2CPP_ASSERT(typeDef);
+		if (IsInterface(typeDef->flags) || typeDef->interfaceOffsetsStart != 0)
+		{
+			return;
+		}
+		uint32_t index = GetTypeRawIndex(typeDef);
+		IL2CPP_ASSERT(index < _typeDetails.size());
+		ComputeVTable(&_typeDetails[index]);
 	}
 
 	void InterpreterImage::InitVTables()
 	{
-		const Table& typeDefTb = _rawImage->GetTable(TableType::TYPEDEF);
-
-		for (TypeDefinitionDetail& td : _typeDetails)
+		_vtableTreesByTypeDefinition.assign(_typesDefines.size(), nullptr);
+		_vtableInitializableTypeCount = 0;
+		// <Module> is never materialized, and interfaces do not enter ComputeVTable.
+		for (uint32_t index = 1; index < (uint32_t)_typesDefines.size(); ++index)
 		{
-			ComputeVTable(&td);
+			const Il2CppTypeDefinition& typeDef = _typesDefines[index];
+			if (!IsInterface(typeDef.flags) && typeDef.interfaceOffsetsStart == 0)
+			{
+				++_vtableInitializableTypeCount;
+			}
 		}
-
-		for (auto& e : _cacheTrees)
-		{
-			e.second->~VTableSetUp();
-			HYBRIDCLR_FREE(e.second);
-		}
-		Il2CppType2TypeDeclaringTreeMap temp;
-		_cacheTrees.swap(temp);
 	}
 
 	// index => MethodDefinition -> DeclaringClass -> index - klass->methodStart -> MethodInfo*
@@ -2246,12 +3254,24 @@ namespace metadata
 	{
 		IL2CPP_ASSERT((size_t)index <= _methodDefines.size());
 		const Il2CppMethodDefinition* methodDefinition = GetMethodDefinitionFromRawIndex(index);
-		const Il2CppTypeDefinition* typeDefinition = (const Il2CppTypeDefinition*)il2cpp::vm::GlobalMetadata::GetTypeHandleFromIndex(methodDefinition->declaringType);
+		// Interpreter method definitions carry an image-local declaring type
+		// index. Resolve it directly instead of routing through the global
+		// metadata handle/index conversion on every entry lookup.
+		uint32_t declaringTypeIndex = DecodeMetadataIndex(methodDefinition->declaringType);
+		IL2CPP_ASSERT(declaringTypeIndex < _typesDefines.size());
+		const Il2CppTypeDefinition* typeDefinition = &_typesDefines[declaringTypeIndex];
 		int32_t indexInClass = index - DecodeMetadataIndex(typeDefinition->methodStart);
 		IL2CPP_ASSERT(indexInClass >= 0 && indexInClass < typeDefinition->method_count);
-		Il2CppClass* klass = il2cpp::vm::GlobalMetadata::GetTypeInfoFromHandle((Il2CppMetadataTypeHandle)typeDefinition);
+		Il2CppClass* klass = GetTypeInfoFromTypeDefinitionRawIndex(declaringTypeIndex);
+#if UNITY_ENGINE_TUANJIE
+		// Tuanjie exposes a lock-protected per-slot initializer. Entry lookup only
+		// needs the requested MethodInfo; reflection enumeration still calls
+		// Class::SetupMethods and materializes the complete method array.
+		return il2cpp::vm::Class::GetOrSetupOneMethod(klass, static_cast<MethodIndex>(indexInClass));
+#else
 		il2cpp::vm::Class::SetupMethods(klass);
 		return klass->methods[indexInClass];
+#endif
 	}
 
 	const MethodInfo* InterpreterImage::GetMethodInfoFromMethodDefinition(const Il2CppMethodDefinition* methodDef)
@@ -2316,6 +3336,7 @@ namespace metadata
 	{
 		uint32_t methodIndex = DecodeTokenRowIndex(token) - 1;
 		IL2CPP_ASSERT(methodIndex < (uint32_t)_methodDefines.size());
+		EnsureMethodMetadataInitialized(methodIndex);
 		const Il2CppMethodDefinition* methodDef = &_methodDefines[methodIndex];
 		return IsInstanceMethod(methodDef) ? hybridclr::interpreter::InterpreterModule::GetAdjustThunkMethodPointer(methodDef) : nullptr;
 	}
@@ -2324,6 +3345,7 @@ namespace metadata
 	{
 		uint32_t methodIndex = DecodeTokenRowIndex(token) - 1;
 		IL2CPP_ASSERT(methodIndex < (uint32_t)_methodDefines.size());
+		EnsureMethodMetadataInitialized(methodIndex);
 		const Il2CppMethodDefinition* methodDef = &_methodDefines[methodIndex];
 		return hybridclr::interpreter::InterpreterModule::GetMethodPointer(methodDef);
 	}
@@ -2332,6 +3354,7 @@ namespace metadata
 	{
 		uint32_t methodIndex = DecodeTokenRowIndex(token) - 1;
 		IL2CPP_ASSERT(methodIndex < (uint32_t)_methodDefines.size());
+		EnsureMethodMetadataInitialized(methodIndex);
 		const Il2CppMethodDefinition* methodDef = &_methodDefines[methodIndex];
 		return hybridclr::interpreter::InterpreterModule::GetMethodInvoker(methodDef);
 	}
@@ -2616,7 +3639,7 @@ namespace metadata
 		}
 	}
 
-	void InterpreterImage::ReadMethodDefSig(BlobReader& reader, const Il2CppGenericContainer* klassGenericContainer, const Il2CppGenericContainer* methodGenericContainer, Il2CppMethodDefinition& methodDef, std::vector<ParamDetail>& paramArr)
+	void InterpreterImage::ReadMethodDefSig(BlobReader& reader, const Il2CppGenericContainer* klassGenericContainer, const Il2CppGenericContainer* methodGenericContainer, Il2CppMethodDefinition& methodDef, uint32_t parameterStart, uint32_t paramCapacity)
 	{
 		uint8_t rawSigFlags = reader.ReadByte();
 
@@ -2628,21 +3651,34 @@ namespace metadata
 			IL2CPP_ASSERT(gc->type_argc == genParamCount);
 		}
 		uint32_t paramCount = reader.ReadCompressedUint32();
-		//IL2CPP_ASSERT(paramCount >= methodDef.parameterCount);
+		if (paramCount != paramCapacity)
+		{
+			RaiseBadImageException("method signature parameter count does not match metadata");
+		}
 
 		const Il2CppType* returnType = ReadType(reader, klassGenericContainer, methodGenericContainer);
 		methodDef.returnType = AddIl2CppTypeCache(returnType);
 
-		int readParamNum = 0;
+		uint32_t readParamNum = 0;
+		ParamDetail* contiguousParams = _params.GetOrCreateContiguous(parameterStart, paramCapacity);
 		for (; reader.NonEmpty(); )
 		{
-			ParamDetail curParam = {};
+			if (readParamNum >= paramCapacity)
+			{
+				RaiseBadImageException("method signature contains too many parameters");
+			}
+			ParamDetail& curParam = contiguousParams ? contiguousParams[readParamNum] : _params.GetOrCreate(parameterStart + readParamNum);
+			curParam = {};
 			const Il2CppType* type = ReadType(reader, klassGenericContainer, methodGenericContainer);
-			curParam.parameterIndex = readParamNum++;
+			curParam.parameterIndex = readParamNum;
+			curParam.defaultValueIndex = kDefaultValueIndexNull;
 			curParam.paramDef.typeIndex = AddIl2CppTypeCache(type);
-			paramArr.push_back(curParam);
+			++readParamNum;
 		}
-		IL2CPP_ASSERT(readParamNum == (int)paramCount);
+		if (readParamNum != paramCount)
+		{
+			RaiseBadImageException("method signature contains too few parameters");
+		}
 	}
 
 	const Il2CppType* InterpreterImage::GetModuleIl2CppType(uint32_t moduleRowIndex, uint32_t typeNamespace, uint32_t typeName, bool raiseExceptionIfNotFound)

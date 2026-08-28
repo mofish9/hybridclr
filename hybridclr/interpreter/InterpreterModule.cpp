@@ -663,18 +663,43 @@ namespace interpreter
 
 	InterpMethodInfo* InterpreterModule::GetInterpMethodInfo(const MethodInfo* methodInfo)
 	{
-		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
+		return GetInterpMethodInfo(methodInfo, false);
+	}
 
-		if (methodInfo->interpData)
+	InterpMethodInfo* InterpreterModule::GetInterpMethodInfo(const MethodInfo* methodInfo, bool metadataLockHeld)
+	{
+		// Reflection invokes the same interpreter constructor many times (for
+		// example, once per custom attribute). Once the transform has published
+		// interpData, an acquire load is sufficient and avoids the global metadata
+		// lock on every subsequent invocation.
+		InterpMethodInfo* initialized = (InterpMethodInfo*)il2cpp::os::Atomic::LoadPointerAcquire(&methodInfo->interpData);
+		if (initialized)
 		{
-			return (InterpMethodInfo*)methodInfo->interpData;
+			return initialized;
 		}
-		IL2CPP_ASSERT(methodInfo->isInterpterImpl);
 
+		if (metadataLockHeld)
+		{
+			initialized = (InterpMethodInfo*)il2cpp::os::Atomic::LoadPointerAcquire(&methodInfo->interpData);
+			if (initialized)
+				return initialized;
+			IL2CPP_ASSERT(methodInfo->isInterpterImpl);
+			il2cpp::vm::Class::Init(methodInfo->klass);
+			InterpMethodInfo* imi = transform::HiTransform::Transform(methodInfo);
+			void** interpDataSlot = &const_cast<MethodInfo*>(methodInfo)->interpData;
+			il2cpp::os::Atomic::PublishPointer<void>(interpDataSlot, (void*)imi);
+			return imi;
+		}
+
+		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
+		initialized = (InterpMethodInfo*)il2cpp::os::Atomic::LoadPointerAcquire(&methodInfo->interpData);
+		if (initialized)
+			return initialized;
+		IL2CPP_ASSERT(methodInfo->isInterpterImpl);
 		il2cpp::vm::Class::Init(methodInfo->klass);
 		InterpMethodInfo* imi = transform::HiTransform::Transform(methodInfo);
-		il2cpp::os::Atomic::FullMemoryBarrier();
-		const_cast<MethodInfo*>(methodInfo)->interpData = imi;
+		void** interpDataSlot = &const_cast<MethodInfo*>(methodInfo)->interpData;
+		il2cpp::os::Atomic::PublishPointer<void>(interpDataSlot, (void*)imi);
 		return imi;
 	}
 }

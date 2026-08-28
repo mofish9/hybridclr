@@ -277,6 +277,36 @@ namespace metadata
 		}
 
 	public:
+		template<typename Visitor>
+		void VisitCustomAttributeParentAndType(Visitor&& visitor) const
+		{
+			const Table& table = GetTable(TableType::CUSTOMATTRIBUTE);
+			const std::vector<ColumnOffsetSize>& rowSchema = GetRowSchema(TableType::CUSTOMATTRIBUTE);
+			IL2CPP_ASSERT(rowSchema.size() == 3);
+			const ColumnOffsetSize& parentColumn = rowSchema[0];
+			const ColumnOffsetSize& typeColumn = rowSchema[1];
+			const byte* rowPtr = table.data;
+			for (uint32_t rowIndex = 1; rowIndex <= table.rowNum; ++rowIndex, rowPtr += table.rowMetaDataSize)
+			{
+				visitor(rowIndex, ReadColumn(rowPtr, parentColumn), ReadColumn(rowPtr, typeColumn));
+			}
+		}
+
+		template<typename Visitor>
+		void VisitCustomAttributes(Visitor&& visitor) const
+		{
+			const Table& table = GetTable(TableType::CUSTOMATTRIBUTE);
+			const std::vector<ColumnOffsetSize>& rowSchema = GetRowSchema(TableType::CUSTOMATTRIBUTE);
+			IL2CPP_ASSERT(rowSchema.size() == 3);
+			const ColumnOffsetSize& parentColumn = rowSchema[0];
+			const ColumnOffsetSize& typeColumn = rowSchema[1];
+			const ColumnOffsetSize& valueColumn = rowSchema[2];
+			const byte* rowPtr = table.data;
+			for (uint32_t rowIndex = 1; rowIndex <= table.rowNum; ++rowIndex, rowPtr += table.rowMetaDataSize)
+			{
+				visitor(rowIndex, ReadColumn(rowPtr, parentColumn), ReadColumn(rowPtr, typeColumn), ReadColumn(rowPtr, valueColumn));
+			}
+		}
 
 #define TABLE_BEGIN(name, tableType) virtual Tb##name Read##name(uint32_t rawIndex) \
         { \

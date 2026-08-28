@@ -118,6 +118,26 @@ namespace metadata
 			return GetImage(imageIndex)->GetMethodDefinitionFromRawIndex(DecodeMetadataIndex(index));
 		}
 
+		static void EnsureTypeMethodMetadataInitializedLocked(const Il2CppClass* klass)
+		{
+			IL2CPP_ASSERT(IsInterpreterType(klass));
+			const Il2CppTypeDefinition* typeDef = reinterpret_cast<const Il2CppTypeDefinition*>(klass->typeMetadataHandle);
+			GetImage(klass)->EnsureTypeMethodMetadataInitializedLocked(typeDef);
+		}
+
+		static void EnsureTypeFieldMetadataInitializedLocked(const Il2CppClass* klass)
+		{
+			IL2CPP_ASSERT(IsInterpreterType(klass));
+			const Il2CppTypeDefinition* typeDef = reinterpret_cast<const Il2CppTypeDefinition*>(klass->typeMetadataHandle);
+			GetImage(klass)->EnsureTypeFieldMetadataInitializedLocked(typeDef);
+		}
+
+		static bool TryApplyClassLayoutLocked(Il2CppClass* klass)
+		{
+			IL2CPP_ASSERT(IsInterpreterType(klass));
+			return GetImage(klass)->TryApplyClassLayoutLocked(klass);
+		}
+
 		static uint32_t GetFieldOffset(const Il2CppClass* klass, int32_t fieldIndexInType, FieldInfo* field)
 		{
 			return GetImage(klass)->GetFieldOffset(klass, fieldIndexInType);

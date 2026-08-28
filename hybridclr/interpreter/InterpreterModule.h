@@ -42,6 +42,10 @@ namespace interpreter
 		}
 
 		static InterpMethodInfo* GetInterpMethodInfo(const MethodInfo* methodInfo);
+		// The caller may already hold g_MetadataLock while preparing a batch of
+		// methods. This avoids one lock transition per method without changing the
+		// default thread-safe path used by normal first execution.
+		static InterpMethodInfo* GetInterpMethodInfo(const MethodInfo* methodInfo, bool metadataLockHeld);
 
 		static Il2CppMethodPointer GetMethodPointer(const Il2CppMethodDefinition* method);
 		static Il2CppMethodPointer GetMethodPointer(const MethodInfo* method);

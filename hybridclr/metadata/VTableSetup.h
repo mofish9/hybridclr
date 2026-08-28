@@ -63,8 +63,9 @@ namespace metadata
 		bool IsInterType() const { return hybridclr::metadata::IsInterpreterType(_typeDef); }
 	private:
 
-		void ComputeVtables(Il2CppType2TypeDeclaringTreeMap& cache);
+		void ComputeVtables(Il2CppType2TypeDeclaringTreeMap& cache, bool usePublishedInterpVTable = false);
 		void ComputAotTypeVtables(Il2CppType2TypeDeclaringTreeMap& cache);
+		void LoadPublishedInterpTypeVtables(Il2CppType2TypeDeclaringTreeMap& cache);
 		void InitInterfaceVTable(uint16_t& curOffset, std::vector<uint16_t>& implInterfaceOffsetIdxs);
 		void ComputeExplicitImpls(const std::vector<uint16_t>& implInterfaceOffsetIdxs, Int32ToUin16Map& explicitImplToken2Slots);
 		void ApplyTypeExplicitImpls(const Il2CppType* type, const VTableSetUp* tree, const std::vector<uint16_t>& implInterfaceOffsetIdxs, Int32ToUin16Map& explicitImplToken2Slots);

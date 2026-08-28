@@ -7,10 +7,28 @@
 
 #include "MetadataModule.h"
 
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+#include <chrono>
+#endif
+
 namespace hybridclr
 {
 namespace metadata
 {
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+	void RecordMetadataInitStage(uint32_t imageIndex, const char* stage, uint64_t elapsedNanoseconds);
+
+#define HC_VTABLE_STAGE(imageIndex, stageName, expression) \
+	do \
+	{ \
+		auto _vtableStageStart = std::chrono::steady_clock::now(); \
+		expression; \
+		RecordMetadataInitStage((imageIndex), (stageName), (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - _vtableStageStart).count()); \
+	} while (false)
+#else
+#define HC_VTABLE_STAGE(imageIndex, stageName, expression) do { expression; } while (false)
+#endif
+
 	const Il2CppType* TryInflateIfNeed(const Il2CppType* containerType, const Il2CppType* genericType, const Il2CppType* selfType)
 	{
 		if (selfType->type == IL2CPP_TYPE_CLASS || selfType->type == IL2CPP_TYPE_VALUETYPE)
@@ -62,10 +80,32 @@ namespace metadata
 
 	VTableSetUp* VTableSetUp::BuildByType(Il2CppType2TypeDeclaringTreeMap& cache, const Il2CppType* type)
 	{
-		auto it = cache.find(type);
-		if (it != cache.end())
+		const Il2CppTypeDefinition* typeDef = nullptr;
+		InterpreterImage* interpreterImage = nullptr;
+		bool useDirectInterpreterCache = false;
+		if (type->type != IL2CPP_TYPE_GENERICINST)
 		{
-			return it->second;
+			typeDef = GetUnderlyingTypeDefinition(type);
+			interpreterImage = IsInterpreterType(typeDef) ? MetadataModule::GetImage(typeDef) : nullptr;
+			bool ownsInterpreterCache = interpreterImage && interpreterImage->OwnsVTableTreeCache(&cache);
+			useDirectInterpreterCache = ownsInterpreterCache && interpreterImage->HasDirectVTableTreeCache();
+			if (useDirectInterpreterCache)
+			{
+				// The per-definition array is the common hit path for ordinary
+				// interpreter types. It avoids hashing a structurally comparable
+				// Il2CppType before falling back to the shared dependency cache.
+				VTableSetUp* cachedTree = interpreterImage->GetVTableTree(typeDef);
+				if (cachedTree)
+				{
+					return cachedTree;
+				}
+			}
+		}
+
+		auto cached = cache.find(type);
+		if (cached != cache.end())
+		{
+			return cached->second;
 		}
 		if (type->type == IL2CPP_TYPE_GENERICINST)
 		{
@@ -75,19 +115,40 @@ namespace metadata
 			VTableSetUp* gidt = InflateVts(cache, gdt, type);
 			return cache[type] = gidt;
 		}
-		VTableSetUp* tdt = new (HYBRIDCLR_MALLOC_ZERO(sizeof(VTableSetUp))) VTableSetUp();
-		const Il2CppTypeDefinition* typeDef = GetUnderlyingTypeDefinition(type);
-		const char* ns = il2cpp::vm::GlobalMetadata::GetStringFromIndex(typeDef->namespaceIndex);
-		const char* name = il2cpp::vm::GlobalMetadata::GetStringFromIndex(typeDef->nameIndex);
+		IL2CPP_ASSERT(typeDef && interpreterImage == (IsInterpreterType(typeDef) ? MetadataModule::GetImage(typeDef) : nullptr));
+		if (useDirectInterpreterCache)
+		{
+			VTableSetUp* cachedTree = interpreterImage->GetVTableTree(typeDef);
+			if (cachedTree)
+			{
+				return cachedTree;
+			}
+		}
 		const Il2CppType* parentType = nullptr;
 		if (typeDef->parentIndex != kInvalidIndex)
 		{
 			parentType = il2cpp::vm::GlobalMetadata::GetIl2CppTypeFromIndex(typeDef->parentIndex);
 		}
+		uint32_t rawMethodStart = interpreterImage ? DecodeMetadataIndex(typeDef->methodStart) : 0;
+		const uint32_t virtualMethodCount = interpreterImage ? interpreterImage->GetVirtualMethodCount(typeDef) : 0;
+		if (interpreterImage && parentType && typeDef->genericContainerIndex == kGenericContainerIndexInvalid
+			&& typeDef->interfaces_count == 0 && virtualMethodCount == 0 && !interpreterImage->HasMethodImpls(typeDef))
+		{
+			// This type cannot alter its inherited vtable or interface offsets.
+			return BuildByType(cache, parentType);
+		}
+
+		VTableSetUp* tdt = new (HYBRIDCLR_MALLOC_ZERO(sizeof(VTableSetUp))) VTableSetUp();
+		const char* name = il2cpp::vm::GlobalMetadata::GetStringFromIndex(typeDef->nameIndex);
 		tdt->_type = type;
 		tdt->_typeDef = typeDef;
 		tdt->_parent = parentType ? BuildByType(cache, parentType) : nullptr;
 		tdt->_name = name;
+		tdt->_interfaces.reserve(typeDef->interfaces_count);
+		if (interpreterImage)
+		{
+			tdt->_virtualMethods.reserve(virtualMethodCount);
+		}
 
 		for (uint32_t i = 0; i < typeDef->interfaces_count; i++)
 		{
@@ -98,22 +159,51 @@ namespace metadata
 
 		for (uint32_t i = 0; i < typeDef->method_count; i++)
 		{
-			const Il2CppMethodDefinition* methodDef = il2cpp::vm::GlobalMetadata::GetMethodDefinitionFromIndex(typeDef->methodStart + i);
-			const char* methodName = il2cpp::vm::GlobalMetadata::GetStringFromIndex(methodDef->nameIndex);
+			const Il2CppMethodDefinition* methodDef = interpreterImage
+				? interpreterImage->GetMethodDefinitionHeaderFromRawIndex(rawMethodStart + i)
+				: il2cpp::vm::GlobalMetadata::GetMethodDefinitionFromIndex(typeDef->methodStart + i);
 			if (hybridclr::metadata::IsVirtualMethod(methodDef->flags))
 			{
+				if (interpreterImage)
+				{
+					// VTable construction is reached while the global metadata lock is held.
+					methodDef = interpreterImage->GetMethodDefinitionFromRawIndexLocked(rawMethodStart + i);
+				}
+				const char* methodName = il2cpp::vm::GlobalMetadata::GetStringFromIndex(methodDef->nameIndex);
 				tdt->_virtualMethods.push_back({ type, methodDef, methodName });
 			}
+		}
+		bool usePublishedInterpVTable = interpreterImage && !IsInterface(typeDef->flags) && !useDirectInterpreterCache;
+		if (usePublishedInterpVTable && typeDef->interfaceOffsetsStart == 0)
+		{
+			// Cross-image trees own their complete dependency graph. Publish the source
+			// type first, then copy its stable vtable into the caller-owned tree.
+			interpreterImage->EnsureVTableInitializedLocked(typeDef);
 		}
 		if (hybridclr::metadata::IsInterface(typeDef->flags))
 		{
 			tdt->ComputeInterfaceVtables(cache);
 		}
+		else if (interpreterImage && tdt->_interfaces.empty() && tdt->_virtualMethods.empty() && !interpreterImage->HasMethodImpls(typeDef))
+		{
+			if (tdt->_parent)
+			{
+				tdt->_methodImpls = tdt->_parent->_methodImpls;
+				tdt->_interfaceOffsetInfos = tdt->_parent->_interfaceOffsetInfos;
+			}
+		}
 		else
 		{
-			tdt->ComputeVtables(cache);
+			tdt->ComputeVtables(cache, usePublishedInterpVTable);
 		}
-		cache[type] = tdt;
+		if (useDirectInterpreterCache)
+		{
+			interpreterImage->SetVTableTree(typeDef, tdt);
+		}
+		else
+		{
+			cache[type] = tdt;
+		}
 		return tdt;
 	}
 
@@ -187,9 +277,13 @@ namespace metadata
 		}
 	}
 
-	void VTableSetUp::ComputeVtables(Il2CppType2TypeDeclaringTreeMap& cache)
+	void VTableSetUp::ComputeVtables(Il2CppType2TypeDeclaringTreeMap& cache, bool usePublishedInterpVTable)
 	{
-		if (IsInterType())
+		if (usePublishedInterpVTable)
+		{
+			LoadPublishedInterpTypeVtables(cache);
+		}
+		else if (IsInterType())
 		{
 			ComputeInterpTypeVtables(cache);
 		}
@@ -358,6 +452,24 @@ namespace metadata
 		}
 
 		IL2CPP_ASSERT(_typeDef->vtable_count == (uint16_t)_methodImpls.size());
+	}
+
+	void VTableSetUp::LoadPublishedInterpTypeVtables(Il2CppType2TypeDeclaringTreeMap& cache)
+	{
+		IL2CPP_ASSERT(IsInterType() && _typeDef->interfaceOffsetsStart != 0);
+		for (uint16_t i = 0; i < _typeDef->interface_offsets_count; ++i)
+		{
+			Il2CppInterfaceOffsetInfo ioi = il2cpp::vm::GlobalMetadata::GetInterfaceOffsetInfo(_typeDef, i);
+			_interfaceOffsetInfos.push_back({ ioi.interfaceType, BuildByType(cache, ioi.interfaceType), (uint16_t)ioi.offset });
+		}
+
+		uint32_t methodImplCount = 0;
+		const VirtualMethodImpl* methodImpls = MetadataModule::GetImage(_typeDef)->GetPublishedVTable(_typeDef, methodImplCount);
+		if (methodImplCount > 0)
+		{
+			IL2CPP_ASSERT(methodImpls);
+			_methodImpls.assign(methodImpls, methodImpls + methodImplCount);
+		}
 	}
 
 	void VTableSetUp::ApplyOverrideMethod(const GenericClassMethod* overrideParentMethod, const Il2CppMethodDefinition* overrideMethodDef, uint16_t checkOverrideMaxIdx)
@@ -708,6 +820,10 @@ namespace metadata
 					continue;
 				}
 				VirtualMethodImpl& vmi = _methodImpls[slotIdx];
+				if (vmi.method != interfaceVirtualMethods[idx].method)
+				{
+					continue;
+				}
 				// override by virtual method
 				const GenericClassMethod* implVm = FindImplMethod(rioi.type, interfaceVirtualMethods[idx].method, false);
 				if (implVm)
@@ -722,21 +838,34 @@ namespace metadata
 
 	void VTableSetUp::ComputeInterpTypeVtables(Il2CppType2TypeDeclaringTreeMap& cache)
 	{
+#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
+		uint32_t imageIndex = MetadataModule::GetImage(_typeDef)->GetIndex();
+#endif
 		uint16_t curOffset = 0;
-		if (_parent)
+		HC_VTABLE_STAGE(imageIndex, "VTableCopyParent", if (_parent)
+			{
+				curOffset = (uint16_t)_parent->_methodImpls.size();
+				_methodImpls = _parent->_methodImpls;
+				_interfaceOffsetInfos = _parent->_interfaceOffsetInfos;
+			});
+		size_t additionalInterfaceSlots = 0;
+		for (VTableSetUp* intTree : _interfaces)
 		{
-			curOffset = (uint16_t)_parent->_methodImpls.size();
-			_methodImpls = _parent->_methodImpls;
-			_interfaceOffsetInfos = _parent->_interfaceOffsetInfos;
+			additionalInterfaceSlots += intTree->_virtualMethods.size();
 		}
+		_methodImpls.reserve(_methodImpls.size() + additionalInterfaceSlots + _virtualMethods.size());
+		_interfaceOffsetInfos.reserve(_interfaceOffsetInfos.size() + _interfaces.size());
 
 		std::vector<uint16_t> implInterfaceOffsetIdxs;
-		InitInterfaceVTable(curOffset, implInterfaceOffsetIdxs);
+		implInterfaceOffsetIdxs.reserve(_interfaces.size());
+		HC_VTABLE_STAGE(imageIndex, "VTableInitInterfaces", InitInterfaceVTable(curOffset, implInterfaceOffsetIdxs));
 		Int32ToUin16Map explicitImplToken2Slots;
-		ComputeExplicitImpls(implInterfaceOffsetIdxs, explicitImplToken2Slots);
-		ComputeOverrideParentVirtualMethod(curOffset, implInterfaceOffsetIdxs, explicitImplToken2Slots);
-		ComputeInterfaceOverrideByParentVirtualMethod(implInterfaceOffsetIdxs);
+		HC_VTABLE_STAGE(imageIndex, "VTableExplicitImpls", ComputeExplicitImpls(implInterfaceOffsetIdxs, explicitImplToken2Slots));
+		HC_VTABLE_STAGE(imageIndex, "VTableOverrideMethods", ComputeOverrideParentVirtualMethod(curOffset, implInterfaceOffsetIdxs, explicitImplToken2Slots));
+		HC_VTABLE_STAGE(imageIndex, "VTableInterfaceOverrides", ComputeInterfaceOverrideByParentVirtualMethod(implInterfaceOffsetIdxs));
 	}
+
+#undef HC_VTABLE_STAGE
 
 }
 }
