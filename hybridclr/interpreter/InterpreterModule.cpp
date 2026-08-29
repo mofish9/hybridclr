@@ -303,6 +303,12 @@ namespace interpreter
 			Interpreter::Execute(method,  localVarBase + argVarIndexs[0], ret);
 			return;
 		}
+		if (method && method->klass && method->klass->image &&
+			method->klass->image->assembly &&
+			hybridclr::dhe::IsDheAssembly(method->klass->image->assembly))
+		{
+			hybridclr::dhe::RecordAotBridgeCall();
+		}
 		if (!PrepareInterpreterManaged2NativeCall(method))
 		{
 			if (method->invoker_method == nullptr)
@@ -342,9 +348,15 @@ namespace interpreter
 			}
 		}
 #if HYBRIDCLR_UNITY_2021_OR_NEW
-		method->invoker_method(GetInterpreterInvokerMethodPointer(method), method, thisPtr, invokeParams, ret);
+		Il2CppMethodPointer methodPointer = metadata::IsInterpreterImplement(method)
+			? GetInterpreterInvokerMethodPointer(method)
+			: ReadPublishedPointer(&const_cast<MethodInfo*>(method)->methodPointer);
+		method->invoker_method(methodPointer, method, thisPtr, invokeParams, ret);
 #else
-		void* retObj = method->invoker_method(GetInterpreterInvokerMethodPointer(method), method, thisPtr, invokeParams);
+		Il2CppMethodPointer methodPointer = metadata::IsInterpreterImplement(method)
+			? GetInterpreterInvokerMethodPointer(method)
+			: ReadPublishedPointer(&const_cast<MethodInfo*>(method)->methodPointer);
+		void* retObj = method->invoker_method(methodPointer, method, thisPtr, invokeParams);
 		if (ret)
 		{
 			const Il2CppType* returnType = method->return_type;
@@ -370,6 +382,14 @@ namespace interpreter
 
 	Managed2NativeCallMethod InterpreterModule::GetManaged2NativeMethodPointer(const MethodInfo* method, bool forceStatic)
 	{
+		const bool isDheUnchanged = method && !method->isInterpterImpl &&
+			!IsFullGenericSharingMethod(method) && method->klass && method->klass->image &&
+			method->klass->image->assembly &&
+			hybridclr::dhe::IsDheAssembly(method->klass->image->assembly);
+		if (isDheUnchanged)
+		{
+			return Managed2NativeCallByReflectionInvoke;
+		}
 		if (ReadPublishedPointer(&const_cast<MethodInfo*>(method)->methodPointerCallByInterp) == NotSupportNative2Managed || IsFullGenericSharingMethod(method))
 		{
 			return Managed2NativeCallByReflectionInvoke;

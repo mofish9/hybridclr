@@ -177,8 +177,18 @@ namespace metadata
         return ass;
     }
 
-    LoadImageErrorCode Assembly::LoadMetadataForAOTAssembly(const void* dllBytes, uint32_t dllSize, HomologousImageMode mode)
+    LoadImageErrorCode Assembly::LoadMetadataForAOTAssembly(const void* dllBytes, uint32_t dllSize,
+        HomologousImageMode mode, const Il2CppAssembly** targetAssembly,
+        AOTHomologousImage** targetImage, const char* expectedAssemblyName)
     {
+        if (targetAssembly)
+        {
+            *targetAssembly = nullptr;
+        }
+        if (targetImage)
+        {
+            *targetImage = nullptr;
+        }
         il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
 
         AOTHomologousImage* image = nullptr;
@@ -199,7 +209,15 @@ namespace metadata
         RawImageBase* rawImage = &image->GetRawImage();
         TbAssembly data = rawImage->ReadAssembly(1);
         const char* assName = rawImage->GetStringFromRawIndex(data.name);
-        const Il2CppAssembly* aotAss = il2cpp::vm::Assembly::GetLoadedAssembly(assName);
+        if (expectedAssemblyName && std::strcmp(assName, expectedAssemblyName) != 0)
+        {
+            delete image;
+            return LoadImageErrorCode::DHE_MV_DLL_ASSEMBLY_MISMATCH;
+        }
+        // Prefer the static metadata table. DHE assemblies are also listed as
+        // hot-update assemblies, so the placeholder registry may contain a
+        // newer empty entry with the same name.
+        const Il2CppAssembly* aotAss = il2cpp::vm::MetadataCache::GetAssemblyByName(assName);
         // FIXME. not free memory.
         if (!aotAss)
         {
@@ -214,10 +232,19 @@ namespace metadata
         image->SetTargetAssembly(aotAss);
         if (AOTHomologousImage::FindImageByAssemblyLocked(image->GetTargetAssembly(), lock))
         {
+            delete image;
             return LoadImageErrorCode::HOMOLOGOUS_ASSEMBLY_HAS_BEEN_LOADED;
         }
         image->InitRuntimeMetadatas();
         AOTHomologousImage::RegisterLocked(image, lock);
+		if (targetAssembly)
+		{
+			*targetAssembly = aotAss;
+		}
+		if (targetImage)
+		{
+			*targetImage = image;
+		}
 		NotifyAOTMetadataLoaded();
         return LoadImageErrorCode::OK;
     }

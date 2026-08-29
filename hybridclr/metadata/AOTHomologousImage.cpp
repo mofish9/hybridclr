@@ -1,5 +1,6 @@
 #include "AOTHomologousImage.h"
 
+#include <algorithm>
 #include "vm/MetadataLock.h"
 #include "vm/GlobalMetadata.h"
 #include "vm/Class.h"
@@ -25,6 +26,17 @@ namespace metadata
 	{
 		IL2CPP_ASSERT(FindImageByAssemblyLocked(image->_targetAssembly, lock) == nullptr);
 		s_images.push_back(image);
+	}
+
+	bool AOTHomologousImage::UnregisterLocked(AOTHomologousImage* image, il2cpp::os::FastAutoLock&)
+	{
+		auto it = std::find(s_images.begin(), s_images.end(), image);
+		if (it == s_images.end())
+		{
+			return false;
+		}
+		s_images.erase(it);
+		return true;
 	}
 
 	AOTHomologousImage* AOTHomologousImage::FindImageByAssemblyLocked(const Il2CppAssembly* ass, il2cpp::os::FastAutoLock& lock)

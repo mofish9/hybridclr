@@ -24,6 +24,9 @@ namespace metadata
 		static AOTHomologousImage* FindImageByAssembly(const Il2CppAssembly* ass);
 		static AOTHomologousImage* FindImageByAssemblyLocked(const Il2CppAssembly* ass, il2cpp::os::FastAutoLock& lock);
 		static void RegisterLocked(AOTHomologousImage* image, il2cpp::os::FastAutoLock& lock);
+		// Remove a failed registration while retaining the image allocation.
+		// Method-body caches may still refer to its preparation epoch.
+		static bool UnregisterLocked(AOTHomologousImage* image, il2cpp::os::FastAutoLock& lock);
 
 		AOTHomologousImage() : _targetAssembly(nullptr) { }
 

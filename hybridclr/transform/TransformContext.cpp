@@ -3789,7 +3789,10 @@ else \
 					continue;
 				}
 
-				if (!IsFullGenericSharingMethod(shareMethod))
+				// DHE methods listed by mv are interpreted. Unchanged methods in
+				// the same call graph stay on their AOT entry and are bridged below.
+				bool shouldImplementByInterpreter = hybridclr::metadata::MetadataModule::IsImplementedByInterpreter(const_cast<MethodInfo*>(shareMethod));
+				if (shouldImplementByInterpreter && !IsFullGenericSharingMethod(shareMethod))
 				{
 					if (!InitAndGetInterpreterDirectlyCallMethodPointer(shareMethod))
 					{
@@ -3803,7 +3806,7 @@ else \
 				int32_t callArgEvalStackIdxBase = evalStackTop - resolvedTotalArgNum;
 				uint32_t methodDataIndex = GetOrAddResolveDataIndex(shareMethod);
 
-				if (hybridclr::metadata::IsInterpreterImplement(shareMethod))
+				if (shouldImplementByInterpreter && hybridclr::metadata::IsInterpreterImplement(shareMethod))
 				{
 					uint16_t argBaseOffset = (uint16_t)GetEvalStackOffset(callArgEvalStackIdxBase);
 
@@ -3860,7 +3863,7 @@ else \
 							}
 						}
 					}
-					else if (ShouldBeInlined(shareMethod, depth) && TransformSubMethodBody(*this, shareMethod, depth + 1, argBaseOffset))
+					else if (shouldImplementByInterpreter && ShouldBeInlined(shareMethod, depth) && TransformSubMethodBody(*this, shareMethod, depth + 1, argBaseOffset))
 					{
 						if (directDelegateReceiverOffset >= 0 && !IsReturnVoidMethod(shareMethod))
 						{

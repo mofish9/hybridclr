@@ -3,6 +3,7 @@
 #include "InterpreterImage.h"
 #include "AOTHomologousImage.h"
 #include "Assembly.h"
+#include "../DheRuntime.h"
 
 namespace hybridclr
 {
@@ -256,6 +257,18 @@ namespace metadata
 		static bool IsImplementedByInterpreter(MethodInfo* method)
 		{
 			Il2CppClass* klass = method->klass;
+			const Il2CppAssembly* assembly = klass && klass->image ? klass->image->assembly : nullptr;
+			if (AOTHomologousImage::FindImageByAssembly(assembly))
+			{
+				// Ordinary supplemental metadata keeps the historical assembly-wide
+				// interpreter behavior. A registered DHE image narrows it to the
+				// methods listed by mv; all other methods remain native AOT.
+				if (dhe::IsDheAssembly(assembly))
+				{
+					return dhe::IsChangedMethod(method);
+				}
+				return true;
+			}
 			Il2CppClass* parent = klass->parent;
 			if (parent != il2cpp_defaults.multicastdelegate_class && parent != il2cpp_defaults.delegate_class)
 			{

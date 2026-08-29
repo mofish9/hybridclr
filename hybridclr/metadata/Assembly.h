@@ -15,7 +15,9 @@ namespace metadata
     public:
         static void InitializePlaceHolderAssemblies();
         static Il2CppAssembly* LoadFromBytes(const void* assemblyData, uint64_t length, const void* rawSymbolStoreBytes, uint64_t rawSymbolStoreLength);
-        static LoadImageErrorCode LoadMetadataForAOTAssembly(const void* dllBytes, uint32_t dllSize, HomologousImageMode mode);
+        static LoadImageErrorCode LoadMetadataForAOTAssembly(const void* dllBytes, uint32_t dllSize,
+            HomologousImageMode mode, const Il2CppAssembly** targetAssembly = nullptr,
+            AOTHomologousImage** targetImage = nullptr, const char* expectedAssemblyName = nullptr);
     private:
         static Il2CppAssembly* Create(const byte* assemblyData, uint64_t length, const byte* rawSymbolStoreBytes, uint64_t rawSymbolStoreLength);
     };

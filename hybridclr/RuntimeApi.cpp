@@ -1,5 +1,7 @@
 #include "RuntimeApi.h"
 
+#include <cstring>
+
 #if defined(__has_include)
 #if __has_include("lab/InstrumentationConfig.h")
 #include "lab/InstrumentationConfig.h"
@@ -11,10 +13,13 @@
 #include "vm/Array.h"
 #include "vm/Exception.h"
 #include "vm/Class.h"
+#include "vm/Assembly.h"
 #include "vm/MetadataLock.h"
 
 #include "metadata/MetadataModule.h"
 #include "metadata/MetadataUtil.h"
+#include "DheRuntime.h"
+#include "metadata/AOTHomologousImage.h"
 #include "interpreter/InterpreterModule.h"
 #include "interpreter/InterpreterProfile.h"
 #include "RuntimeConfig.h"
@@ -335,6 +340,13 @@ namespace hybridclr
 	void RuntimeApi::RegisterInternalCalls()
 	{
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadMetadataForAOTAssembly(System.Byte[],HybridCLR.HomologousImageMode)", (Il2CppMethodPointer)LoadMetadataForAOTAssembly);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssemblyWithMetaVersion(System.Byte[],System.Byte[])", (Il2CppMethodPointer)LoadDifferentialHybridAssemblyWithMetaVersion);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssemblyWithMetaVersion(System.Byte[],System.Byte[],System.Byte[])", (Il2CppMethodPointer)LoadDifferentialHybridAssemblyWithMetaVersionAndSnapshot);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::IsDifferentialMethodChanged(System.Reflection.MethodInfo)", (Il2CppMethodPointer)IsDifferentialMethodChanged);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetDifferentialInterpreterEntryCount()", (Il2CppMethodPointer)GetDifferentialInterpreterEntryCount);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetDifferentialAotBridgeCallCount()", (Il2CppMethodPointer)GetDifferentialAotBridgeCallCount);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetDifferentialAotEntryCount()", (Il2CppMethodPointer)GetDifferentialAotEntryCount);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::ResetDifferentialDispatchCounters()", (Il2CppMethodPointer)ResetDifferentialDispatchCounters);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetRuntimeOption(HybridCLR.RuntimeOptionId)", (Il2CppMethodPointer)GetRuntimeOption);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::SetRuntimeOption(HybridCLR.RuntimeOptionId,System.Int32)", (Il2CppMethodPointer)SetRuntimeOption);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::PrewarmMethod(System.Reflection.MethodInfo)", (Il2CppMethodPointer)PrewarmMethod);
@@ -370,6 +382,140 @@ namespace hybridclr
 			il2cpp::vm::Exception::RaiseNullReferenceException();
 		}
 		return (int32_t)hybridclr::metadata::Assembly::LoadMetadataForAOTAssembly(il2cpp::vm::Array::GetFirstElementAddress(dllBytes), il2cpp::vm::Array::GetByteLength(dllBytes), (hybridclr::metadata::HomologousImageMode)mode);
+	}
+
+	static int32_t LoadDifferentialHybridAssemblyWithMetaVersionCore(Il2CppArray* dllBytes, Il2CppArray* mvBytes, Il2CppArray* snapshotHash)
+	{
+		if (!dllBytes || !mvBytes)
+		{
+			il2cpp::vm::Exception::RaiseNullReferenceException();
+		}
+		// A differential image is only safe when its baseline hash is checked
+		// against the actual player snapshot. Keep the legacy two-argument entry
+		// for ABI compatibility, but never allow it to publish DHE state.
+		if (!snapshotHash)
+		{
+			return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_SNAPSHOT_HASH;
+		}
+
+		hybridclr::dhe::MetaVersionData mv;
+		if (!hybridclr::dhe::ParseMetaVersion(
+			il2cpp::vm::Array::GetFirstElementAddress(mvBytes),
+			il2cpp::vm::Array::GetByteLength(mvBytes), mv) ||
+			(mv.flags & hybridclr::dhe::kMetaVersionStrictCompatibilityFlag) == 0)
+		{
+			return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
+		}
+
+		const void* dllData = il2cpp::vm::Array::GetFirstElementAddress(dllBytes);
+		const uint32_t dllSize = il2cpp::vm::Array::GetByteLength(dllBytes);
+		hybridclr::dhe::Sha256Digest currentHash{};
+		if (!hybridclr::dhe::ComputeSha256(dllData, dllSize, currentHash) ||
+			currentHash != mv.currentAssemblyHash)
+		{
+			return (int32_t)metadata::LoadImageErrorCode::DHE_MV_CURRENT_HASH_MISMATCH;
+		}
+
+		if (snapshotHash)
+		{
+			const uint32_t snapshotHashSize = il2cpp::vm::Array::GetByteLength(snapshotHash);
+			if (snapshotHashSize != hybridclr::dhe::kSha256DigestSize)
+			{
+				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_SNAPSHOT_HASH;
+			}
+			if (std::memcmp(
+				il2cpp::vm::Array::GetFirstElementAddress(snapshotHash),
+				mv.baselineAssemblyHash.data(),
+				hybridclr::dhe::kSha256DigestSize) != 0)
+			{
+				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BASELINE_HASH_MISMATCH;
+			}
+		}
+
+		const Il2CppAssembly* targetAssembly = nullptr;
+		hybridclr::metadata::AOTHomologousImage* targetImage = nullptr;
+		metadata::LoadImageErrorCode loadError = metadata::Assembly::LoadMetadataForAOTAssembly(
+			dllData,
+			dllSize,
+			// Strict DHE keeps the metadata row set stable. CONSISTENT is
+			// required here because SUPERSET's method-body map is intentionally
+			// limited to generic/superset cases in the community runtime.
+			metadata::HomologousImageMode::CONSISTENT, &targetAssembly, &targetImage, mv.assemblyName.c_str());
+		if (loadError != metadata::LoadImageErrorCode::OK)
+		{
+			return (int32_t)loadError;
+		}
+
+		// LoadMetadataForAOTAssembly already resolved and validated the static
+		// AOT image. Re-querying by name would select the newer placeholder
+		// registered for the hot-update path.
+		const Il2CppAssembly* assembly = targetAssembly;
+		if (!assembly)
+		{
+			return (int32_t)metadata::LoadImageErrorCode::DHE_MV_ASSEMBLY_NOT_FOUND;
+		}
+		// Resolve and prepare every token before publishing the DHE state. If
+		// preparation or publication fails, hide the homologous image again so
+		// callers can retry with a corrected MV in the same process. The image is
+		// intentionally retained by the metadata subsystem because method-body
+		// caches may still hold pointers into its preparation epoch.
+		const auto rollbackImage = [&]()
+		{
+			if (!targetAssembly || !targetImage)
+			{
+				return;
+			}
+			il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
+			if (hybridclr::metadata::AOTHomologousImage::FindImageByAssemblyLocked(targetAssembly, metadataLock) == targetImage)
+			{
+				hybridclr::metadata::AOTHomologousImage::UnregisterLocked(targetImage, metadataLock);
+			}
+		};
+		if (!hybridclr::dhe::PrepareAndRegisterChangedMethods(assembly, mv.changedMethodTokens))
+		{
+			rollbackImage();
+			return (int32_t)metadata::LoadImageErrorCode::DHE_MV_REGISTRATION_FAILED;
+		}
+		return (int32_t)metadata::LoadImageErrorCode::OK;
+	}
+
+	int32_t RuntimeApi::LoadDifferentialHybridAssemblyWithMetaVersion(Il2CppArray* dllBytes, Il2CppArray* mvBytes)
+	{
+		return LoadDifferentialHybridAssemblyWithMetaVersionCore(dllBytes, mvBytes, nullptr);
+	}
+
+	int32_t RuntimeApi::LoadDifferentialHybridAssemblyWithMetaVersionAndSnapshot(Il2CppArray* dllBytes, Il2CppArray* mvBytes, Il2CppArray* snapshotHash)
+	{
+		if (!snapshotHash)
+		{
+			il2cpp::vm::Exception::RaiseNullReferenceException();
+		}
+		return LoadDifferentialHybridAssemblyWithMetaVersionCore(dllBytes, mvBytes, snapshotHash);
+	}
+
+	int32_t RuntimeApi::IsDifferentialMethodChanged(Il2CppReflectionMethod* method)
+	{
+		return method && method->method && hybridclr::dhe::IsChangedMethod(method->method);
+	}
+
+	int32_t RuntimeApi::GetDifferentialInterpreterEntryCount()
+	{
+		return hybridclr::dhe::GetInterpreterEntryCount();
+	}
+
+	int32_t RuntimeApi::GetDifferentialAotBridgeCallCount()
+	{
+		return hybridclr::dhe::GetAotBridgeCallCount();
+	}
+
+	int32_t RuntimeApi::GetDifferentialAotEntryCount()
+	{
+		return hybridclr::dhe::GetAotEntryCount();
+	}
+
+	void RuntimeApi::ResetDifferentialDispatchCounters()
+	{
+		hybridclr::dhe::ResetDispatchCounters();
 	}
 
 	int32_t RuntimeApi::GetRuntimeOption(int32_t optionId)

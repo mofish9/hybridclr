@@ -12,6 +12,7 @@
 #include "vm/MetadataAlloc.h"
 #include "icalls/mscorlib/System/Type.h"
 #include "gc/GarbageCollector.h"
+#include "DheRuntime.h"
 
 #if HYBRIDCLR_UNITY_2020
 #include "icalls/mscorlib/System/MonoType.h"
@@ -151,11 +152,25 @@ namespace hybridclr
 		return InitAndGetInterpreterDirectlyCallMethodPointerSlow(const_cast<MethodInfo*>(method));
 	}
 
+	inline bool IsDheUnchangedMethod(const MethodInfo* method)
+	{
+		return method && !method->isInterpterImpl && method->klass && method->klass->image &&
+			method->klass->image->assembly &&
+			hybridclr::dhe::IsDheAssembly(method->klass->image->assembly);
+	}
+
 	inline bool PrepareInterpreterManaged2NativeCall(const MethodInfo* method)
 	{
 		if (IsFullGenericSharingMethod(method))
 		{
 			return PrepareFullGenericSharingMethod(method);
+		}
+		// DHE leaves unchanged methods on their native AOT entry. They still
+		// participate in interpreter call graphs, where the managed-to-native
+		// reflection bridge invokes methodPointer directly.
+		if (IsDheUnchangedMethod(method))
+		{
+			return ReadPublishedPointer(&const_cast<MethodInfo*>(method)->methodPointer) != nullptr;
 		}
 		return InitAndGetInterpreterDirectlyCallMethodPointer(method) != nullptr;
 	}
@@ -163,6 +178,10 @@ namespace hybridclr
 	inline Il2CppMethodPointer GetInterpreterInvokerMethodPointer(const MethodInfo* method)
 	{
 		if (IsFullGenericSharingMethod(method))
+		{
+			return ReadPublishedPointer(&const_cast<MethodInfo*>(method)->methodPointer);
+		}
+		if (IsDheUnchangedMethod(method))
 		{
 			return ReadPublishedPointer(&const_cast<MethodInfo*>(method)->methodPointer);
 		}
