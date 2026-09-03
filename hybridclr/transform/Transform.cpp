@@ -24,11 +24,12 @@ namespace transform
 	#endif
 		TemporaryMemoryArena pool;
 
-		metadata::Image* image = metadata::MetadataModule::GetUnderlyingInterpreterImage(methodInfo);
-		IL2CPP_ASSERT(image);
+		metadata::Image* bodyImage = metadata::MetadataModule::GetUnderlyingInterpreterImage(methodInfo);
+		metadata::Image* resolveImage = metadata::MetadataModule::GetInterpreterResolveImage(methodInfo);
+		IL2CPP_ASSERT(bodyImage && resolveImage);
 
 		metadata::MethodBodyCache::EnableShrinkMethodBodyCache(false);
-		metadata::MethodBody* methodBody = metadata::MethodBodyCache::GetMethodBody(image, methodInfo->token);
+		metadata::MethodBody* methodBody = metadata::MethodBodyCache::GetMethodBody(bodyImage, methodInfo->token);
 		if (methodBody == nullptr || methodBody->ilcodes == nullptr)
 		{
 			TEMP_FORMAT(errMsg, "Method body is null. %s.%s::%s", methodInfo->klass->namespaze, methodInfo->klass->name, methodInfo->name);
@@ -36,7 +37,7 @@ namespace transform
 		}
 		InterpMethodInfo* result = new (HYBRIDCLR_METADATA_MALLOC(sizeof(InterpMethodInfo))) InterpMethodInfo;
 		il2cpp::utils::dynamic_array<uint64_t> resolveDatas;
-		TransformContext ctx(image, methodInfo, *methodBody, pool, resolveDatas);
+		TransformContext ctx(resolveImage, methodInfo, *methodBody, pool, resolveDatas);
 
 		ctx.TransformBody(0, 0, *result);
 		metadata::MethodBodyCache::EnableShrinkMethodBodyCache(true);

@@ -230,11 +230,47 @@ namespace metadata
             return LoadImageErrorCode::HOMOLOGOUS_ONLY_SUPPORT_AOT_ASSEMBLY;
         }
         image->SetTargetAssembly(aotAss);
-        if (AOTHomologousImage::FindImageByAssemblyLocked(image->GetTargetAssembly(), lock))
-        {
-            delete image;
-            return LoadImageErrorCode::HOMOLOGOUS_ASSEMBLY_HAS_BEEN_LOADED;
-        }
+		// Check before allocating/registering the hidden interpreter image. A
+		// duplicate load must not consume another global metadata image index.
+		if (AOTHomologousImage::FindImageByAssemblyLocked(image->GetTargetAssembly(), lock))
+		{
+			delete image;
+			return LoadImageErrorCode::HOMOLOGOUS_ASSEMBLY_HAS_BEEN_LOADED;
+		}
+		InterpreterImage* interpreterFallbackImage = nullptr;
+		if (mode == HomologousImageMode::SUPERSET)
+		{
+			uint32_t imageId = InterpreterImage::AllocImageIndex(dllSize);
+			if (imageId == kInvalidImageIndex)
+			{
+				delete image;
+				return LoadImageErrorCode::BAD_IMAGE;
+			}
+			interpreterFallbackImage = new InterpreterImage(imageId);
+			LoadImageErrorCode fallbackError = interpreterFallbackImage->Load(
+				CopyBytes(dllBytes, dllSize), dllSize);
+			if (fallbackError != LoadImageErrorCode::OK)
+			{
+				delete interpreterFallbackImage;
+				delete image;
+				return fallbackError;
+			}
+
+			Il2CppAssembly* fallbackAssembly = new (HYBRIDCLR_MALLOC_ZERO(sizeof(Il2CppAssembly))) Il2CppAssembly;
+			Il2CppImage* fallbackIl2CppImage = new (HYBRIDCLR_MALLOC_ZERO(sizeof(Il2CppImage))) Il2CppImage;
+			interpreterFallbackImage->InitBasic(fallbackIl2CppImage);
+			interpreterFallbackImage->BuildIl2CppAssembly(fallbackAssembly);
+			fallbackAssembly->image = fallbackIl2CppImage;
+			interpreterFallbackImage->BuildIl2CppImage(fallbackIl2CppImage);
+			fallbackIl2CppImage->name = ConcatNewString(fallbackAssembly->aname.name, ".dll");
+			fallbackIl2CppImage->nameNoExt = fallbackAssembly->aname.name;
+			// Supplemental types must report the public Base assembly identity even
+			// though their metadata and executable bodies live in this hidden image.
+			fallbackIl2CppImage->assembly = const_cast<Il2CppAssembly*>(aotAss);
+			interpreterFallbackImage->InitRuntimeMetadatas();
+			static_cast<SuperSetAOTHomologousImage*>(image)->SetInterpreterFallbackImage(
+				interpreterFallbackImage);
+		}
         image->InitRuntimeMetadatas();
         AOTHomologousImage::RegisterLocked(image, lock);
 		if (targetAssembly)

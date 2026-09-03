@@ -12496,6 +12496,38 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 					SET_RET_AND_LEAVE_FRAME(4, 8);
 					continue;
 				}
+				case HiOpcodeEnum::DheLdfldVarVar:
+				{
+					uint16_t __dst = *(uint16_t*)(ip + 2);
+					uint16_t __obj = *(uint16_t*)(ip + 4);
+					FieldInfo* __field = reinterpret_cast<FieldInfo*>(
+						imi->resolveDatas[*(uint32_t*)(ip + 8)]);
+					Il2CppObject* __instance = *(Il2CppObject**)(localVarBase + __obj);
+					CHECK_NOT_NULL_THROW(__instance);
+					if (!MetadataModule::TryGetDheSupplementalInstanceFieldValue(
+						__instance, __field, localVarBase + __dst))
+					{
+						RaiseExecutionEngineException("DHE instance field is not registered.");
+					}
+					ip += 16;
+					continue;
+				}
+				case HiOpcodeEnum::DheStfldVarVar:
+				{
+					uint16_t __obj = *(uint16_t*)(ip + 2);
+					uint16_t __data = *(uint16_t*)(ip + 4);
+					FieldInfo* __field = reinterpret_cast<FieldInfo*>(
+						imi->resolveDatas[*(uint32_t*)(ip + 8)]);
+					Il2CppObject* __instance = *(Il2CppObject**)(localVarBase + __obj);
+					CHECK_NOT_NULL_THROW(__instance);
+					if (!MetadataModule::TrySetDheSupplementalInstanceFieldValue(
+						__instance, __field, localVarBase + __data))
+					{
+						RaiseExecutionEngineException("DHE instance field is not registered.");
+					}
+					ip += 16;
+					continue;
+				}
 				//!!!}}INSTRINCT
 #pragma endregion
 				default:

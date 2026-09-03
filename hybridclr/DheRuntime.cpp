@@ -18,6 +18,7 @@
 #include "interpreter/Interpreter.h"
 #include "interpreter/InterpreterModule.h"
 #include "interpreter/InterpreterDefs.h"
+#include "metadata/GenericMetadata.h"
 #include "vm/Exception.h"
 #include "Il2CppCompatibleDef.h"
 
@@ -25,14 +26,19 @@ namespace hybridclr::dhe
 {
 namespace
 {
-    constexpr char kMetaVersionMagic[] = "DHEMVLT1";
+    constexpr char kMetaVersionMagic[] = "DHEMETA1";
     constexpr size_t kMetaVersionMagicSize = sizeof(kMetaVersionMagic) - 1;
-    constexpr size_t kMetaVersionFixedHeaderSize = kMetaVersionMagicSize + 4 * sizeof(uint32_t) + 64;
+    constexpr size_t kMetaVersionFixedHeaderSize = kMetaVersionMagicSize + 5 * sizeof(uint32_t) +
+        kSha256DigestSize;
+    constexpr size_t kMetaVersionTypeSize = 2 * kSha256DigestSize + 2 * sizeof(uint32_t);
+    constexpr size_t kMetaVersionMethodSize = 3 * kSha256DigestSize + 2 * sizeof(uint32_t);
 
     struct DHEAssemblyState
     {
         std::unordered_set<uint32_t> changedMethodTokens;
+		std::unordered_set<uint32_t> removedTypeTokens;
         std::unordered_map<uint32_t, const MethodInfo*> resolvedMethods;
+        std::unordered_map<uint32_t, const MethodInfo*> baseMethods;
     };
 
     struct PublishedState
@@ -154,6 +160,22 @@ namespace
         offset += sizeof(value);
         return true;
     }
+
+    bool ReadDigest(const uint8_t* data, size_t size, size_t& offset, Sha256Digest& value)
+    {
+        if (offset > size || size - offset < value.size())
+        {
+            return false;
+        }
+        std::memcpy(value.data(), data + offset, value.size());
+        offset += value.size();
+        return true;
+    }
+
+    std::string DigestKey(const Sha256Digest& value)
+    {
+        return std::string(reinterpret_cast<const char*>(value.data()), value.size());
+    }
 }
 
 bool ComputeSha256(const void* data, uint32_t size, Sha256Digest& result)
@@ -206,37 +228,28 @@ bool ParseMetaVersion(const void* data, uint32_t size, MetaVersionData& result)
     size_t offset = kMetaVersionMagicSize;
     uint32_t schemaVersion = 0;
     uint32_t assemblyNameSize = 0;
+    uint32_t typeCount = 0;
     uint32_t methodCount = 0;
     if (!ReadU32(bytes, size, offset, schemaVersion) ||
+        !ReadU32(bytes, size, offset, result.flags) ||
         !ReadU32(bytes, size, offset, assemblyNameSize) ||
+        !ReadU32(bytes, size, offset, typeCount) ||
         !ReadU32(bytes, size, offset, methodCount) ||
-        !ReadU32(bytes, size, offset, result.flags))
+        !ReadDigest(bytes, size, offset, result.assemblyHash))
     {
         return false;
     }
     if (schemaVersion != kMetaVersionSchema || assemblyNameSize == 0 || assemblyNameSize > 1024 ||
-        (result.flags & ~kMetaVersionKnownFlags) != 0)
+        (result.flags & ~kMetaVersionKnownFlags) != 0 ||
+        typeCount > (size - offset) / kMetaVersionTypeSize)
     {
         return false;
     }
-
-    // The first format stores 32 bytes each for baseline/current SHA-256.
-    if (size - offset < 64 || size - offset - 64 < assemblyNameSize)
-    {
-        return false;
-    }
-    std::memcpy(result.baselineAssemblyHash.data(), bytes + offset, kSha256DigestSize);
-    std::memcpy(result.currentAssemblyHash.data(), bytes + offset + kSha256DigestSize, kSha256DigestSize);
-    offset += 64;
-
-    if (size - offset < assemblyNameSize)
-    {
-        return false;
-    }
-
-    const size_t tokenBytes = size - offset - assemblyNameSize;
-    if (methodCount > tokenBytes / sizeof(uint32_t) ||
-        tokenBytes != static_cast<size_t>(methodCount) * sizeof(uint32_t))
+    const size_t typeBytes = static_cast<size_t>(typeCount) * kMetaVersionTypeSize;
+    if (size - offset < typeBytes || size - offset - typeBytes < assemblyNameSize ||
+        methodCount > (size - offset - typeBytes - assemblyNameSize) / kMetaVersionMethodSize ||
+        size - offset - typeBytes - assemblyNameSize !=
+            static_cast<size_t>(methodCount) * kMetaVersionMethodSize)
     {
         return false;
     }
@@ -249,17 +262,48 @@ bool ParseMetaVersion(const void* data, uint32_t size, MetaVersionData& result)
     }
     offset += assemblyNameSize;
 
-    result.changedMethodTokens.reserve(methodCount);
-    std::unordered_set<uint32_t> uniqueTokens;
-    for (uint32_t i = 0; i < methodCount; ++i)
+    std::unordered_set<std::string> typeIds;
+    std::unordered_set<uint32_t> typeTokens;
+    result.types.reserve(typeCount);
+    for (uint32_t index = 0; index < typeCount; ++index)
     {
-        uint32_t token = 0;
-        if (!ReadU32(bytes, size, offset, token) || token == 0 || !uniqueTokens.insert(token).second)
+        MetaVersionType type;
+        if (!ReadDigest(bytes, size, offset, type.stableId) ||
+            !ReadDigest(bytes, size, offset, type.version) ||
+            !ReadU32(bytes, size, offset, type.token) ||
+            !ReadU32(bytes, size, offset, type.flags) ||
+            (type.token & 0xff000000u) != 0x02000000u ||
+            (type.flags & ~kMetaVersionKnownTypeFlags) != 0 ||
+            !typeIds.insert(DigestKey(type.stableId)).second ||
+            !typeTokens.insert(type.token).second)
         {
             result = MetaVersionData{};
             return false;
         }
-        result.changedMethodTokens.push_back(token);
+        result.types.push_back(type);
+    }
+
+    std::unordered_set<std::string> methodIds;
+    std::unordered_set<uint32_t> methodTokens;
+    result.methods.reserve(methodCount);
+    for (uint32_t index = 0; index < methodCount; ++index)
+    {
+        MetaVersionMethod method;
+        if (!ReadDigest(bytes, size, offset, method.stableId) ||
+            !ReadDigest(bytes, size, offset, method.version) ||
+            !ReadDigest(bytes, size, offset, method.declaringTypeStableId) ||
+            !ReadU32(bytes, size, offset, method.token) ||
+            !ReadU32(bytes, size, offset, method.flags) ||
+            (method.token & 0xff000000u) != 0x06000000u ||
+            (method.flags & ~kMetaVersionKnownMethodFlags) != 0 ||
+            typeIds.find(DigestKey(method.declaringTypeStableId)) == typeIds.end() ||
+            !methodIds.insert(DigestKey(method.stableId)).second ||
+            !methodTokens.insert(method.token).second)
+        {
+            result = MetaVersionData{};
+            return false;
+        }
+        result.methods.push_back(method);
     }
     return offset == size;
 }
@@ -369,48 +413,6 @@ bool ParseMetaVersion(const void* data, uint32_t size, MetaVersionData& result)
         }
     }
 
-bool RegisterChangedMethods(const Il2CppAssembly* assembly,
-    const std::vector<uint32_t>& changedMethodTokens,
-    const std::vector<const MethodInfo*>& resolvedMethods)
-{
-    if (!assembly)
-    {
-        return false;
-    }
-    if (resolvedMethods.size() != changedMethodTokens.size())
-    {
-        return false;
-    }
-
-    DHEAssemblyState state;
-    state.changedMethodTokens.reserve(changedMethodTokens.size());
-    state.resolvedMethods.reserve(resolvedMethods.size());
-    for (size_t index = 0; index < changedMethodTokens.size(); ++index)
-    {
-        const uint32_t token = changedMethodTokens[index];
-        if (token == 0)
-        {
-            return false;
-        }
-        if (!state.changedMethodTokens.insert(token).second || resolvedMethods[index] == nullptr)
-        {
-            return false;
-        }
-        state.resolvedMethods.emplace(token, resolvedMethods[index]);
-    }
-
-    std::lock_guard<std::recursive_mutex> lock(s_registrationMutex);
-    const PublishedState* current = s_publishedState.load(std::memory_order_acquire);
-    if (current->assemblyStates.find(assembly) != current->assemblyStates.end())
-    {
-        return false;
-    }
-    std::unique_ptr<PublishedState> next(new PublishedState(*current));
-    next->assemblyStates.emplace(assembly, std::move(state));
-    s_publishedState.store(next.release(), std::memory_order_release);
-    return true;
-}
-
 bool IsDheAssembly(const Il2CppAssembly* assembly)
 {
     if (!assembly)
@@ -433,8 +435,56 @@ bool IsChangedMethod(const MethodInfo* method)
     {
         return false;
     }
-    return state->second.changedMethodTokens.find(method->token) !=
-        state->second.changedMethodTokens.end();
+    const MethodInfo* definition = method->is_inflated && method->genericMethod &&
+        method->genericMethod->methodDefinition
+        ? method->genericMethod->methodDefinition
+        : method;
+    const uint32_t token = definition->token;
+    auto baseMethod = state->second.baseMethods.find(token);
+    return baseMethod != state->second.baseMethods.end() &&
+        baseMethod->second == definition &&
+        state->second.changedMethodTokens.find(token) !=
+            state->second.changedMethodTokens.end();
+}
+
+bool IsRemovedMethod(const MethodInfo* method)
+{
+	if (!method || !method->klass || !method->klass->image ||
+		!method->klass->image->assembly)
+	{
+		return false;
+	}
+	const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
+	auto state = published->assemblyStates.find(method->klass->image->assembly);
+	if (state == published->assemblyStates.end())
+	{
+		return false;
+	}
+	const MethodInfo* definition = method->is_inflated && method->genericMethod &&
+		method->genericMethod->methodDefinition
+		? method->genericMethod->methodDefinition
+		: method;
+	const uint32_t token = definition->token;
+	auto baseMethod = state->second.baseMethods.find(token);
+	if (baseMethod == state->second.baseMethods.end() || baseMethod->second != definition)
+	{
+		return false;
+	}
+	auto resolved = state->second.resolvedMethods.find(token);
+	return resolved != state->second.resolvedMethods.end() && resolved->second == nullptr;
+}
+
+bool IsRemovedType(const Il2CppClass* klass)
+{
+	if (!klass || !klass->image || !klass->image->assembly)
+	{
+		return false;
+	}
+	const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
+	auto state = published->assemblyStates.find(klass->image->assembly);
+	return state != published->assemblyStates.end() &&
+		state->second.removedTypeTokens.find(klass->token) !=
+		state->second.removedTypeTokens.end();
 }
 
 bool ShouldDispatchToInterpreter(const MethodInfo* method)
@@ -444,27 +494,11 @@ bool ShouldDispatchToInterpreter(const MethodInfo* method)
     return IsChangedMethod(method);
 }
 
-const MethodInfo* ResolveMethodByToken(const char* assemblyName, uint32_t token)
+static const MethodInfo* ResolveMethodInAssembly(const Il2CppAssembly* assembly, uint32_t token)
 {
-    if (!assemblyName || assemblyName[0] == '\0' || token == 0)
+    if (!assembly || token == 0)
     {
         return nullptr;
-    }
-
-    const Il2CppAssembly* assembly = il2cpp::vm::MetadataCache::GetAssemblyByName(assemblyName);
-    if (!assembly)
-    {
-        return nullptr;
-    }
-    const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
-    auto assemblyState = published->assemblyStates.find(assembly);
-    if (assemblyState != published->assemblyStates.end())
-    {
-        auto resolved = assemblyState->second.resolvedMethods.find(token);
-        if (resolved != assemblyState->second.resolvedMethods.end())
-        {
-            return resolved->second;
-        }
     }
     const Il2CppImage* image = il2cpp::vm::Assembly::GetImage(assembly);
     if (!image)
@@ -492,6 +526,70 @@ const MethodInfo* ResolveMethodByToken(const char* assemblyName, uint32_t token)
         }
     }
     return nullptr;
+}
+
+const MethodInfo* ResolveMethodByToken(const char* assemblyName, uint32_t token)
+{
+    if (!assemblyName || assemblyName[0] == '\0' || token == 0)
+    {
+        return nullptr;
+    }
+    const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
+    for (const auto& entry : published->assemblyStates)
+    {
+        const Il2CppAssembly* assembly = entry.first;
+        if (!assembly || !assembly->aname.name || std::strcmp(assembly->aname.name, assemblyName) != 0)
+        {
+            continue;
+        }
+        auto baseMethod = entry.second.baseMethods.find(token);
+        if (baseMethod != entry.second.baseMethods.end())
+        {
+            return baseMethod->second;
+        }
+    }
+    return ResolveMethodInAssembly(il2cpp::vm::MetadataCache::GetAssemblyByName(assemblyName), token);
+}
+
+const MethodInfo* ResolveInterpreterMethod(const MethodInfo* baseMethod)
+{
+    if (!baseMethod || !baseMethod->klass || !baseMethod->klass->image ||
+        !baseMethod->klass->image->assembly)
+    {
+        return nullptr;
+    }
+    const MethodInfo* baseDefinition = baseMethod->is_inflated && baseMethod->genericMethod &&
+        baseMethod->genericMethod->methodDefinition
+        ? baseMethod->genericMethod->methodDefinition
+        : baseMethod;
+    const uint32_t token = baseDefinition->token;
+    const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
+    auto state = published->assemblyStates.find(baseMethod->klass->image->assembly);
+    if (state == published->assemblyStates.end() ||
+        state->second.changedMethodTokens.find(token) == state->second.changedMethodTokens.end())
+    {
+        return baseMethod;
+    }
+	auto registeredBaseMethod = state->second.baseMethods.find(token);
+	if (registeredBaseMethod == state->second.baseMethods.end() ||
+		registeredBaseMethod->second != baseDefinition)
+	{
+		return baseMethod;
+	}
+    auto current = state->second.resolvedMethods.find(token);
+    if (current == state->second.resolvedMethods.end() || !current->second)
+    {
+        il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetMissingMethodException(
+            "A DHE method present in the Base Player was removed by the current update."));
+        return nullptr;
+    }
+    const MethodInfo* currentMethod = current->second;
+    if (baseMethod->is_inflated && baseMethod->genericMethod)
+    {
+        currentMethod = il2cpp::metadata::GenericMetadata::Inflate(currentMethod,
+            &baseMethod->genericMethod->context);
+    }
+    return currentMethod;
 }
 
 const MethodInfo* ResolveMethodByNameAndToken(const char* assemblyName,
@@ -524,43 +622,36 @@ const MethodInfo* ResolveMethodByNameAndToken(const char* assemblyName,
     return method && method->token == token ? method : nullptr;
 }
 
-bool PrepareChangedMethods(const Il2CppAssembly* assembly,
-    const std::vector<uint32_t>& changedMethodTokens,
-    std::vector<const MethodInfo*>& resolvedMethods)
+static void RollbackMethodPreparations(
+    const std::vector<MethodPreparationSnapshot>& snapshots)
 {
-    // Preparation mutates MethodInfo and vtable state. Serialize it with the
-    // registration commit so a concurrent failed load cannot restore a
-    // snapshot over a successful load's published interpreter pointers.
-    std::lock_guard<std::recursive_mutex> lock(s_registrationMutex);
-    if (!assembly || !assembly->aname.name)
+    for (auto it = snapshots.rbegin(); it != snapshots.rend(); ++it)
     {
-        return false;
+        RestoreMethodPreparationSnapshot(*it);
     }
+}
 
-    if (IsDheAssembly(assembly))
+static void CommitMethodPreparations(
+    const std::vector<MethodPreparationSnapshot>& snapshots)
+{
+    for (const MethodPreparationSnapshot& snapshot : snapshots)
     {
-        return false;
-    }
-
-    resolvedMethods.clear();
-    resolvedMethods.reserve(changedMethodTokens.size());
-    std::vector<MethodPreparationSnapshot> snapshots;
-    snapshots.reserve(changedMethodTokens.size());
-    const auto rollback = [&snapshots]()
-    {
-        for (auto it = snapshots.rbegin(); it != snapshots.rend(); ++it)
+        if (snapshot.vtableEntry)
         {
-            RestoreMethodPreparationSnapshot(*it);
+            snapshot.vtableEntry->method = snapshot.method;
+            snapshot.vtableEntry->methodPtr =
+                snapshot.method->virtualMethodPointerCallByInterp;
         }
-    };
-    for (uint32_t token : changedMethodTokens)
+    }
+}
+
+static bool PrepareResolvedMethods(const std::vector<const MethodInfo*>& methods,
+    std::vector<MethodPreparationSnapshot>& snapshots)
+{
+    for (const MethodInfo* method : methods)
     {
-        const MethodInfo* method = ResolveMethodByToken(assembly->aname.name, token);
-        resolvedMethods.push_back(method);
         if (!method)
         {
-            rollback();
-            resolvedMethods.clear();
             return false;
         }
 
@@ -581,8 +672,6 @@ bool PrepareChangedMethods(const Il2CppAssembly* assembly,
             hybridclr::InitAndGetInterpreterDirectlyCallMethodPointer(method);
         if (!interpreterPointer)
         {
-            rollback();
-            resolvedMethods.clear();
             return false;
         }
         // The direct-call pointer can have been initialized by an earlier
@@ -590,31 +679,196 @@ bool PrepareChangedMethods(const Il2CppAssembly* assembly,
         // token, so make the interpreter implementation bit explicit.
         const_cast<MethodInfo*>(method)->isInterpterImpl = true;
     }
-
-    // Publish all virtual slots only after every changed method has a valid
-    // interpreter entry. This is the commit point of preparation.
-    for (const MethodPreparationSnapshot& snapshot : snapshots)
-    {
-        if (snapshot.vtableEntry)
-        {
-            snapshot.vtableEntry->method = snapshot.method;
-            snapshot.vtableEntry->methodPtr =
-                snapshot.method->virtualMethodPointerCallByInterp;
-        }
-    }
     return true;
 }
 
-bool PrepareAndRegisterChangedMethods(const Il2CppAssembly* assembly,
-    const std::vector<uint32_t>& changedMethodTokens)
+bool PrepareChangedMethods(const Il2CppAssembly* assembly,
+    const std::vector<uint32_t>& changedMethodTokens,
+    std::vector<const MethodInfo*>& resolvedMethods)
 {
+    // Preparation mutates MethodInfo and vtable state. Serialize it with the
+    // registration commit so a concurrent failed load cannot restore a
+    // snapshot over a successful load's published interpreter pointers.
     std::lock_guard<std::recursive_mutex> lock(s_registrationMutex);
-    std::vector<const MethodInfo*> resolvedMethods;
-    if (!PrepareChangedMethods(assembly, changedMethodTokens, resolvedMethods))
+    if (!assembly || !assembly->aname.name || IsDheAssembly(assembly))
     {
         return false;
     }
-    return RegisterChangedMethods(assembly, changedMethodTokens, resolvedMethods);
+
+    resolvedMethods.clear();
+    resolvedMethods.reserve(changedMethodTokens.size());
+    for (uint32_t token : changedMethodTokens)
+    {
+        const MethodInfo* method = ResolveMethodByToken(assembly->aname.name, token);
+        if (!method)
+        {
+            resolvedMethods.clear();
+            return false;
+        }
+        resolvedMethods.push_back(method);
+    }
+
+    std::vector<MethodPreparationSnapshot> snapshots;
+    snapshots.reserve(resolvedMethods.size());
+    if (!PrepareResolvedMethods(resolvedMethods, snapshots))
+    {
+        RollbackMethodPreparations(snapshots);
+        resolvedMethods.clear();
+        return false;
+    }
+    CommitMethodPreparations(snapshots);
+    return true;
+}
+
+static bool MethodCanHaveAotEntry(const MetaVersionMethod& method)
+{
+    constexpr uint32_t kAbstract = 2u;
+    constexpr uint32_t kPInvoke = 4u;
+    constexpr uint32_t kHasBody = 8u;
+    return (method.flags & kHasBody) != 0 && (method.flags & (kAbstract | kPInvoke)) == 0;
+}
+
+struct PendingMetaVersionRegistration
+{
+    const Il2CppAssembly* baseAssembly = nullptr;
+    DHEAssemblyState state;
+    std::vector<const MethodInfo*> methodsToPrepare;
+    std::vector<uint32_t> preparedMethodTokens;
+};
+
+bool PrepareAndRegisterMetaVersions(
+    const std::vector<MetaVersionRegistration>& registrations)
+{
+    std::lock_guard<std::recursive_mutex> lock(s_registrationMutex);
+    if (registrations.empty())
+    {
+        return false;
+    }
+    const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
+    std::unordered_set<const Il2CppAssembly*> uniqueAssemblies;
+    std::unordered_set<std::string> uniqueAssemblyNames;
+    std::vector<PendingMetaVersionRegistration> pending;
+    pending.reserve(registrations.size());
+
+    // Resolve every Base method before any MethodInfo is modified.
+    for (const MetaVersionRegistration& registration : registrations)
+    {
+        if (!registration.baseAssembly || !registration.baseMetaVersion ||
+            !registration.currentMetaVersion || !registration.baseAssembly->aname.name)
+        {
+            return false;
+        }
+        const MetaVersionData& baseMetaVersion = *registration.baseMetaVersion;
+        const MetaVersionData& currentMetaVersion = *registration.currentMetaVersion;
+        if (baseMetaVersion.assemblyName != currentMetaVersion.assemblyName ||
+            baseMetaVersion.assemblyName != registration.baseAssembly->aname.name ||
+            !uniqueAssemblies.insert(registration.baseAssembly).second ||
+            !uniqueAssemblyNames.insert(baseMetaVersion.assemblyName).second ||
+            published->assemblyStates.find(registration.baseAssembly) !=
+                published->assemblyStates.end())
+        {
+            return false;
+        }
+
+        std::unordered_map<std::string, const MetaVersionMethod*> currentMethods;
+        currentMethods.reserve(currentMetaVersion.methods.size());
+        for (const MetaVersionMethod& method : currentMetaVersion.methods)
+        {
+            if (!currentMethods.emplace(DigestKey(method.stableId), &method).second)
+            {
+                return false;
+            }
+        }
+
+        std::unordered_set<std::string> currentTypes;
+        currentTypes.reserve(currentMetaVersion.types.size());
+        for (const MetaVersionType& type : currentMetaVersion.types)
+        {
+            if (!currentTypes.insert(DigestKey(type.stableId)).second)
+            {
+                return false;
+            }
+        }
+
+        PendingMetaVersionRegistration plan;
+        plan.baseAssembly = registration.baseAssembly;
+        for (const MetaVersionType& baseType : baseMetaVersion.types)
+        {
+            if (currentTypes.find(DigestKey(baseType.stableId)) == currentTypes.end())
+            {
+                plan.state.removedTypeTokens.insert(baseType.token);
+            }
+        }
+        for (const MetaVersionMethod& baseMethodVersion : baseMetaVersion.methods)
+        {
+            auto currentVersionEntry = currentMethods.find(
+                DigestKey(baseMethodVersion.stableId));
+            const MetaVersionMethod* currentMethodVersion =
+                currentVersionEntry == currentMethods.end() ? nullptr :
+                    currentVersionEntry->second;
+            const bool changed = !currentMethodVersion ||
+                baseMethodVersion.version != currentMethodVersion->version;
+            if (!MethodCanHaveAotEntry(baseMethodVersion) || !changed)
+            {
+                continue;
+            }
+            if (currentMethodVersion && !MethodCanHaveAotEntry(*currentMethodVersion))
+            {
+                return false;
+            }
+            const MethodInfo* baseMethod = ResolveMethodInAssembly(
+                registration.baseAssembly, baseMethodVersion.token);
+            if (!baseMethod)
+            {
+                return false;
+            }
+            plan.state.changedMethodTokens.insert(baseMethodVersion.token);
+            plan.state.baseMethods.emplace(baseMethodVersion.token, baseMethod);
+            if (!currentMethodVersion)
+            {
+                plan.state.resolvedMethods.emplace(baseMethodVersion.token, nullptr);
+            }
+            else
+            {
+                plan.methodsToPrepare.push_back(baseMethod);
+                plan.preparedMethodTokens.push_back(baseMethodVersion.token);
+            }
+        }
+        pending.push_back(std::move(plan));
+    }
+
+    std::vector<MethodPreparationSnapshot> snapshots;
+    for (PendingMetaVersionRegistration& plan : pending)
+    {
+        snapshots.reserve(snapshots.size() + plan.methodsToPrepare.size());
+        if (!PrepareResolvedMethods(plan.methodsToPrepare, snapshots))
+        {
+            RollbackMethodPreparations(snapshots);
+            return false;
+        }
+        for (size_t index = 0; index < plan.methodsToPrepare.size(); ++index)
+        {
+            plan.state.resolvedMethods.emplace(plan.preparedMethodTokens[index],
+                plan.methodsToPrepare[index]);
+        }
+    }
+
+    CommitMethodPreparations(snapshots);
+    std::unique_ptr<PublishedState> next(new PublishedState(*published));
+    for (PendingMetaVersionRegistration& plan : pending)
+    {
+        next->assemblyStates.emplace(plan.baseAssembly, std::move(plan.state));
+    }
+    s_publishedState.store(next.release(), std::memory_order_release);
+    return true;
+}
+
+bool PrepareAndRegisterMetaVersion(const Il2CppAssembly* baseAssembly,
+    const MetaVersionData& baseMetaVersion, const MetaVersionData& currentMetaVersion)
+{
+    return PrepareAndRegisterMetaVersions({
+        { baseAssembly, &baseMetaVersion, &currentMetaVersion }
+    });
 }
 
 int32_t ExecuteInterpreterI4I4(const MethodInfo* method, int32_t value)

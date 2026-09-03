@@ -101,6 +101,27 @@ namespace metadata
 			return handle == il2cpp_defaults.value_type_class->typeMetadataHandle ||
 				handle == il2cpp_defaults.enum_class->typeMetadataHandle;
         }
+        case TableType::TYPEDEF:
+        {
+			const Table& typeDefTable = _rawImage->GetTable(TableType::TYPEDEF);
+			const Table& assemblyTable = _rawImage->GetTable(TableType::ASSEMBLY);
+			if (rowIndex == 0 || rowIndex > typeDefTable.rowNum || assemblyTable.rowNum != 1)
+			{
+				return false;
+			}
+			TbTypeDef typeDef = _rawImage->ReadTypeDef(rowIndex);
+			const char* typeNamespace = _rawImage->GetStringFromRawIndex(typeDef.typeNamespace);
+			const char* typeName = _rawImage->GetStringFromRawIndex(typeDef.typeName);
+			if (std::strcmp(typeNamespace, "System") != 0 ||
+				(std::strcmp(typeName, "ValueType") != 0 && std::strcmp(typeName, "Enum") != 0))
+			{
+				return false;
+			}
+			TbAssembly assembly = _rawImage->ReadAssembly(1);
+			const char* assemblyName = _rawImage->GetStringFromRawIndex(assembly.name);
+			return il2cpp_defaults.corlib &&
+				std::strcmp(assemblyName, il2cpp_defaults.corlib->nameNoExt) == 0;
+        }
         default:
         {
             return false;
@@ -992,6 +1013,39 @@ namespace metadata
                     return GetMethodInfo(type, methodDef, genericInstantiation, genericContext);
                 }
             }
+
+			// A DHE current image can add methods to an existing AOT type. Those
+			// methods are deliberately absent from the Base TypeDefinition table,
+			// but Class::GetMethods exposes the merged current view and filters
+			// tombstones. MemberRef resolution must use that view as its fallback.
+			const Il2CppType* finalContainerType = genericContext
+				? TryInflateIfNeed(type, genericContext, true)
+				: type;
+			Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(finalContainerType);
+			void* iter = nullptr;
+			while (const MethodInfo* method = il2cpp::vm::Class::GetMethods(klass, &iter))
+			{
+				if (std::strcmp(resolveMethodName, method->name) != 0 ||
+					!IsMatchMethodSig(method, resolveSig, klassGenericContainer))
+				{
+					continue;
+				}
+				if (!genericInstantiation)
+				{
+					return method;
+				}
+				const Il2CppGenericInst* classInstantiation =
+					finalContainerType->type == IL2CPP_TYPE_GENERICINST
+					? finalContainerType->data.generic_class->context.class_inst
+					: nullptr;
+				Il2CppGenericContext finalGenericContext = {
+					classInstantiation, genericInstantiation };
+				const MethodInfo* definition = method->is_inflated
+					? method->genericMethod->methodDefinition
+					: method;
+				return il2cpp::metadata::GenericMetadata::Inflate(definition,
+					&finalGenericContext);
+			}
         }
         else
         {

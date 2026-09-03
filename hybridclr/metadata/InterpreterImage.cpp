@@ -496,10 +496,23 @@ namespace metadata
 					if (parentType != classifiedParent)
 					{
 						classifiedParent = parentType;
-						const Il2CppMetadataTypeHandle parentHandle = parentType->data.typeHandle;
-						classifiedParentIsEnum = parentHandle == il2cpp_defaults.enum_class->typeMetadataHandle;
-						classifiedParentIsValueType = classifiedParentIsEnum ||
-							parentHandle == il2cpp_defaults.value_type_class->typeMetadataHandle;
+						if (parentTableType == TableType::TYPEDEF &&
+							IsValueTypeFromToken(parentTableType, parentRowIndex))
+						{
+							TbTypeDef parentDefinition = _rawImage->ReadTypeDef(parentRowIndex);
+							const char* parentName = _rawImage->GetStringFromRawIndex(
+								parentDefinition.typeName);
+							classifiedParentIsEnum = std::strcmp(parentName, "Enum") == 0;
+							classifiedParentIsValueType = true;
+						}
+						else
+						{
+							const Il2CppMetadataTypeHandle parentHandle = parentType->data.typeHandle;
+							classifiedParentIsEnum = parentHandle ==
+								il2cpp_defaults.enum_class->typeMetadataHandle;
+							classifiedParentIsValueType = classifiedParentIsEnum ||
+								parentHandle == il2cpp_defaults.value_type_class->typeMetadataHandle;
+						}
 					}
 					if (classifiedParentIsEnum)
 					{
@@ -1088,6 +1101,10 @@ namespace metadata
 		{
 			writer.WriteByte((byte)IL2CPP_TYPE_IL2CPP_TYPE_INDEX);
 		}
+		else if (klass == il2cpp_defaults.string_class)
+		{
+			writer.WriteByte((byte)IL2CPP_TYPE_STRING);
+		}
 		else
 		{
 			writer.WriteByte((uint8_t)type->type);
@@ -1271,7 +1288,43 @@ namespace metadata
 			{
 				RaiseExecutionEngineException("type not find");
 			}
-			if (klass == il2cpp_defaults.object_class)
+			if (klass->enumtype)
+			{
+				if (writeType)
+				{
+					writer.WriteByte((byte)IL2CPP_TYPE_ENUM);
+					int32_t typeIndex = klass->generic_class ? AddIl2CppTypeCache(type) :
+						((Il2CppTypeDefinition*)type->data.typeHandle)->byvalTypeIndex;
+					writer.WriteCompressedInt32(typeIndex);
+				}
+				ConvertFixedArg(writer, reader, &klass->element_class->byval_arg, false);
+			}
+			else if (klass == il2cpp_defaults.string_class)
+			{
+				if (writeType)
+				{
+					writer.WriteByte((uint8_t)IL2CPP_TYPE_STRING);
+				}
+				byte b = reader.PeekByte();
+				if (b == 0xFF)
+				{
+					reader.SkipByte();
+					writer.WriteCompressedInt32(-1);
+				}
+				else if (b == 0)
+				{
+					reader.SkipByte();
+					writer.WriteCompressedInt32(0);
+				}
+				else
+				{
+					uint32_t len = reader.ReadCompressedUint32();
+					writer.WriteCompressedInt32((int32_t)len);
+					writer.WriteBytes(reader.GetDataOfReadPosition(), len);
+					reader.SkipBytes(len);
+				}
+			}
+			else if (klass == il2cpp_defaults.object_class)
 			{
 				ConvertBoxedValue(writer, reader, writeType);
 			}

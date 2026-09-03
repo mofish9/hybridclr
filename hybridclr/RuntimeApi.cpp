@@ -1,6 +1,10 @@
 #include "RuntimeApi.h"
 
 #include <cstring>
+#include <mutex>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
 
 #if defined(__has_include)
 #if __has_include("lab/InstrumentationConfig.h")
@@ -15,9 +19,11 @@
 #include "vm/Class.h"
 #include "vm/Assembly.h"
 #include "vm/MetadataLock.h"
+#include "vm/MetadataCache.h"
 
 #include "metadata/MetadataModule.h"
 #include "metadata/MetadataUtil.h"
+#include "metadata/Assembly.h"
 #include "DheRuntime.h"
 #include "metadata/AOTHomologousImage.h"
 #include "interpreter/InterpreterModule.h"
@@ -44,6 +50,154 @@
 #include <vector>
 namespace hybridclr
 {
+	namespace
+	{
+		struct PendingDheImage
+		{
+			metadata::AOTHomologousImage* image;
+			dhe::Sha256Digest currentAssemblyHash;
+		};
+
+		// DHE images are one-shot process metadata. If MV registration fails
+		// after the hidden interpreter image has been initialized, deleting it
+		// is unsafe because metadata caches may already reference it. Retain one
+		// pending image per Base assembly and reuse it for a corrected MV retry.
+		std::mutex s_dheLoadMutex;
+		std::unordered_map<const Il2CppAssembly*, PendingDheImage> s_pendingDheImages;
+
+		struct DheLoadPayload
+		{
+			const void* dllData = nullptr;
+			uint32_t dllSize = 0;
+			dhe::Sha256Digest currentAssemblyHash{};
+			dhe::MetaVersionData baseMetaVersion;
+			dhe::MetaVersionData currentMetaVersion;
+			const Il2CppAssembly* baseAssembly = nullptr;
+			metadata::AOTHomologousImage* currentImage = nullptr;
+		};
+
+		int32_t ParseDheLoadPayload(Il2CppArray* dllBytes, Il2CppArray* baseMvBytes,
+			Il2CppArray* currentMvBytes, DheLoadPayload& payload)
+		{
+			if (!dllBytes || !baseMvBytes || !currentMvBytes)
+			{
+				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
+			}
+			if (!dhe::ParseMetaVersion(il2cpp::vm::Array::GetFirstElementAddress(baseMvBytes),
+					il2cpp::vm::Array::GetByteLength(baseMvBytes), payload.baseMetaVersion) ||
+				!dhe::ParseMetaVersion(il2cpp::vm::Array::GetFirstElementAddress(currentMvBytes),
+					il2cpp::vm::Array::GetByteLength(currentMvBytes), payload.currentMetaVersion) ||
+				(payload.baseMetaVersion.flags & dhe::kMetaVersionStrictCompatibilityFlag) == 0 ||
+				(payload.currentMetaVersion.flags & dhe::kMetaVersionStrictCompatibilityFlag) == 0 ||
+				payload.baseMetaVersion.assemblyName != payload.currentMetaVersion.assemblyName)
+			{
+				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
+			}
+
+			payload.dllData = il2cpp::vm::Array::GetFirstElementAddress(dllBytes);
+			payload.dllSize = il2cpp::vm::Array::GetByteLength(dllBytes);
+			if (!dhe::ComputeSha256(payload.dllData, payload.dllSize,
+					payload.currentAssemblyHash) ||
+				payload.currentAssemblyHash != payload.currentMetaVersion.assemblyHash)
+			{
+				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_CURRENT_HASH_MISMATCH;
+			}
+			return (int32_t)metadata::LoadImageErrorCode::OK;
+		}
+
+		int32_t LoadDhePayloads(std::vector<DheLoadPayload>& payloads)
+		{
+			if (payloads.empty())
+			{
+				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
+			}
+
+			std::lock_guard<std::mutex> loadLock(s_dheLoadMutex);
+			std::unordered_set<const Il2CppAssembly*> uniqueAssemblies;
+			std::unordered_set<std::string> uniqueNames;
+			for (DheLoadPayload& payload : payloads)
+			{
+				payload.baseAssembly = il2cpp::vm::MetadataCache::GetAssemblyByName(
+					payload.baseMetaVersion.assemblyName.c_str());
+				if (!payload.baseAssembly || !payload.baseAssembly->image ||
+					metadata::IsInterpreterImage(payload.baseAssembly->image))
+				{
+					return (int32_t)metadata::LoadImageErrorCode::AOT_ASSEMBLY_NOT_FIND;
+				}
+				if (!uniqueAssemblies.insert(payload.baseAssembly).second ||
+					!uniqueNames.insert(payload.baseMetaVersion.assemblyName).second ||
+					dhe::IsDheAssembly(payload.baseAssembly))
+				{
+					return (int32_t)metadata::LoadImageErrorCode::
+						HOMOLOGOUS_ASSEMBLY_HAS_BEEN_LOADED;
+				}
+				auto pending = s_pendingDheImages.find(payload.baseAssembly);
+				if (pending != s_pendingDheImages.end() &&
+					pending->second.currentAssemblyHash != payload.currentAssemblyHash)
+				{
+					return (int32_t)metadata::LoadImageErrorCode::
+						HOMOLOGOUS_ASSEMBLY_HAS_BEEN_LOADED;
+				}
+			}
+
+			std::vector<DheLoadPayload*> loaded;
+			loaded.reserve(payloads.size());
+			for (DheLoadPayload& payload : payloads)
+			{
+				auto pending = s_pendingDheImages.find(payload.baseAssembly);
+				if (pending != s_pendingDheImages.end())
+				{
+					payload.currentImage = pending->second.image;
+				}
+				else
+				{
+					const Il2CppAssembly* loadedAssembly = nullptr;
+					metadata::LoadImageErrorCode loadError =
+						metadata::Assembly::LoadMetadataForAOTAssembly(
+							payload.dllData, payload.dllSize,
+							metadata::HomologousImageMode::SUPERSET,
+							&loadedAssembly, &payload.currentImage,
+							payload.baseMetaVersion.assemblyName.c_str());
+					if (loadError != metadata::LoadImageErrorCode::OK ||
+						loadedAssembly != payload.baseAssembly || !payload.currentImage)
+					{
+						for (DheLoadPayload* previous : loaded)
+						{
+							s_pendingDheImages[previous->baseAssembly] = {
+								previous->currentImage, previous->currentAssemblyHash };
+						}
+						return (int32_t)(loadError == metadata::LoadImageErrorCode::OK
+							? metadata::LoadImageErrorCode::DHE_MV_REGISTRATION_FAILED
+							: loadError);
+					}
+				}
+				loaded.push_back(&payload);
+			}
+
+			std::vector<dhe::MetaVersionRegistration> registrations;
+			registrations.reserve(payloads.size());
+			for (DheLoadPayload& payload : payloads)
+			{
+				registrations.push_back({ payload.baseAssembly,
+					&payload.baseMetaVersion, &payload.currentMetaVersion });
+			}
+			if (!dhe::PrepareAndRegisterMetaVersions(registrations))
+			{
+				for (DheLoadPayload& payload : payloads)
+				{
+					s_pendingDheImages[payload.baseAssembly] = {
+						payload.currentImage, payload.currentAssemblyHash };
+				}
+				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_REGISTRATION_FAILED;
+			}
+			for (DheLoadPayload& payload : payloads)
+			{
+				s_pendingDheImages.erase(payload.baseAssembly);
+			}
+			return (int32_t)metadata::LoadImageErrorCode::OK;
+		}
+	}
+
 #if defined(HYBRIDCLR_LAB_FGS_TESTS)
 
 	namespace interpreter
@@ -340,8 +494,8 @@ namespace hybridclr
 	void RuntimeApi::RegisterInternalCalls()
 	{
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadMetadataForAOTAssembly(System.Byte[],HybridCLR.HomologousImageMode)", (Il2CppMethodPointer)LoadMetadataForAOTAssembly);
-		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssemblyWithMetaVersion(System.Byte[],System.Byte[])", (Il2CppMethodPointer)LoadDifferentialHybridAssemblyWithMetaVersion);
-		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssemblyWithMetaVersion(System.Byte[],System.Byte[],System.Byte[])", (Il2CppMethodPointer)LoadDifferentialHybridAssemblyWithMetaVersionAndSnapshot);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssemblyWithMetaVersion(System.Byte[],System.Byte[],System.Byte[])", (Il2CppMethodPointer)LoadDifferentialHybridAssemblyWithMetaVersion);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssembliesWithMetaVersion(System.Byte[][],System.Byte[][],System.Byte[][])", (Il2CppMethodPointer)LoadDifferentialHybridAssembliesWithMetaVersion);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::IsDifferentialMethodChanged(System.Reflection.MethodInfo)", (Il2CppMethodPointer)IsDifferentialMethodChanged);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetDifferentialInterpreterEntryCount()", (Il2CppMethodPointer)GetDifferentialInterpreterEntryCount);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetDifferentialAotBridgeCallCount()", (Il2CppMethodPointer)GetDifferentialAotBridgeCallCount);
@@ -384,113 +538,62 @@ namespace hybridclr
 		return (int32_t)hybridclr::metadata::Assembly::LoadMetadataForAOTAssembly(il2cpp::vm::Array::GetFirstElementAddress(dllBytes), il2cpp::vm::Array::GetByteLength(dllBytes), (hybridclr::metadata::HomologousImageMode)mode);
 	}
 
-	static int32_t LoadDifferentialHybridAssemblyWithMetaVersionCore(Il2CppArray* dllBytes, Il2CppArray* mvBytes, Il2CppArray* snapshotHash)
+	int32_t RuntimeApi::LoadDifferentialHybridAssemblyWithMetaVersion(Il2CppArray* dllBytes,
+		Il2CppArray* baseMvBytes, Il2CppArray* currentMvBytes)
 	{
-		if (!dllBytes || !mvBytes)
+		if (!dllBytes || !baseMvBytes || !currentMvBytes)
 		{
 			il2cpp::vm::Exception::RaiseNullReferenceException();
 		}
-		// A differential image is only safe when its baseline hash is checked
-		// against the actual player snapshot. Keep the legacy two-argument entry
-		// for ABI compatibility, but never allow it to publish DHE state.
-		if (!snapshotHash)
+		DheLoadPayload payload;
+		int32_t parseError = ParseDheLoadPayload(dllBytes, baseMvBytes,
+			currentMvBytes, payload);
+		if (parseError != (int32_t)metadata::LoadImageErrorCode::OK)
 		{
-			return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_SNAPSHOT_HASH;
+			return parseError;
 		}
+		std::vector<DheLoadPayload> payloads;
+		payloads.push_back(std::move(payload));
+		return LoadDhePayloads(payloads);
+	}
 
-		hybridclr::dhe::MetaVersionData mv;
-		if (!hybridclr::dhe::ParseMetaVersion(
-			il2cpp::vm::Array::GetFirstElementAddress(mvBytes),
-			il2cpp::vm::Array::GetByteLength(mvBytes), mv) ||
-			(mv.flags & hybridclr::dhe::kMetaVersionStrictCompatibilityFlag) == 0)
+	int32_t RuntimeApi::LoadDifferentialHybridAssembliesWithMetaVersion(
+		Il2CppArray* dllBytes, Il2CppArray* baseMvBytes, Il2CppArray* currentMvBytes)
+	{
+		if (!dllBytes || !baseMvBytes || !currentMvBytes)
+		{
+			il2cpp::vm::Exception::RaiseNullReferenceException();
+		}
+		const uint32_t count = il2cpp::vm::Array::GetLength(dllBytes);
+		if (count == 0 || il2cpp::vm::Array::GetLength(baseMvBytes) != count ||
+			il2cpp::vm::Array::GetLength(currentMvBytes) != count)
 		{
 			return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
 		}
 
-		const void* dllData = il2cpp::vm::Array::GetFirstElementAddress(dllBytes);
-		const uint32_t dllSize = il2cpp::vm::Array::GetByteLength(dllBytes);
-		hybridclr::dhe::Sha256Digest currentHash{};
-		if (!hybridclr::dhe::ComputeSha256(dllData, dllSize, currentHash) ||
-			currentHash != mv.currentAssemblyHash)
+		Il2CppArray** dllArray = reinterpret_cast<Il2CppArray**>(
+			il2cpp::vm::Array::GetFirstElementAddress(dllBytes));
+		Il2CppArray** baseMvArray = reinterpret_cast<Il2CppArray**>(
+			il2cpp::vm::Array::GetFirstElementAddress(baseMvBytes));
+		Il2CppArray** currentMvArray = reinterpret_cast<Il2CppArray**>(
+			il2cpp::vm::Array::GetFirstElementAddress(currentMvBytes));
+		std::vector<DheLoadPayload> payloads(count);
+		std::unordered_set<std::string> assemblyNames;
+		for (uint32_t index = 0; index < count; ++index)
 		{
-			return (int32_t)metadata::LoadImageErrorCode::DHE_MV_CURRENT_HASH_MISMATCH;
-		}
-
-		if (snapshotHash)
-		{
-			const uint32_t snapshotHashSize = il2cpp::vm::Array::GetByteLength(snapshotHash);
-			if (snapshotHashSize != hybridclr::dhe::kSha256DigestSize)
+			int32_t parseError = ParseDheLoadPayload(dllArray[index],
+				baseMvArray[index], currentMvArray[index], payloads[index]);
+			if (parseError != (int32_t)metadata::LoadImageErrorCode::OK)
 			{
-				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_SNAPSHOT_HASH;
+				return parseError;
 			}
-			if (std::memcmp(
-				il2cpp::vm::Array::GetFirstElementAddress(snapshotHash),
-				mv.baselineAssemblyHash.data(),
-				hybridclr::dhe::kSha256DigestSize) != 0)
+			if (!assemblyNames.insert(
+					payloads[index].baseMetaVersion.assemblyName).second)
 			{
-				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BASELINE_HASH_MISMATCH;
+				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
 			}
 		}
-
-		const Il2CppAssembly* targetAssembly = nullptr;
-		hybridclr::metadata::AOTHomologousImage* targetImage = nullptr;
-		metadata::LoadImageErrorCode loadError = metadata::Assembly::LoadMetadataForAOTAssembly(
-			dllData,
-			dllSize,
-			// Strict DHE keeps the metadata row set stable. CONSISTENT is
-			// required here because SUPERSET's method-body map is intentionally
-			// limited to generic/superset cases in the community runtime.
-			metadata::HomologousImageMode::CONSISTENT, &targetAssembly, &targetImage, mv.assemblyName.c_str());
-		if (loadError != metadata::LoadImageErrorCode::OK)
-		{
-			return (int32_t)loadError;
-		}
-
-		// LoadMetadataForAOTAssembly already resolved and validated the static
-		// AOT image. Re-querying by name would select the newer placeholder
-		// registered for the hot-update path.
-		const Il2CppAssembly* assembly = targetAssembly;
-		if (!assembly)
-		{
-			return (int32_t)metadata::LoadImageErrorCode::DHE_MV_ASSEMBLY_NOT_FOUND;
-		}
-		// Resolve and prepare every token before publishing the DHE state. If
-		// preparation or publication fails, hide the homologous image again so
-		// callers can retry with a corrected MV in the same process. The image is
-		// intentionally retained by the metadata subsystem because method-body
-		// caches may still hold pointers into its preparation epoch.
-		const auto rollbackImage = [&]()
-		{
-			if (!targetAssembly || !targetImage)
-			{
-				return;
-			}
-			il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
-			if (hybridclr::metadata::AOTHomologousImage::FindImageByAssemblyLocked(targetAssembly, metadataLock) == targetImage)
-			{
-				hybridclr::metadata::AOTHomologousImage::UnregisterLocked(targetImage, metadataLock);
-			}
-		};
-		if (!hybridclr::dhe::PrepareAndRegisterChangedMethods(assembly, mv.changedMethodTokens))
-		{
-			rollbackImage();
-			return (int32_t)metadata::LoadImageErrorCode::DHE_MV_REGISTRATION_FAILED;
-		}
-		return (int32_t)metadata::LoadImageErrorCode::OK;
-	}
-
-	int32_t RuntimeApi::LoadDifferentialHybridAssemblyWithMetaVersion(Il2CppArray* dllBytes, Il2CppArray* mvBytes)
-	{
-		return LoadDifferentialHybridAssemblyWithMetaVersionCore(dllBytes, mvBytes, nullptr);
-	}
-
-	int32_t RuntimeApi::LoadDifferentialHybridAssemblyWithMetaVersionAndSnapshot(Il2CppArray* dllBytes, Il2CppArray* mvBytes, Il2CppArray* snapshotHash)
-	{
-		if (!snapshotHash)
-		{
-			il2cpp::vm::Exception::RaiseNullReferenceException();
-		}
-		return LoadDifferentialHybridAssemblyWithMetaVersionCore(dllBytes, mvBytes, snapshotHash);
+		return LoadDhePayloads(payloads);
 	}
 
 	int32_t RuntimeApi::IsDifferentialMethodChanged(Il2CppReflectionMethod* method)

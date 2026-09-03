@@ -935,6 +935,8 @@ namespace interpreter
 		ConvertVarVar_i4_i8_Add_i8_LdlocVarVar_2,
 		LdcVarConst_4_Add_i4_LdlocVarVar_2,
 		LdcVarConst_4_Add_i4_Ret_4,
+		DheLdfldVarVar,
+		DheStfldVarVar,
 
 		//!!!}}OPCODE
 	};
@@ -10818,6 +10820,34 @@ namespace interpreter
 		int32_t constant;
 		uint8_t __pad10;
 		uint8_t __pad11;
+		uint8_t __pad12;
+		uint8_t __pad13;
+		uint8_t __pad14;
+		uint8_t __pad15;
+	};
+
+
+	struct IRDheLdfldVarVar : IRCommon
+	{
+		uint16_t dst;
+		uint16_t obj;
+		uint8_t __pad6;
+		uint8_t __pad7;
+		uint32_t field;
+		uint8_t __pad12;
+		uint8_t __pad13;
+		uint8_t __pad14;
+		uint8_t __pad15;
+	};
+
+
+	struct IRDheStfldVarVar : IRCommon
+	{
+		uint16_t obj;
+		uint16_t data;
+		uint8_t __pad6;
+		uint8_t __pad7;
+		uint32_t field;
 		uint8_t __pad12;
 		uint8_t __pad13;
 		uint8_t __pad14;

@@ -4003,7 +4003,7 @@ else \
 					Il2CppClass* exactClass = evalStack[callArgEvalStackIdxBase].exactClass;
 					if (exactClass && !IS_CLASS_VALUE_TYPE(exactClass))
 					{
-						const MethodInfo* implMethod = image->FindImplMethod(exactClass, shareMethod);
+							const MethodInfo* implMethod = image->FindImplMethod(exactClass, shareMethod);
 						if (implMethod)
 						{
 							shareMethod = const_cast<MethodInfo*>(implMethod);
@@ -5331,8 +5331,18 @@ else \
 				// ldfld obj may be obj or or valuetype or ref valuetype....
 				EvalStackVarInfo& obj = evalStack[evalStackTop - 1];
 				uint16_t topIdx = GetEvalStackTopOffset();
-				IRCommon* ir = obj.reduceType != NATIVE_INT_REDUCE_TYPE && IS_CLASS_VALUE_TYPE(fieldInfo->parent) ? CreateValueTypeLdfld(pool, topIdx, topIdx, fieldInfo) : CreateClassLdfld(pool, topIdx, topIdx, fieldInfo);
-				AddInst(ir);
+				if (hybridclr::metadata::MetadataModule::IsDheSupplementalInstanceField(fieldInfo))
+				{
+					CreateAddIR(ir, DheLdfldVarVar);
+					ir->dst = topIdx;
+					ir->obj = topIdx;
+					ir->field = GetOrAddResolveDataIndex(fieldInfo);
+				}
+				else
+				{
+					IRCommon* ir = obj.reduceType != NATIVE_INT_REDUCE_TYPE && IS_CLASS_VALUE_TYPE(fieldInfo->parent) ? CreateValueTypeLdfld(pool, topIdx, topIdx, fieldInfo) : CreateClassLdfld(pool, topIdx, topIdx, fieldInfo);
+					AddInst(ir);
+				}
 				PopStack();
 				PushStackByType(fieldInfo->type);
 
@@ -5348,6 +5358,10 @@ else \
 				uint32_t token = (uint32_t)GetI4LittleEndian(ip + 1);
 				FieldInfo* fieldInfo = const_cast<FieldInfo*>(image->GetFieldInfoFromToken(tokenCache, token, klassContainer, methodContainer, genericContext));
 				IL2CPP_ASSERT(fieldInfo);
+				if (hybridclr::metadata::MetadataModule::IsDheSupplementalInstanceField(fieldInfo))
+				{
+					RaiseExecutionEngineException("ldflda is not supported for DHE supplemental instance fields.");
+				}
 
 				uint16_t topIdx = GetEvalStackTopOffset();
 				uint32_t fieldOffset = GetFieldOffset(fieldInfo);
@@ -5381,8 +5395,18 @@ else \
 				FieldInfo* fieldInfo = const_cast<FieldInfo*>(image->GetFieldInfoFromToken(tokenCache, token, klassContainer, methodContainer, genericContext));
 				IL2CPP_ASSERT(fieldInfo);
 
-				IRCommon* ir = CreateStfld(pool, GetEvalStackOffset_2(), fieldInfo, GetEvalStackOffset_1());
-				AddInst(ir);
+				if (hybridclr::metadata::MetadataModule::IsDheSupplementalInstanceField(fieldInfo))
+				{
+					CreateAddIR(ir, DheStfldVarVar);
+					ir->obj = GetEvalStackOffset_2();
+					ir->data = GetEvalStackOffset_1();
+					ir->field = GetOrAddResolveDataIndex(fieldInfo);
+				}
+				else
+				{
+					IRCommon* ir = CreateStfld(pool, GetEvalStackOffset_2(), fieldInfo, GetEvalStackOffset_1());
+					AddInst(ir);
+				}
 				PopStackN(2);
 				ip += 5;
 				continue;
@@ -6599,7 +6623,7 @@ ir->ele = ele.locOffset;
 					{
 						// impl in self
 						const MethodInfo* implMethod = image->FindImplMethod(conKlass, shareMethod);
-						if (implMethod->klass == conKlass)
+						if (implMethod && implMethod->klass == conKlass)
 						{
 							shareMethod = implMethod;
 							goto LabelCall;
@@ -6909,17 +6933,18 @@ ir->ele = ele.locOffset;
 
 	bool TransformContext::TransformSubMethodBody(TransformContext& callingCtx, const MethodInfo* methodInfo, int32_t depth, int32_t localVarOffset)
 	{
-		metadata::Image* image = metadata::MetadataModule::GetUnderlyingInterpreterImage(methodInfo);
-		IL2CPP_ASSERT(image);
+		metadata::Image* bodyImage = metadata::MetadataModule::GetUnderlyingInterpreterImage(methodInfo);
+		metadata::Image* resolveImage = metadata::MetadataModule::GetInterpreterResolveImage(methodInfo);
+		IL2CPP_ASSERT(bodyImage && resolveImage);
 
-		metadata::MethodBody* methodBody = metadata::MethodBodyCache::GetMethodBody(image, methodInfo->token);
+		metadata::MethodBody* methodBody = metadata::MethodBodyCache::GetMethodBody(bodyImage, methodInfo->token);
 		if (methodBody == nullptr || methodBody->ilcodes == nullptr)
 		{
 			TEMP_FORMAT(errMsg, "Method body is null. %s.%s::%s", methodInfo->klass->namespaze, methodInfo->klass->name, methodInfo->name);
 			il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetExecutionEngineException(errMsg));
 		}
 
-		TransformContext ctx(image, methodInfo, *methodBody, callingCtx.pool, callingCtx.resolveDatas);
+		TransformContext ctx(resolveImage, methodInfo, *methodBody, callingCtx.pool, callingCtx.resolveDatas);
 
 		try
 		{

@@ -52,6 +52,89 @@ namespace metadata
 		}
 		
 		static Image* GetUnderlyingInterpreterImage(const MethodInfo* method);
+		static Image* GetInterpreterResolveImage(const MethodInfo* method);
+
+		static Il2CppClass* FindDheSupplementalType(const Il2CppImage* image,
+			const char* namespaze, const char* name);
+
+		static void GetDheSupplementalTypes(const Il2CppImage* image,
+			std::vector<const Il2CppClass*>& types);
+
+		static Il2CppClass* GetFirstDheSupplementalNestedType(Il2CppClass* klass,
+			void** iter);
+
+		static bool TryGetNextDheSupplementalNestedType(Il2CppClass* klass, void** iter,
+			Il2CppClass** nestedType);
+
+		static const MethodInfo* GetFirstDheSupplementalMethod(Il2CppClass* klass,
+			void** iter);
+
+		static bool TryGetNextDheSupplementalMethod(Il2CppClass* klass, void** iter,
+			const MethodInfo** method);
+
+		static FieldInfo* GetFirstDheSupplementalField(Il2CppClass* klass, void** iter);
+
+		static bool TryGetNextDheSupplementalField(Il2CppClass* klass, void** iter,
+			FieldInfo** field);
+
+		static size_t GetDheSupplementalFieldCount(Il2CppClass* klass);
+
+		static bool IsDheRemovedMethod(const MethodInfo* method)
+		{
+			return dhe::IsRemovedMethod(method);
+		}
+
+		static size_t GetDheRemovedMethodCount(Il2CppClass* klass);
+
+		static size_t GetDheSupplementalMethodCount(Il2CppClass* klass);
+
+		static bool IsDheRemovedType(const Il2CppClass* klass)
+		{
+			return dhe::IsRemovedType(klass);
+		}
+
+		static bool IsDheRemovedField(const FieldInfo* field);
+
+		static size_t GetDheRemovedFieldCount(Il2CppClass* klass);
+
+		static Il2CppClass* GetDheLogicalFieldParent(FieldInfo* field);
+
+		static void RegisterDheSupplementalInstanceField(FieldInfo* runtimeField,
+			FieldInfo* logicalField);
+
+		static bool IsDheSupplementalInstanceField(const FieldInfo* field);
+
+		static bool TryGetDheSupplementalInstanceFieldValue(Il2CppObject* obj,
+			FieldInfo* field, void* value);
+
+		static bool TrySetDheSupplementalInstanceFieldValue(Il2CppObject* obj,
+			const FieldInfo* field, void* value);
+
+		static bool TryGetDheSupplementalInstanceFieldValueObject(Il2CppObject* obj,
+			FieldInfo* field, Il2CppObject** value);
+
+		static bool TrySetDheSupplementalInstanceFieldValueObject(Il2CppObject* obj,
+			FieldInfo* field, Il2CppObject* value);
+
+		static bool HasDheLogicalPropertyView(Il2CppClass* klass);
+
+		static const PropertyInfo* GetFirstDheLogicalProperty(Il2CppClass* klass,
+			void** iter);
+
+		static bool TryGetNextDheLogicalProperty(Il2CppClass* klass, void** iter,
+			const PropertyInfo** property);
+
+		static size_t GetDheLogicalPropertyCount(Il2CppClass* klass);
+
+		static bool HasDheLogicalEventView(Il2CppClass* klass);
+
+		static const EventInfo* GetFirstDheLogicalEvent(Il2CppClass* klass,
+			void** iter);
+
+		static bool TryGetNextDheLogicalEvent(Il2CppClass* klass, void** iter,
+			const EventInfo** eventInfo);
+
+		static size_t GetDheLogicalEventCount(Il2CppClass* klass);
 
 
 		static const char* GetStringFromEncodeIndex(StringIndex index)
@@ -241,6 +324,9 @@ namespace metadata
 		{
 			return GetImage(DecodeImageIndex(index))->GetFieldOrParameterDefalutValueByRawIndex(DecodeMetadataIndex(index));
 		}
+
+		static bool TryGetDheCustomAttributeSource(const Il2CppImage* image,
+			uint32_t token, const Il2CppImage*& sourceImage, uint32_t& sourceToken);
 
 #if HYBRIDCLR_UNITY_2020
 		static bool HasAttribute(const Il2CppImage* image, uint32_t token, Il2CppClass* attribute)

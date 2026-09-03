@@ -812,7 +812,12 @@ namespace metadata
 			const MethodInfo* removeOn = pd.removeMethodIndex ? klass->methods[pd.removeMethodIndex - baseMethodIdx] : nullptr;
 			const MethodInfo* raiseOn = pd.fireMethodIndex ? klass->methods[pd.fireMethodIndex - baseMethodIdx] : nullptr;
 #endif
-			return { pd.name, &klass->byval_arg, addOn, removeOn, raiseOn, EncodeToken(TableType::EVENT, rowIndex) };
+			const Il2CppType* eventType = ReadTypeFromToken(
+				GetGenericContainerByTypeDefinition(typeDef), nullptr,
+				DecodeTypeDefOrRefOrSpecCodedIndexTableType(pd.eventType),
+				DecodeTypeDefOrRefOrSpecCodedIndexRowIndex(pd.eventType));
+			return { pd.name, eventType, addOn, removeOn, raiseOn,
+				EncodeToken(TableType::EVENT, rowIndex) };
 		}
 
 		const Il2CppAssembly* GetReferencedAssembly(int32_t referencedAssemblyTableIndex, const Il2CppAssembly assembliesTable[], int assembliesCount);
