@@ -39,6 +39,9 @@ namespace
 		std::unordered_set<uint32_t> removedTypeTokens;
         std::unordered_map<uint32_t, const MethodInfo*> resolvedMethods;
         std::unordered_map<uint32_t, const MethodInfo*> baseMethods;
+        // Both Base and current-image MethodInfo pointers are normalized to
+        // the immutable Base method token before the changed set is queried.
+        std::unordered_map<const MethodInfo*, uint32_t> methodBaseTokens;
     };
 
     struct PublishedState
@@ -52,6 +55,11 @@ namespace
     std::recursive_mutex s_registrationMutex;
     const PublishedState* s_emptyState = new PublishedState();
     std::atomic<const PublishedState*> s_publishedState{ s_emptyState };
+    // SUPERSET creates the current MethodInfo objects before DHE receives the
+    // MetaVersion pair. Keep these mappings until the registration snapshot
+    // copies them into its lock-free dispatch state.
+    std::unordered_map<const Il2CppAssembly*,
+        std::unordered_map<const MethodInfo*, const MethodInfo*>> s_logicalMethodMappings;
     std::atomic<int32_t> s_interpreterEntryCount{ 0 };
     std::atomic<int32_t> s_aotBridgeCallCount{ 0 };
     std::atomic<int32_t> s_aotEntryCount{ 0 };
@@ -423,6 +431,24 @@ bool IsDheAssembly(const Il2CppAssembly* assembly)
     return state->assemblyStates.find(assembly) != state->assemblyStates.end();
 }
 
+bool RegisterLogicalMethodMapping(const Il2CppAssembly* assembly,
+    const MethodInfo* currentMethod, const MethodInfo* baseMethod)
+{
+    if (!assembly || !currentMethod || !baseMethod || currentMethod == baseMethod)
+    {
+        return false;
+    }
+    std::lock_guard<std::recursive_mutex> lock(s_registrationMutex);
+    auto& mappings = s_logicalMethodMappings[assembly];
+    auto existing = mappings.find(currentMethod);
+    if (existing != mappings.end() && existing->second != baseMethod)
+    {
+        return false;
+    }
+    mappings[currentMethod] = baseMethod;
+    return true;
+}
+
 bool IsChangedMethod(const MethodInfo* method)
 {
     if (!method || !method->klass || !method->klass->image || !method->klass->image->assembly)
@@ -439,10 +465,13 @@ bool IsChangedMethod(const MethodInfo* method)
         method->genericMethod->methodDefinition
         ? method->genericMethod->methodDefinition
         : method;
-    const uint32_t token = definition->token;
-    auto baseMethod = state->second.baseMethods.find(token);
-    return baseMethod != state->second.baseMethods.end() &&
-        baseMethod->second == definition &&
+    auto identity = state->second.methodBaseTokens.find(definition);
+    if (identity == state->second.methodBaseTokens.end())
+    {
+        return false;
+    }
+    const uint32_t token = identity->second;
+    return state->second.baseMethods.find(token) != state->second.baseMethods.end() &&
         state->second.changedMethodTokens.find(token) !=
             state->second.changedMethodTokens.end();
 }
@@ -464,8 +493,13 @@ bool IsRemovedMethod(const MethodInfo* method)
 		method->genericMethod->methodDefinition
 		? method->genericMethod->methodDefinition
 		: method;
-	const uint32_t token = definition->token;
-	auto baseMethod = state->second.baseMethods.find(token);
+    auto identity = state->second.methodBaseTokens.find(definition);
+    if (identity == state->second.methodBaseTokens.end())
+    {
+        return false;
+    }
+    const uint32_t token = identity->second;
+    auto baseMethod = state->second.baseMethods.find(token);
 	if (baseMethod == state->second.baseMethods.end() || baseMethod->second != definition)
 	{
 		return false;
@@ -562,14 +596,22 @@ const MethodInfo* ResolveInterpreterMethod(const MethodInfo* baseMethod)
         baseMethod->genericMethod->methodDefinition
         ? baseMethod->genericMethod->methodDefinition
         : baseMethod;
-    const uint32_t token = baseDefinition->token;
     const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
     auto state = published->assemblyStates.find(baseMethod->klass->image->assembly);
-    if (state == published->assemblyStates.end() ||
-        state->second.changedMethodTokens.find(token) == state->second.changedMethodTokens.end())
+    if (state == published->assemblyStates.end())
     {
         return baseMethod;
     }
+	auto identity = state->second.methodBaseTokens.find(baseDefinition);
+	if (identity == state->second.methodBaseTokens.end())
+	{
+		return baseMethod;
+	}
+	const uint32_t token = identity->second;
+	if (state->second.changedMethodTokens.find(token) == state->second.changedMethodTokens.end())
+	{
+		return baseMethod;
+	}
 	auto registeredBaseMethod = state->second.baseMethods.find(token);
 	if (registeredBaseMethod == state->second.baseMethods.end() ||
 		registeredBaseMethod->second != baseDefinition)
@@ -792,6 +834,32 @@ bool PrepareAndRegisterMetaVersions(
 
         PendingMetaVersionRegistration plan;
         plan.baseAssembly = registration.baseAssembly;
+
+        auto logicalMappings = s_logicalMethodMappings.find(registration.baseAssembly);
+        if (logicalMappings != s_logicalMethodMappings.end())
+        {
+            plan.state.methodBaseTokens.reserve(logicalMappings->second.size() * 2);
+            for (const auto& mapping : logicalMappings->second)
+            {
+                if (!mapping.first || !mapping.second || mapping.second->token == 0)
+                {
+                    return false;
+                }
+                const uint32_t baseToken = mapping.second->token;
+                auto currentIdentity = plan.state.methodBaseTokens.emplace(
+                    mapping.first, baseToken);
+                if (!currentIdentity.second && currentIdentity.first->second != baseToken)
+                {
+                    return false;
+                }
+                auto baseIdentity = plan.state.methodBaseTokens.emplace(
+                    mapping.second, baseToken);
+                if (!baseIdentity.second && baseIdentity.first->second != baseToken)
+                {
+                    return false;
+                }
+            }
+        }
         for (const MetaVersionType& baseType : baseMetaVersion.types)
         {
             if (currentTypes.find(DigestKey(baseType.stableId)) == currentTypes.end())
@@ -824,6 +892,12 @@ bool PrepareAndRegisterMetaVersions(
             }
             plan.state.changedMethodTokens.insert(baseMethodVersion.token);
             plan.state.baseMethods.emplace(baseMethodVersion.token, baseMethod);
+            auto baseIdentity = plan.state.methodBaseTokens.emplace(
+                baseMethod, baseMethodVersion.token);
+            if (!baseIdentity.second && baseIdentity.first->second != baseMethodVersion.token)
+            {
+                return false;
+            }
             if (!currentMethodVersion)
             {
                 plan.state.resolvedMethods.emplace(baseMethodVersion.token, nullptr);
@@ -1121,6 +1195,7 @@ void ResetForTests()
 {
     std::lock_guard<std::recursive_mutex> lock(s_registrationMutex);
     s_publishedState.store(new PublishedState(), std::memory_order_release);
+    s_logicalMethodMappings.clear();
     ResetDispatchCounters();
 }
 }

@@ -62,6 +62,12 @@ namespace hybridclr::dhe
     bool PrepareChangedMethods(const Il2CppAssembly* assembly,
         const std::vector<uint32_t>& changedMethodTokens,
         std::vector<const MethodInfo*>& resolvedMethods);
+    // SUPERSET metadata keeps a current-image MethodInfo for reflection and a
+    // logical Base MethodInfo for execution. Register that relationship while
+    // the image is built so DHE dispatch can identify methods without relying
+    // on current metadata tokens (which may be reordered).
+    bool RegisterLogicalMethodMapping(const Il2CppAssembly* assembly,
+        const MethodInfo* currentMethod, const MethodInfo* baseMethod);
     bool PrepareAndRegisterMetaVersion(const Il2CppAssembly* baseAssembly,
         const MetaVersionData& baseMetaVersion, const MetaVersionData& currentMetaVersion);
     // Resolve and prepare every assembly first, then publish the complete set

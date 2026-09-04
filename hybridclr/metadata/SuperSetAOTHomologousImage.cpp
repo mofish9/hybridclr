@@ -287,6 +287,12 @@ namespace metadata
 				if (currentMethod && logicalMethod)
 				{
 					_logicalMethods[currentMethod] = logicalMethod;
+					if (!dhe::RegisterLogicalMethodMapping(_targetAssembly,
+						currentMethod, logicalMethod))
+					{
+						RaiseExecutionEngineException(
+							"DHE logical method identity registration failed.");
+					}
 				}
 			}
 		}
