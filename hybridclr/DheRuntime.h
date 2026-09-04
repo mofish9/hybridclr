@@ -9,7 +9,9 @@ struct Il2CppAssembly;
 struct Il2CppClass;
 struct MethodInfo;
 
-namespace hybridclr::dhe
+namespace hybridclr
+{
+namespace dhe
 {
     // The Base Player embeds one immutable MetaVersion per DHE assembly. At
     // runtime it is compared with the current MetaVersion shipped beside the
@@ -51,6 +53,16 @@ namespace hybridclr::dhe
 
     struct MetaVersionRegistration
     {
+        MetaVersionRegistration() = default;
+        MetaVersionRegistration(const Il2CppAssembly* baseAssemblyValue,
+            const MetaVersionData* baseMetaVersionValue,
+            const MetaVersionData* currentMetaVersionValue)
+            : baseAssembly(baseAssemblyValue),
+              baseMetaVersion(baseMetaVersionValue),
+              currentMetaVersion(currentMetaVersionValue)
+        {
+        }
+
         const Il2CppAssembly* baseAssembly = nullptr;
         const MetaVersionData* baseMetaVersion = nullptr;
         const MetaVersionData* currentMetaVersion = nullptr;
@@ -125,4 +137,5 @@ namespace hybridclr::dhe
     // Test-only reset. Production code never needs to remove a registered
     // DHE assembly because the corresponding homologous image is one-shot.
     void ResetForTests();
+}
 }

@@ -22,7 +22,9 @@
 #include "vm/Exception.h"
 #include "Il2CppCompatibleDef.h"
 
-namespace hybridclr::dhe
+namespace hybridclr
+{
+namespace dhe
 {
 namespace
 {
@@ -1197,5 +1199,6 @@ void ResetForTests()
     s_publishedState.store(new PublishedState(), std::memory_order_release);
     s_logicalMethodMappings.clear();
     ResetDispatchCounters();
+}
 }
 }
