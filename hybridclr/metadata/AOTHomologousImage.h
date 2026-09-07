@@ -87,6 +87,11 @@ namespace metadata
 			return 0;
 		}
 
+		virtual const MethodInfo* ResolveLogicalMethod(const MethodInfo* method)
+		{
+			return method;
+		}
+
 		virtual FieldInfo* GetFirstSupplementalField(Il2CppClass* klass, void** iter)
 		{
 			return nullptr;

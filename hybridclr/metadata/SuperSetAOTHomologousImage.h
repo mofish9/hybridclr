@@ -96,6 +96,7 @@ namespace hybridclr
 			Image* GetSupplementalMethodImage(const MethodInfo* method) override;
 			Image* GetMethodResolveImage(const MethodInfo* method) override;
 			size_t GetSupplementalMethodCount(Il2CppClass* klass) override;
+			const MethodInfo* ResolveLogicalMethod(const MethodInfo* method) override;
 			FieldInfo* GetFirstSupplementalField(Il2CppClass* klass, void** iter) override;
 			bool TryGetNextSupplementalField(Il2CppClass* klass, void** iter,
 				FieldInfo** field) override;

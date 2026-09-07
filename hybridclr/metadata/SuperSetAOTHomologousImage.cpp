@@ -452,6 +452,12 @@ namespace metadata
 		}
 	}
 
+	const MethodInfo* SuperSetAOTHomologousImage::ResolveLogicalMethod(const MethodInfo* method)
+	{
+		auto logical = _logicalMethods.find(method);
+		return logical == _logicalMethods.end() ? method : logical->second;
+	}
+
 	const MethodInfo* SuperSetAOTHomologousImage::GetLogicalMethod(
 		const MethodInfo* currentMethod)
 	{

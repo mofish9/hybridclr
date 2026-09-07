@@ -1,4 +1,5 @@
 #include "InterpreterImage.h"
+#include "DheCustomAttributeMetadata.h"
 #include "SuperSetAOTHomologousImage.h"
 
 #include <cstring>
@@ -1427,6 +1428,16 @@ namespace metadata
 		{
 			RaiseExecutionEngineException("GetFieldDeclaringTypeIndexAndFieldIndexByName can't find field");
 		}
+		AOTHomologousImage* propertyImage = _homologousTypeReferenceImage;
+		if ((!propertyImage || propertyInfo->parent->image->assembly != propertyImage->GetTargetAssembly()) &&
+			dhe::IsDheAssembly(propertyInfo->parent->image->assembly))
+			propertyImage = AOTHomologousImage::FindImageByAssembly(propertyInfo->parent->image->assembly);
+		if (TryGetDheAttributePropertyIndex(propertyImage, propertyInfo, fieldIndex))
+		{
+			typeIndex = propertyInfo->parent == klass ? kTypeDefinitionIndexInvalid
+				: il2cpp::vm::GlobalMetadata::GetIndexForTypeDefinition(propertyInfo->parent);
+			return;
+		}
 		if (propertyInfo->parent == klass)
 		{
 			typeIndex = kTypeDefinitionIndexInvalid;
@@ -1452,8 +1463,18 @@ namespace metadata
 		}
 		IL2CPP_ASSERT(fieldIndex != -1);
 #else
-		fieldIndex = (int32_t)(propertyInfo - klass->properties);
+		fieldIndex = -1;
+		for (int32_t i = 0; i < klass->property_count; i++)
+		{
+			if (&klass->properties[i] == propertyInfo)
+			{
+				fieldIndex = i;
+				break;
+			}
+		}
 #endif
+		if (fieldIndex == -1)
+			RaiseExecutionEngineException("Custom attribute property has no physical or logical slot.");
 	}
 
 	void InterpreterImage::ConvertILCustomAttributeData2Il2CppFormat(const MethodInfo* ctorMethod, BlobReader& reader)

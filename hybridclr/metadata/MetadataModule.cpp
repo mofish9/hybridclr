@@ -1,4 +1,5 @@
 #include "MetadataModule.h"
+#include "DheCustomAttributeMetadata.h"
 
 #include "os/Atomic.h"
 #include "os/Mutex.h"
@@ -279,6 +280,21 @@ namespace metadata
         AOTHomologousImage* homologous = AOTHomologousImage::FindImageByAssembly(image->assembly);
         return homologous && homologous->GetTargetAssembly()->image == image ? homologous : nullptr;
     }
+
+	const PropertyInfo* MetadataModule::GetDheCustomAttributeProperty(Il2CppClass* klass, uint32_t index)
+	{
+		return GetDheAttributePropertyByIndex(GetDheSupplementalImage(klass->image), klass, index);
+	}
+
+	const MethodInfo* MetadataModule::ResolveDheCustomAttributeConstructor(const MethodInfo* method)
+	{
+		if (!method || !method->klass || !method->klass->image ||
+			!IS_INTERPRETER_IMAGE(method->klass->image) ||
+			!dhe::IsDheAssembly(method->klass->image->assembly))
+			return method;
+		AOTHomologousImage* image = AOTHomologousImage::FindImageByAssembly(method->klass->image->assembly);
+		return image ? image->ResolveLogicalMethod(method) : method;
+	}
 
 	bool MetadataModule::TryGetDheCustomAttributeSource(const Il2CppImage* image,
 		uint32_t token, const Il2CppImage*& sourceImage, uint32_t& sourceToken)
