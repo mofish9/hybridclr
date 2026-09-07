@@ -168,9 +168,10 @@ namespace hybridclr
 		// DHE leaves unchanged methods on their native AOT entry. They still
 		// participate in interpreter call graphs, where the managed-to-native
 		// reflection bridge invokes methodPointer directly.
-		if (IsDheUnchangedMethod(method))
+		if (IsDheUnchangedMethod(method) &&
+			ReadPublishedPointer(&const_cast<MethodInfo*>(method)->methodPointer) != nullptr)
 		{
-			return ReadPublishedPointer(&const_cast<MethodInfo*>(method)->methodPointer) != nullptr;
+			return true;
 		}
 		return InitAndGetInterpreterDirectlyCallMethodPointer(method) != nullptr;
 	}
