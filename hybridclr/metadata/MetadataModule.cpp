@@ -288,6 +288,41 @@ namespace metadata
 			token, sourceImage, sourceToken);
 	}
 
+    const Il2CppImage* MetadataModule::GetDheMethodMetadataImage(const MethodInfo* method)
+    {
+        const Il2CppImage* image = method->klass->image;
+        AOTHomologousImage* homologous = GetDheSupplementalImage(image);
+        Image* supplemental = homologous ? homologous->GetSupplementalMethodImage(method) : nullptr;
+        return supplemental ? static_cast<InterpreterImage*>(supplemental)->GetIl2CppImage() : image;
+    }
+
+    bool MetadataModule::TryGetDheReferencedAssemblies(const Il2CppAssembly* assembly,
+        std::vector<const Il2CppAssemblyName*>& references)
+    {
+        AOTHomologousImage* homologous = GetDheSupplementalImage(assembly->image);
+        if (!homologous)
+        {
+            return false;
+        }
+        RawImageBase& raw = homologous->GetRawImage();
+        std::vector<const Il2CppAssemblyName*> currentReferences;
+        const uint32_t count = raw.GetTable(TableType::ASSEMBLYREF).rowNum;
+        currentReferences.reserve(count);
+        for (uint32_t row = 1; row <= count; ++row)
+        {
+            TbAssemblyRef reference = raw.ReadAssemblyRef(row);
+            const char* name = raw.GetStringFromRawIndex(reference.name);
+            const Il2CppAssembly* referencedAssembly = il2cpp::vm::Assembly::GetLoadedAssembly(name);
+            if (!referencedAssembly)
+            {
+                il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetDllNotFoundException(name));
+            }
+            currentReferences.push_back(&referencedAssembly->aname);
+        }
+        references.insert(references.end(), currentReferences.begin(), currentReferences.end());
+        return true;
+    }
+
     Il2CppClass* MetadataModule::FindDheSupplementalType(const Il2CppImage* image,
         const char* namespaze, const char* name)
     {

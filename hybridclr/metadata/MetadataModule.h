@@ -54,6 +54,11 @@ namespace metadata
 		static Image* GetUnderlyingInterpreterImage(const MethodInfo* method);
 		static Image* GetInterpreterResolveImage(const MethodInfo* method);
 
+        static const Il2CppImage* GetDheMethodMetadataImage(const MethodInfo* method);
+
+        static bool TryGetDheReferencedAssemblies(const Il2CppAssembly* assembly,
+            std::vector<const Il2CppAssemblyName*>& references);
+
 		static Il2CppClass* FindDheSupplementalType(const Il2CppImage* image,
 			const char* namespaze, const char* name);
 

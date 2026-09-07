@@ -728,6 +728,10 @@ namespace metadata
 
 	Image* SuperSetAOTHomologousImage::GetSupplementalMethodImage(const MethodInfo* method)
 	{
+		if (method->is_inflated)
+		{
+			method = method->genericMethod->methodDefinition;
+		}
 		auto image = _supplementalMethodImages.find(method);
 		return image == _supplementalMethodImages.end() ? nullptr : image->second;
 	}
