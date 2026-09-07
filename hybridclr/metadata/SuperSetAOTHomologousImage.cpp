@@ -742,12 +742,12 @@ namespace metadata
 		{
 			method = method->genericMethod->methodDefinition;
 		}
-		// Both the public alias and the hidden current MethodInfo must resolve
-		// body tokens through the merged Base/current metadata view. Methods on
-		// wholly new types are absent from both maps and keep their interpreter
-		// image as the resolution context.
+		// New types can also refer back to Base types. Their bodies must use the
+		// merged view, or typeof/casts/calls see a second hidden current class.
 		return _supplementalMethodImages.find(method) != _supplementalMethodImages.end() ||
-			_logicalMethods.find(method) != _logicalMethods.end()
+			_logicalMethods.find(method) != _logicalMethods.end() ||
+			(_interpreterFallbackImage &&
+				method->klass->image == _interpreterFallbackImage->GetIl2CppImage())
 			? this : nullptr;
 	}
 
