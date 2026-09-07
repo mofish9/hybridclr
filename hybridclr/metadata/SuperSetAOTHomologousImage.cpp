@@ -738,6 +738,10 @@ namespace metadata
 
 	Image* SuperSetAOTHomologousImage::GetMethodResolveImage(const MethodInfo* method)
 	{
+		if (method->is_inflated)
+		{
+			method = method->genericMethod->methodDefinition;
+		}
 		// Both the public alias and the hidden current MethodInfo must resolve
 		// body tokens through the merged Base/current metadata view. Methods on
 		// wholly new types are absent from both maps and keep their interpreter
