@@ -349,14 +349,17 @@ namespace metadata
 		{
 			Il2CppClass* klass = method->klass;
 			const Il2CppAssembly* assembly = klass && klass->image ? klass->image->assembly : nullptr;
-			if (AOTHomologousImage::FindImageByAssembly(assembly))
+			if (AOTHomologousImage* image = AOTHomologousImage::FindImageByAssembly(assembly))
 			{
 				// Ordinary supplemental metadata keeps the historical assembly-wide
 				// interpreter behavior. A registered DHE image narrows it to the
 				// methods listed by mv; all other methods remain native AOT.
 				if (dhe::IsDheAssembly(assembly))
 				{
-					return dhe::IsChangedMethod(method);
+					// Supplemental aliases keep a Base declaring class, but have no
+					// Base token or AOT implementation, including generic inflations.
+					return image->GetSupplementalMethodImage(method) != nullptr ||
+						dhe::IsChangedMethod(method);
 				}
 				return true;
 			}
