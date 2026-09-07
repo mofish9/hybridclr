@@ -289,7 +289,7 @@ namespace metadata
 	const MethodInfo* MetadataModule::ResolveDheCustomAttributeConstructor(const MethodInfo* method)
 	{
 		if (!method || !method->klass || !method->klass->image ||
-			!IS_INTERPRETER_IMAGE(method->klass->image) ||
+			!IsInterpreterImage(method->klass->image) ||
 			!dhe::IsDheAssembly(method->klass->image->assembly))
 			return method;
 		AOTHomologousImage* image = AOTHomologousImage::FindImageByAssembly(method->klass->image->assembly);
