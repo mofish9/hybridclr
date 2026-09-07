@@ -3534,8 +3534,8 @@ namespace metadata
 			resolved.data.type = ResolveHomologousType(type->data.type);
 			break;
 		case IL2CPP_TYPE_ARRAY:
-			resolved.data.array = MetadataPool::GetPooledIl2CppArrayType(
-				ResolveHomologousType(type->data.array->etype), type->data.array->rank);
+			resolved.data.array = const_cast<Il2CppArrayType*>(MetadataPool::GetPooledIl2CppArrayType(
+				ResolveHomologousType(type->data.array->etype), type->data.array->rank));
 			break;
 		default:
 			break;
