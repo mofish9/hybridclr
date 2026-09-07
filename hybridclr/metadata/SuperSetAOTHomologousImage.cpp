@@ -81,16 +81,25 @@ namespace metadata
 
 	void SuperSetAOTHomologousImage::InitRuntimeMetadatas()
 	{
+		if (_typeIntermediateInfos.empty())
+		{
+			InitTypeReferences();
+		}
+		InitSupplementalTypes(_typeIntermediateInfos);
+		InitMethods(_typeIntermediateInfos);
+		InitFields(_typeIntermediateInfos);
+		InitPropertiesAndEvents(_typeIntermediateInfos);
+		_typeIntermediateInfos.clear();
+		_typeIntermediateInfos.shrink_to_fit();
+	}
+
+	void SuperSetAOTHomologousImage::InitTypeReferences()
+	{
 		_defaultIl2CppType = &il2cpp_defaults.missing_class->byval_arg;
 
-		std::vector< SuperSetTypeIntermediateInfo> typeIntermediateInfos;
-		InitTypes0(typeIntermediateInfos);
-		InitNestedClass(typeIntermediateInfos);
-		InitTypes1(typeIntermediateInfos);
-
-		InitMethods(typeIntermediateInfos);
-		InitFields(typeIntermediateInfos);
-		InitPropertiesAndEvents(typeIntermediateInfos);
+		InitTypes0(_typeIntermediateInfos);
+		InitNestedClass(_typeIntermediateInfos);
+		InitTypes1(_typeIntermediateInfos);
 	}
 
 	void SuperSetAOTHomologousImage::InitTypes0(std::vector< SuperSetTypeIntermediateInfo>& typeIntermediateInfos)
@@ -168,7 +177,7 @@ namespace metadata
 		if (_interpreterFallbackImage)
 		{
 			const uint32_t rawTypeIndex = rowIndex - 1;
-			type.aotIl2CppType = _interpreterFallbackImage->GetIl2CppTypeFromRawTypeDefIndex(rawTypeIndex);
+			type.aotIl2CppType = _interpreterFallbackImage->GetRawTypeDefinitionType(rawTypeIndex);
 		}
 		else
 		{
@@ -208,7 +217,20 @@ namespace metadata
 				_customAttributeTokens[td.aotTypeDef->token] =
 					EncodeToken(TableType::TYPEDEF, rawTypeIndex + 1);
 			}
-			else if (_interpreterFallbackImage && rawTypeIndex != 0)
+		}
+	}
+
+	void SuperSetAOTHomologousImage::InitSupplementalTypes(
+		std::vector<SuperSetTypeIntermediateInfo>& typeIntermediateInfos)
+	{
+		if (!_interpreterFallbackImage)
+		{
+			return;
+		}
+		for (uint32_t rawTypeIndex = 1; rawTypeIndex < typeIntermediateInfos.size(); ++rawTypeIndex)
+		{
+			SuperSetTypeIntermediateInfo& td = typeIntermediateInfos[rawTypeIndex];
+			if (!td.aotTypeDef)
 			{
 				Il2CppClass* supplemental =
 					_interpreterFallbackImage->GetTypeInfoFromTypeDefinitionRawIndex(rawTypeIndex);
@@ -372,7 +394,7 @@ namespace metadata
 					const uint32_t rawTypeIndex = static_cast<uint32_t>(
 						&type - &typeIntermediateInfos[0]);
 					field.declaringIl2CppType =
-						_interpreterFallbackImage->GetIl2CppTypeFromRawTypeDefIndex(rawTypeIndex);
+						_interpreterFallbackImage->GetRawTypeDefinitionType(rawTypeIndex);
 					field.interpreterFallback = true;
 					if (type.aotTypeDef)
 					{

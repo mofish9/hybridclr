@@ -267,9 +267,14 @@ namespace metadata
 			// Supplemental types must report the public Base assembly identity even
 			// though their metadata and executable bodies live in this hidden image.
 			fallbackIl2CppImage->assembly = const_cast<Il2CppAssembly*>(aotAss);
-			interpreterFallbackImage->InitRuntimeMetadatas();
 			static_cast<SuperSetAOTHomologousImage*>(image)->SetInterpreterFallbackImage(
 				interpreterFallbackImage);
+			if (expectedAssemblyName)
+			{
+				interpreterFallbackImage->SetHomologousTypeReferenceImage(
+					static_cast<SuperSetAOTHomologousImage*>(image));
+			}
+			interpreterFallbackImage->InitRuntimeMetadatas();
 		}
         image->InitRuntimeMetadatas();
         AOTHomologousImage::RegisterLocked(image, lock);

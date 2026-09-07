@@ -21,6 +21,7 @@ namespace metadata
 	void FlushMetadataProfile();
 
 	class ClassFieldLayoutCalculator;
+	class SuperSetAOTHomologousImage;
 	struct InterfaceOffsetInfo
 	{
 		const Il2CppType* type;
@@ -504,7 +505,9 @@ namespace metadata
 
 		const Il2CppType* GetIl2CppTypeFromRawIndex(uint32_t index) const;
 
-		const Il2CppType* GetIl2CppTypeFromRawTypeDefIndex(uint32_t index) override
+		const Il2CppType* GetIl2CppTypeFromRawTypeDefIndex(uint32_t index) override;
+
+		const Il2CppType* GetRawTypeDefinitionType(uint32_t index) const
 		{
 			IL2CPP_ASSERT(index < (uint32_t)_typesDefines.size());
 			return GetIl2CppTypeFromRawIndex(DecodeMetadataIndex(_typesDefines[index].byvalTypeIndex));
@@ -987,6 +990,10 @@ namespace metadata
 		void BuildIl2CppAssembly(Il2CppAssembly* assembly);
 
 		void InitRuntimeMetadatas() override;
+		void SetHomologousTypeReferenceImage(SuperSetAOTHomologousImage* image)
+		{
+			_homologousTypeReferenceImage = image;
+		}
 		bool TryApplyClassLayoutLocked(Il2CppClass* klass);
 	protected:
 
@@ -1046,6 +1053,8 @@ namespace metadata
 		bool ReadUTF8SerString(BlobReader& reader, std::string& s);
 #endif
 		Il2CppReflectionType* ReadSystemType(BlobReader& reader);
+		Il2CppReflectionType* ReadAttributeTypeName(Il2CppString* name);
+		const Il2CppType* ResolveHomologousType(const Il2CppType* type);
 		Il2CppObject* ReadBoxedValue(BlobReader& reader);
 		void ReadFixedArg(BlobReader& reader, const Il2CppType* argType, void* data);
 		void ReadCustomAttributeFieldOrPropType(BlobReader& reader, Il2CppType& type);
@@ -1056,6 +1065,7 @@ namespace metadata
 
 		bool _inited;
 		Il2CppImage* _il2cppImage;
+		SuperSetAOTHomologousImage* _homologousTypeReferenceImage = nullptr;
 		const uint32_t _index;
 		static bool IsMetadataPublished(const int32_t* initialized)
 		{

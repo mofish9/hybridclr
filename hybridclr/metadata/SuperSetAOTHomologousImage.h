@@ -76,6 +76,7 @@ namespace hybridclr
 			}
 
 			void InitRuntimeMetadatas() override;
+			void InitTypeReferences();
 
 			const Il2CppType* ReadTypeFromResolutionScope(uint32_t scope, uint32_t typeNamespace, uint32_t typeName) override;
 			MethodBody* GetMethodBody(uint32_t token) override;
@@ -119,6 +120,7 @@ namespace hybridclr
 			void InitNestedClass(std::vector<SuperSetTypeIntermediateInfo>& typeIntermediateInfos);
 			void InitType(std::vector<SuperSetTypeIntermediateInfo>& typeIntermediateInfos, SuperSetTypeIntermediateInfo& type);
 			void InitTypes1(std::vector<SuperSetTypeIntermediateInfo>& typeIntermediateInfos);
+			void InitSupplementalTypes(std::vector<SuperSetTypeIntermediateInfo>& typeIntermediateInfos);
 			void ReadMethodDefSig(BlobReader& reader, MethodRefSig& method);
 			void InitMethods(std::vector<SuperSetTypeIntermediateInfo>& typeIntermediateInfos);
 			void InitFields(std::vector<SuperSetTypeIntermediateInfo>& typeIntermediateInfos);
@@ -129,6 +131,7 @@ namespace hybridclr
 			const Il2CppType* _defaultIl2CppType;
 
 			std::vector<SuperSetTypeDefDetail> _typeDefs;
+			std::vector<SuperSetTypeIntermediateInfo> _typeIntermediateInfos;
 			Il2CppHashMap<int32_t, SuperSetTypeDefDetail*, il2cpp::utils::PassThroughHash<int32_t>> _aotTypeIndex2TypeDefs;
 
 			Il2CppHashMap<uint32_t, SuperSetMethodDefDetail*, il2cpp::utils::PassThroughHash<uint32_t>> _token2MethodDefs;

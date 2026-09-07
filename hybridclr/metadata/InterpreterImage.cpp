@@ -1,4 +1,5 @@
 #include "InterpreterImage.h"
+#include "SuperSetAOTHomologousImage.h"
 
 #include <cstring>
 #include <cmath>
@@ -316,6 +317,12 @@ namespace metadata
 
 		HC_METADATA_STAGE(_index, "InitGenericParamDefs0", InitGenericParamDefs0());
 		HC_METADATA_STAGE(_index, "InitTypeDefs_0", InitTypeDefs_0());
+		// Bind TypeDef references before signatures, parents and layouts can
+		// publish hidden Current classes as the types of public declarations.
+		if (_homologousTypeReferenceImage)
+		{
+			_homologousTypeReferenceImage->InitTypeReferences();
+		}
 		HC_METADATA_STAGE(_index, "InitMethodDefs0", InitMethodDefs0());
 		HC_METADATA_STAGE(_index, "InitGenericParamDefs", InitGenericParamDefs());
 		HC_METADATA_STAGE(_index, "InitNestedClass", InitNestedClass()); // must before typedefs1, because parent may be nested class
@@ -1131,7 +1138,7 @@ namespace metadata
 			writer.WriteCompressedInt32(-1);
 			return;
 		}
-		Il2CppReflectionType* type = GetReflectionTypeFromName(fullName);
+		Il2CppReflectionType* type = ReadAttributeTypeName(fullName);
 		if (!type)
 		{
 			std::string stdTypeName = il2cpp::utils::StringUtils::Utf16ToUtf8(fullName->chars);
@@ -2982,7 +2989,7 @@ namespace metadata
 		IL2CPP_ASSERT(rowIndex > 0);
 		EnsureFieldMetadataInitializedLocked(rowIndex - 1);
 		const FieldDetail& fd = GetFieldDetailFromRawIndex(rowIndex - 1);
-		ret.containerType = GetIl2CppTypeFromRawTypeDefIndex(DecodeMetadataIndex(fd.typeDefIndex));
+		ret.containerType = GetRawTypeDefinitionType(DecodeMetadataIndex(fd.typeDefIndex));
 		ret.field = &fd.fieldDef;
 	}
 
@@ -3472,7 +3479,7 @@ namespace metadata
 		{
 			return nullptr;
 		}
-		Il2CppReflectionType* type = GetReflectionTypeFromName(fullName);
+		Il2CppReflectionType* type = ReadAttributeTypeName(fullName);
 		if (!type)
 		{
 			std::string stdTypeName = il2cpp::utils::StringUtils::Utf16ToUtf8(fullName->chars);
@@ -3480,6 +3487,60 @@ namespace metadata
 			il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetTypeLoadException(errMsg));
 		}
 		return type;
+	}
+
+	Il2CppReflectionType* InterpreterImage::ReadAttributeTypeName(Il2CppString* name)
+	{
+		Il2CppReflectionType* reflection = GetReflectionTypeFromName(name);
+		if (!_homologousTypeReferenceImage || !reflection)
+		{
+			return reflection;
+		}
+		return il2cpp::vm::Reflection::GetTypeObject(ResolveHomologousType(reflection->type));
+	}
+
+	const Il2CppType* InterpreterImage::ResolveHomologousType(const Il2CppType* type)
+	{
+		Il2CppType resolved = *type;
+		switch (type->type)
+		{
+		case IL2CPP_TYPE_CLASS:
+		case IL2CPP_TYPE_VALUETYPE:
+		{
+			const Il2CppTypeDefinition* definition =
+				(const Il2CppTypeDefinition*)type->data.typeHandle;
+			if (definition && DecodeImageIndex(definition->byvalTypeIndex) == _index)
+			{
+				resolved.data = GetIl2CppTypeFromRawTypeDefIndex(GetTypeRawIndex(definition))->data;
+			}
+			break;
+		}
+		case IL2CPP_TYPE_GENERICINST:
+		{
+			const Il2CppGenericClass* generic = type->data.generic_class;
+			const Il2CppGenericInst* arguments = generic->context.class_inst;
+			std::vector<const Il2CppType*> types(arguments->type_argc);
+			for (uint32_t index = 0; index < arguments->type_argc; ++index)
+			{
+				types[index] = ResolveHomologousType(arguments->type_argv[index]);
+			}
+			resolved.data.generic_class = const_cast<Il2CppGenericClass*>(
+				il2cpp::metadata::GenericMetadata::GetGenericClass(ResolveHomologousType(generic->type),
+					il2cpp::vm::MetadataCache::GetGenericInst(types.data(), static_cast<uint32_t>(types.size()))));
+			break;
+		}
+		case IL2CPP_TYPE_SZARRAY:
+		case IL2CPP_TYPE_PTR:
+			resolved.data.type = ResolveHomologousType(type->data.type);
+			break;
+		case IL2CPP_TYPE_ARRAY:
+			resolved.data.array = MetadataPool::GetPooledIl2CppArrayType(
+				ResolveHomologousType(type->data.array->etype), type->data.array->rank);
+			break;
+		default:
+			break;
+		}
+		return MetadataPool::GetPooledIl2CppType(resolved);
 	}
 
 
@@ -3664,7 +3725,7 @@ namespace metadata
 		{
 			Il2CppString* enumTypeName = ReadSerString(reader);
 
-			Il2CppReflectionType* enumType = GetReflectionTypeFromName(enumTypeName);
+			Il2CppReflectionType* enumType = ReadAttributeTypeName(enumTypeName);
 			if (!enumType)
 			{
 				std::string stdStrName = il2cpp::utils::StringUtils::Utf16ToUtf8(enumTypeName->chars);
@@ -3744,7 +3805,7 @@ namespace metadata
 			Il2CppTypeDefinition* typeDef = GetTypeDefinitionByTypeDetail(&type);
 			if (typeDef->namespaceIndex == encodedNamespaceIndex && typeDef->nameIndex == encodedNameIndex)
 			{
-				return GetIl2CppTypeFromTypeDefinition(typeDef);
+				return GetIl2CppTypeFromRawTypeDefIndex(GetTypeRawIndex(typeDef));
 			}
 		}
 		if (!raiseExceptionIfNotFound)
@@ -3758,6 +3819,13 @@ namespace metadata
 			CStringToStringView(typeNameStr),
 			CStringToStringView(_il2cppImage->nameNoExt)));
 		return nullptr;
+	}
+
+	const Il2CppType* InterpreterImage::GetIl2CppTypeFromRawTypeDefIndex(uint32_t index)
+	{
+		return _homologousTypeReferenceImage
+			? _homologousTypeReferenceImage->GetIl2CppTypeFromRawTypeDefIndex(index)
+			: GetRawTypeDefinitionType(index);
 	}
 }
 }
