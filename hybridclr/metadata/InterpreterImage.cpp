@@ -1049,7 +1049,12 @@ namespace metadata
 		auto stageStart = std::chrono::steady_clock::now();
 #endif
 		MethodRefInfo mri = {};
-		ReadMethodRefInfoFromToken(nullptr, nullptr, DecodeTokenTableType(ctorMethodToken), DecodeTokenRowIndex(ctorMethodToken), mri);
+		// The serialized constructor index must name the same public class that
+		// reflection filters and allocates, including attributes already in Base.
+		Image* resolveImage = _homologousTypeReferenceImage
+			? static_cast<Image*>(_homologousTypeReferenceImage) : this;
+		resolveImage->ReadMethodRefInfoFromToken(nullptr, nullptr,
+			DecodeTokenTableType(ctorMethodToken), DecodeTokenRowIndex(ctorMethodToken), mri);
 		const MethodInfo* ctorMethod = GetMethodInfoFromMethodDef(mri.containerType, mri.methodDef);
 		MethodIndex ctorIndex = il2cpp::vm::GlobalMetadata::GetMethodIndexFromDefinition(mri.methodDef);
 		auto result = _customAttributeCtorInfos.emplace(ctorMethodToken, CustomAttributeCtorInfo{ ctorMethod, ctorIndex, mri.methodDef->parameterCount });
