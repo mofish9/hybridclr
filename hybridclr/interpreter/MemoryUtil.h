@@ -141,6 +141,21 @@ namespace interpreter
 		}
 	}
 
+	// The destination must not overlap the caller frame, including later arguments.
+	inline void CopyIndexedStackArguments(StackObject* dst, StackObject* localVarBase,
+		const uint16_t* argIndices, const InterpMethodInfo& method)
+	{
+		uint32_t offset = 0;
+		for (uint32_t i = 0; i < method.argCount; ++i)
+		{
+			uint32_t size = method.args[i].stackObjectSize;
+			IL2CPP_ASSERT(offset + size <= method.argStackObjectSize);
+			CopyStackObject(dst + offset, localVarBase + argIndices[i], size);
+			offset += size;
+		}
+		IL2CPP_ASSERT(offset == method.argStackObjectSize);
+	}
+
 	inline void CopyBySize(void* dst, void* src, uint32_t size)
 	{
 		switch (size)

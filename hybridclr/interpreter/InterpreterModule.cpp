@@ -300,7 +300,12 @@ namespace interpreter
 		}
 		if (hybridclr::metadata::IsInterpreterImplement(method))
 		{
-			Interpreter::Execute(method,  localVarBase + argVarIndexs[0], ret);
+			const InterpMethodInfo* imi = GetInterpMethodInfo(method);
+			// Native-form constructors can place this after their explicit arguments.
+			// The caller frame keeps their original references rooted during this copy.
+			std::vector<StackObject> args(imi->argStackObjectSize ? imi->argStackObjectSize : 1);
+			CopyIndexedStackArguments(args.data(), localVarBase, argVarIndexs, *imi);
+			Interpreter::Execute(method, args.data(), ret);
 			return;
 		}
 		if (method && method->klass && method->klass->image &&
