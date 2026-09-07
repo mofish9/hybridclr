@@ -349,7 +349,7 @@ namespace metadata
 		}
 #endif
 
-		static bool IsImplementedByInterpreter(MethodInfo* method)
+		static bool IsImplementedByInterpreter(MethodInfo* method, bool aotImplementationMissing = false)
 		{
 			Il2CppClass* klass = method->klass;
 			const Il2CppAssembly* assembly = klass && klass->image ? klass->image->assembly : nullptr;
@@ -357,12 +357,13 @@ namespace metadata
 			{
 				// Ordinary supplemental metadata keeps the historical assembly-wide
 				// interpreter behavior. A registered DHE image narrows it to the
-				// methods listed by mv; all other methods remain native AOT.
+				// methods listed by mv, unless the requested instantiation has no AOT code.
 				if (dhe::IsDheAssembly(assembly))
 				{
 					// Supplemental aliases keep a Base declaring class, but have no
 					// Base token or AOT implementation, including generic inflations.
-					return image->GetSupplementalMethodImage(method) != nullptr ||
+					return aotImplementationMissing || IsInterpreterImplement(method) ||
+						image->GetSupplementalMethodImage(method) != nullptr ||
 						dhe::IsChangedMethod(method);
 				}
 				return true;

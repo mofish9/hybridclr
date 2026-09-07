@@ -157,7 +157,8 @@ namespace hybridclr
 		// MetadataModule::IsImplementedByInterpreter may acquire g_MetadataLock.
 		// Resolve it before taking the method-pointer lock so this path never
 		// creates an s_methodPointerInitLock -> g_MetadataLock edge.
-		bool implementedByInterpreter = hybridclr::metadata::MetadataModule::IsImplementedByInterpreter(method);
+		bool implementedByInterpreter = hybridclr::metadata::MetadataModule::IsImplementedByInterpreter(
+			method, ReadPublishedPointer(&method->methodPointer) == nullptr);
 		ResolvedInterpreterCallMethodPointers resolved = ResolveInterpreterCallMethodPointers(
 			method, implementedByInterpreter);
 		il2cpp::os::FastAutoLock lock(&s_methodPointerInitLock);
@@ -184,7 +185,7 @@ namespace hybridclr
 			if (needsInterpreterFallback)
 			{
 				implementedByInterpreter = hybridclr::metadata::MetadataModule::IsImplementedByInterpreter(
-					const_cast<MethodInfo*>(method));
+					const_cast<MethodInfo*>(method), true);
 			}
 			ResolvedInterpreterCallMethodPointers resolved;
 			if (implementedByInterpreter)
