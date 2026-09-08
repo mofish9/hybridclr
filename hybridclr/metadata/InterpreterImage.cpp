@@ -2117,6 +2117,12 @@ namespace metadata
 			MethodImpl& impl = methodImpls[i];
 			ReadMethodRefInfoFromToken(gc, nullptr, DecodeMethodDefOrRefCodedIndexTableType(data.methodBody), DecodeMethodDefOrRefCodedIndexRowIndex(data.methodBody), impl.body);
 			ReadMethodRefInfoFromToken(gc, nullptr, DecodeMethodDefOrRefCodedIndexTableType(data.methodDeclaration), DecodeMethodDefOrRefCodedIndexRowIndex(data.methodDeclaration), impl.declaration);
+			if (_homologousTypeReferenceImage)
+			{
+				// MethodDef references retain the hidden Current owner, while the
+				// interface list uses Base identity. Keep the Current declaration.
+				impl.declaration.containerType = ResolveHomologousType(impl.declaration.containerType);
+			}
 		}
 		return methodImpls;
 	}
