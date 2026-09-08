@@ -937,6 +937,7 @@ namespace interpreter
 		LdcVarConst_4_Add_i4_Ret_4,
 		DheLdfldVarVar,
 		DheStfldVarVar,
+		DheLdfldaVarVar,
 
 		//!!!}}OPCODE
 	};
@@ -10845,6 +10846,19 @@ namespace interpreter
 	{
 		uint16_t obj;
 		uint16_t data;
+		uint8_t __pad6;
+		uint8_t __pad7;
+		uint32_t field;
+		uint8_t __pad12;
+		uint8_t __pad13;
+		uint8_t __pad14;
+		uint8_t __pad15;
+	};
+
+	struct IRDheLdfldaVarVar : IRCommon
+	{
+		uint16_t dst;
+		uint16_t obj;
 		uint8_t __pad6;
 		uint8_t __pad7;
 		uint32_t field;

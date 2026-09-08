@@ -5360,7 +5360,14 @@ else \
 				IL2CPP_ASSERT(fieldInfo);
 				if (hybridclr::metadata::MetadataModule::IsDheSupplementalInstanceField(fieldInfo))
 				{
-					RaiseExecutionEngineException("ldflda is not supported for DHE supplemental instance fields.");
+					CreateAddIR(ir, DheLdfldaVarVar);
+					ir->dst = GetEvalStackTopOffset();
+					ir->obj = ir->dst;
+					ir->field = GetOrAddResolveDataIndex(fieldInfo);
+					PopStack();
+					PushStackByReduceType(NATIVE_INT_REDUCE_TYPE);
+					ip += 5;
+					continue;
 				}
 
 				uint16_t topIdx = GetEvalStackTopOffset();

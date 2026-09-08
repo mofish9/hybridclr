@@ -14,6 +14,7 @@
 #include "vm/Field.h"
 #include "vm/Image.h"
 #include "vm/MetadataLock.h"
+#include "vm/MetadataCache.h"
 #include "gc/GarbageCollector.h"
 #include "gc/GCHandle.h"
 #include "gc/WriteBarrier.h"
@@ -67,6 +68,16 @@ namespace metadata
 			uint32_t slot;
 			FieldInfo* logicalField;
 		};
+
+		struct DheFieldCellLayout
+		{
+			Il2CppClass* klass;
+			FieldInfo* value;
+			int32_t ownerOffset;
+		};
+
+		// Cell layouts are immutable after publication under g_MetadataLock.
+		std::unordered_map<Il2CppClass*, DheFieldCellLayout> s_dheFieldCellLayouts;
 
 		std::mutex s_dheSidecarMutex;
 		std::unordered_map<const FieldInfo*, DheInstanceFieldSlot> s_dheInstanceFieldSlots;
@@ -227,6 +238,80 @@ namespace metadata
 			DheEphemeron* entry = GetOrCreateDheSidecarEntryLocked(obj);
 			Il2CppArray* values = EnsureDheSidecarValuesLocked(entry, slot + 1);
 			il2cpp_array_setref(values, slot, value);
+		}
+
+		DheFieldCellLayout GetDheFieldCellLayoutLocked(const Il2CppType* type)
+		{
+			Il2CppClass* fieldType = il2cpp::vm::Class::FromIl2CppType(type);
+			auto existing = s_dheFieldCellLayouts.find(fieldType);
+			if (existing != s_dheFieldCellLayouts.end())
+				return existing->second;
+
+			const Il2CppAssembly* assembly = il2cpp::vm::Assembly::GetLoadedAssembly("HybridCLR.Runtime");
+			Il2CppClass* definition = assembly ? il2cpp::vm::Class::FromName(
+				assembly->image, "HybridCLR", "DheFieldCell`1") : nullptr;
+			if (!definition || !definition->is_generic)
+				RaiseExecutionEngineException("DHE requires the preserved HybridCLR.DheFieldCell<T> runtime type.");
+			const Il2CppType* argument = &fieldType->byval_arg;
+			Il2CppClass* cellClass = il2cpp::vm::MetadataCache::GetGenericInstanceType(definition, &argument, 1);
+			if (!cellClass)
+				RaiseExecutionEngineException("DHE field cell generic instantiation failed.");
+			il2cpp::vm::Class::Init(cellClass);
+			FieldInfo* owner = il2cpp::vm::Class::GetFieldFromName(cellClass, "Owner");
+			FieldInfo* value = il2cpp::vm::Class::GetFieldFromName(cellClass, "Value");
+			if (!owner || !value || owner->type->type != IL2CPP_TYPE_OBJECT ||
+				(owner->type->attrs & FIELD_ATTRIBUTE_STATIC) || (value->type->attrs & FIELD_ATTRIBUTE_STATIC) ||
+				owner->offset < static_cast<int32_t>(sizeof(Il2CppObject)) ||
+				value->offset < static_cast<int32_t>(sizeof(Il2CppObject)) ||
+				il2cpp::vm::Class::FromIl2CppType(value->type) != fieldType)
+				RaiseExecutionEngineException("DHE field cell layout is missing or incompatible.");
+			uint32_t valueSize = fieldType->byval_arg.valuetype
+				? il2cpp::vm::Class::GetValueSize(fieldType, nullptr) : sizeof(Il2CppObject*);
+			uint64_t ownerEnd = static_cast<uint64_t>(owner->offset) + sizeof(Il2CppObject*);
+			uint64_t valueEnd = static_cast<uint64_t>(value->offset) + valueSize;
+			if (ownerEnd > cellClass->instance_size || valueEnd > cellClass->instance_size ||
+				(owner->offset < valueEnd && value->offset < ownerEnd))
+				RaiseExecutionEngineException("DHE field cell storage overlaps or exceeds its managed layout.");
+			DheFieldCellLayout layout = { cellClass, value, owner->offset };
+			s_dheFieldCellLayouts.emplace(fieldType, layout);
+			return layout;
+		}
+
+		bool TryGetDheFieldCell(Il2CppObject* obj, const FieldInfo* field,
+			Il2CppObject*& cell, FieldInfo*& valueField)
+		{
+			uint32_t slot;
+			FieldInfo* logicalField;
+			{
+				std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
+				if (!TryGetDheFieldSlotLocked(field, slot, logicalField))
+					return false;
+			}
+			if (!obj)
+				il2cpp::vm::Exception::RaiseNullReferenceException();
+			// Never enter engine Field APIs under the sidecar mutex: they reenter DHE.
+			il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
+			DheFieldCellLayout layout = GetDheFieldCellLayoutLocked(logicalField->type);
+			valueField = layout.value;
+			{
+				std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
+				cell = GetDheSidecarValueLocked(obj, slot);
+				if (cell)
+					return true;
+			}
+			Il2CppObject* created = il2cpp::vm::Object::New(layout.klass);
+			gc::WriteBarrier::GenericStore(reinterpret_cast<Il2CppObject**>(
+				reinterpret_cast<uint8_t*>(created) + layout.ownerOffset), obj);
+			{
+				std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
+				cell = GetDheSidecarValueLocked(obj, slot);
+				if (!cell)
+				{
+					SetDheSidecarValueLocked(obj, slot, created);
+					cell = created;
+				}
+			}
+			return true;
 		}
 	}
 
@@ -529,95 +614,62 @@ namespace metadata
 	bool MetadataModule::TryGetDheSupplementalInstanceFieldValue(Il2CppObject* obj,
 		FieldInfo* field, void* value)
 	{
-		uint32_t slot;
-		FieldInfo* logicalField;
-		Il2CppObject* stored;
-		{
-			std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
-			if (!TryGetDheFieldSlotLocked(field, slot, logicalField))
-				return false;
-			stored = GetDheSidecarValueLocked(obj, slot);
-		}
-		if (!stored)
-		{
-			il2cpp::vm::Field::SetValueRaw(logicalField->type, value, nullptr, false);
-			return true;
-		}
-		Il2CppClass* fieldType = il2cpp::vm::Class::FromIl2CppType(logicalField->type);
-		if (il2cpp::vm::Class::IsNullable(fieldType))
-		{
-			il2cpp::vm::Object::UnboxNullable(stored, fieldType, value);
-		}
-		else
-		{
-			il2cpp::vm::Field::SetValueRaw(logicalField->type, value,
-				fieldType->byval_arg.valuetype ? il2cpp::vm::Object::Unbox(stored) : stored, false);
-		}
+		Il2CppObject* cell;
+		FieldInfo* valueField;
+		if (!TryGetDheFieldCell(obj, field, cell, valueField))
+			return false;
+		il2cpp::vm::Field::GetValue(cell, valueField, value);
 		return true;
 	}
 
 	bool MetadataModule::TrySetDheSupplementalInstanceFieldValue(Il2CppObject* obj,
-		const FieldInfo* field, void* value)
+		const FieldInfo* field, void* value, bool dereferencePointer)
 	{
-		uint32_t slot;
-		FieldInfo* logicalField;
-		{
-			std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
-			if (!TryGetDheFieldSlotLocked(field, slot, logicalField))
-			{
-				return false;
-			}
-		}
-		Il2CppClass* fieldType = il2cpp::vm::Class::FromIl2CppType(logicalField->type);
-		Il2CppObject* boxed = il2cpp::vm::Object::Box(fieldType, value);
-		// Sidecar allocation can enter engine metadata; keep one lock order.
-		il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
-		std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
-		SetDheSidecarValueLocked(obj, slot, boxed);
+		Il2CppObject* cell;
+		FieldInfo* valueField;
+		if (!TryGetDheFieldCell(obj, field, cell, valueField))
+			return false;
+		il2cpp::vm::Field::SetValueRaw(valueField->type,
+			reinterpret_cast<uint8_t*>(cell) + valueField->offset, value, dereferencePointer);
+		return true;
+	}
+
+	bool MetadataModule::TryGetDheSupplementalInstanceFieldAddress(Il2CppObject* obj,
+		const FieldInfo* field, void** address)
+	{
+		Il2CppObject* cell;
+		FieldInfo* valueField;
+		if (!TryGetDheFieldCell(obj, field, cell, valueField))
+			return false;
+		*address = reinterpret_cast<uint8_t*>(cell) + valueField->offset;
 		return true;
 	}
 
 	bool MetadataModule::TryGetDheSupplementalInstanceFieldValueObject(Il2CppObject* obj,
 		FieldInfo* field, Il2CppObject** value)
 	{
-		uint32_t slot;
-		FieldInfo* logicalField;
-		Il2CppObject* stored;
-		{
-			std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
-			if (!TryGetDheFieldSlotLocked(field, slot, logicalField))
-				return false;
-			stored = GetDheSidecarValueLocked(obj, slot);
-		}
-		Il2CppClass* fieldType = il2cpp::vm::Class::FromIl2CppType(logicalField->type);
-		if (!stored && fieldType->byval_arg.valuetype && !il2cpp::vm::Class::IsNullable(fieldType))
-		{
-			stored = il2cpp::vm::Object::New(fieldType);
-		}
-		else if (stored && fieldType->byval_arg.valuetype)
-		{
-			stored = il2cpp::vm::Object::Box(stored->klass, il2cpp::vm::Object::Unbox(stored));
-		}
-		*value = stored;
+		Il2CppObject* cell;
+		FieldInfo* valueField;
+		if (!TryGetDheFieldCell(obj, field, cell, valueField))
+			return false;
+		*value = il2cpp::vm::Field::GetValueObject(valueField, cell);
 		return true;
 	}
 
 	bool MetadataModule::TrySetDheSupplementalInstanceFieldValueObject(Il2CppObject* obj,
 		FieldInfo* field, Il2CppObject* value)
 	{
-		uint32_t slot;
-		FieldInfo* logicalField;
-		{
-			std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
-			if (!TryGetDheFieldSlotLocked(field, slot, logicalField))
-				return false;
-		}
-		Il2CppClass* fieldType = il2cpp::vm::Class::FromIl2CppType(logicalField->type);
-		if (value && fieldType->byval_arg.valuetype)
-			value = il2cpp::vm::Object::Box(value->klass, il2cpp::vm::Object::Unbox(value));
-		il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
-		std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
-		SetDheSidecarValueLocked(obj, slot, value);
+		Il2CppObject* cell;
+		FieldInfo* valueField;
+		if (!TryGetDheFieldCell(obj, field, cell, valueField))
+			return false;
+		Il2CppClass* fieldType = il2cpp::vm::Class::FromIl2CppType(valueField->type);
+		if (il2cpp::vm::Class::IsNullable(fieldType))
+			il2cpp::vm::Object::UnboxNullableWithWriteBarrier(value, fieldType,
+				reinterpret_cast<uint8_t*>(cell) + valueField->offset);
+		else
+			il2cpp::vm::Field::SetValue(cell, valueField,
+				value && fieldType->byval_arg.valuetype ? il2cpp::vm::Object::Unbox(value) : value);
 		return true;
 	}
 

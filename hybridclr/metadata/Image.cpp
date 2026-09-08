@@ -987,9 +987,8 @@ namespace metadata
         void* iter = nullptr;
         for (const FieldInfo* cur = nullptr; (cur = il2cpp::vm::Class::GetFields(klass, &iter)) != nullptr; )
         {
-            if (cur->token == fieldDef->token)
+            if (cur->token == fieldDef->token && std::strcmp(cur->name, name) == 0)
             {
-                IL2CPP_ASSERT(std::strcmp(cur->name, name) == 0);
                 return MetadataModule::ResolveDheSupplementalField(cur);
             }
         }

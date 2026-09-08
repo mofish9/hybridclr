@@ -12521,10 +12521,25 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 					Il2CppObject* __instance = *(Il2CppObject**)(localVarBase + __obj);
 					CHECK_NOT_NULL_THROW(__instance);
 					if (!MetadataModule::TrySetDheSupplementalInstanceFieldValue(
-						__instance, __field, localVarBase + __data))
+						__instance, __field, localVarBase + __data, true))
 					{
 						RaiseExecutionEngineException("DHE instance field is not registered.");
 					}
+					ip += 16;
+					continue;
+				}
+				case HiOpcodeEnum::DheLdfldaVarVar:
+				{
+					uint16_t __dst = *(uint16_t*)(ip + 2);
+					uint16_t __obj = *(uint16_t*)(ip + 4);
+					FieldInfo* __field = reinterpret_cast<FieldInfo*>(
+						imi->resolveDatas[*(uint32_t*)(ip + 8)]);
+					Il2CppObject* __instance = *(Il2CppObject**)(localVarBase + __obj);
+					CHECK_NOT_NULL_THROW(__instance);
+					void* __address;
+					if (!MetadataModule::TryGetDheSupplementalInstanceFieldAddress(__instance, __field, &__address))
+						RaiseExecutionEngineException("DHE instance field is not registered.");
+					*(void**)(localVarBase + __dst) = __address;
 					ip += 16;
 					continue;
 				}

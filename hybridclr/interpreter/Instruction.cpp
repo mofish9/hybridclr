@@ -922,6 +922,7 @@ namespace interpreter
 		16,
 		16,
 
+        16,
         //!!!}}INST_SIZE
     };
 }

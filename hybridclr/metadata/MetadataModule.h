@@ -118,7 +118,10 @@ namespace metadata
 			FieldInfo* field, void* value);
 
 		static bool TrySetDheSupplementalInstanceFieldValue(Il2CppObject* obj,
-			const FieldInfo* field, void* value);
+			const FieldInfo* field, void* value, bool dereferencePointer = false);
+
+		static bool TryGetDheSupplementalInstanceFieldAddress(Il2CppObject* obj,
+			const FieldInfo* field, void** address);
 
 		static bool TryGetDheSupplementalInstanceFieldValueObject(Il2CppObject* obj,
 			FieldInfo* field, Il2CppObject** value);
