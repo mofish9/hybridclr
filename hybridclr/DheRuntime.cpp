@@ -618,11 +618,23 @@ const MethodInfo* ResolveMethodByToken(const char* assemblyName, uint32_t token)
 // image; inflating the Current definition with the original context then
 // silently reintroduces the Base layout.  Remap each concrete argument through
 // its owning DHE image before inflating the Current method.
-static const Il2CppType* RemapDheGenericArgument(const Il2CppType* type)
+static const Il2CppType* RemapDheGenericArgument(const Il2CppType* type,
+    const Il2CppAssembly* preferredAssembly)
 {
     if (!type)
     {
         return nullptr;
+    }
+
+    if (preferredAssembly)
+    {
+        metadata::AOTHomologousImage* preferred =
+            metadata::AOTHomologousImage::FindImageByAssembly(preferredAssembly);
+        if (preferred)
+        {
+            if (const Il2CppType* mapped = preferred->GetDheExecutionType(type))
+                return mapped;
+        }
     }
 
     Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(type);
@@ -637,7 +649,7 @@ static const Il2CppType* RemapDheGenericArgument(const Il2CppType* type)
 }
 
 static Il2CppGenericContext RemapDheGenericContext(const Il2CppGenericContext& baseContext,
-    bool& changed)
+    const Il2CppAssembly* preferredAssembly, bool& changed)
 {
     Il2CppGenericContext currentContext = baseContext;
     auto remapInst = [&changed](const Il2CppGenericInst* baseInst) -> const Il2CppGenericInst*
@@ -652,7 +664,7 @@ static Il2CppGenericContext RemapDheGenericContext(const Il2CppGenericContext& b
         for (uint32_t i = 0; i < baseInst->type_argc; ++i)
         {
             const Il2CppType* argument = baseInst->type_argv[i];
-            const Il2CppType* mappedArgument = RemapDheGenericArgument(argument);
+            const Il2CppType* mappedArgument = RemapDheGenericArgument(argument, preferredAssembly);
             mapped[i] = mappedArgument ? mappedArgument : argument;
             instChanged |= mapped[i] != argument;
         }
@@ -715,7 +727,7 @@ const MethodInfo* ResolveInterpreterMethod(const MethodInfo* baseMethod)
     {
         bool contextChanged = false;
         Il2CppGenericContext currentContext = RemapDheGenericContext(
-            baseMethod->genericMethod->context, contextChanged);
+            baseMethod->genericMethod->context, baseMethod->klass->image->assembly, contextChanged);
         currentMethod = il2cpp::metadata::GenericMetadata::Inflate(currentMethod,
             contextChanged ? &currentContext : &baseMethod->genericMethod->context);
         if (currentMethod && currentMethod->is_inflated)
@@ -780,7 +792,7 @@ const MethodInfo* ResolveCurrentExecutionMethod(const MethodInfo* method)
     {
         bool contextChanged = false;
         Il2CppGenericContext currentContext = RemapDheGenericContext(
-            method->genericMethod->context, contextChanged);
+            method->genericMethod->context, method->klass->image->assembly, contextChanged);
         const MethodInfo* execution = il2cpp::metadata::GenericMetadata::Inflate(current->second,
             contextChanged ? &currentContext : &method->genericMethod->context);
         if (execution && execution->is_inflated)
