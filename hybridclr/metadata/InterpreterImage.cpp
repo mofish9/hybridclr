@@ -3228,7 +3228,9 @@ namespace metadata
 			const Il2CppTypeDefinition* parentTypeDef = GetUnderlyingTypeDefinition(parentType);
 			const bool hasVirtualMethod = _typeDetails[GetTypeRawIndex(&typeDef)].virtualMethodCount != 0;
 			InterpreterImage* parentImage = IsInterpreterType(parentTypeDef) ? MetadataModule::GetImage(parentTypeDef) : nullptr;
-			if (!hasVirtualMethod && parentImage == this)
+			// A generic parent's definition slab still contains open class
+			// arguments. A closed descendant must inflate its inherited slots.
+			if (!hasVirtualMethod && parentImage == this && parentType->type != IL2CPP_TYPE_GENERICINST)
 			{
 				if (parentTypeDef->interfaceOffsetsStart == 0)
 				{
