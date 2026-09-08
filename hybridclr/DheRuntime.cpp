@@ -19,6 +19,7 @@
 #include "interpreter/InterpreterModule.h"
 #include "interpreter/InterpreterDefs.h"
 #include "metadata/GenericMetadata.h"
+#include "metadata/AOTHomologousImage.h"
 #include "vm/Exception.h"
 #include "Il2CppCompatibleDef.h"
 
@@ -611,6 +612,64 @@ const MethodInfo* ResolveMethodByToken(const char* assemblyName, uint32_t token)
     return ResolveMethodInAssembly(il2cpp::vm::MetadataCache::GetAssemblyByName(assemblyName), token);
 }
 
+// Generic MethodInfo instances are keyed by their declaring definition plus
+// the concrete class/method instantiations.  A Base Player instantiation can
+// contain value types whose physical representation changed in the Current
+// image; inflating the Current definition with the original context then
+// silently reintroduces the Base layout.  Remap each concrete argument through
+// its owning DHE image before inflating the Current method.
+static const Il2CppType* RemapDheGenericArgument(const Il2CppType* type)
+{
+    if (!type)
+    {
+        return nullptr;
+    }
+
+    Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(type);
+    if (!klass || !klass->image || !klass->image->assembly)
+    {
+        return nullptr;
+    }
+
+    metadata::AOTHomologousImage* image =
+        metadata::AOTHomologousImage::FindImageByAssembly(klass->image->assembly);
+    return image ? image->GetDheExecutionType(type) : nullptr;
+}
+
+static Il2CppGenericContext RemapDheGenericContext(const Il2CppGenericContext& baseContext,
+    bool& changed)
+{
+    Il2CppGenericContext currentContext = baseContext;
+    auto remapInst = [&changed](const Il2CppGenericInst* baseInst) -> const Il2CppGenericInst*
+    {
+        if (!baseInst || baseInst->type_argc == 0)
+        {
+            return baseInst;
+        }
+
+        std::vector<const Il2CppType*> mapped(baseInst->type_argc);
+        bool instChanged = false;
+        for (uint32_t i = 0; i < baseInst->type_argc; ++i)
+        {
+            const Il2CppType* argument = baseInst->type_argv[i];
+            const Il2CppType* mappedArgument = RemapDheGenericArgument(argument);
+            mapped[i] = mappedArgument ? mappedArgument : argument;
+            instChanged |= mapped[i] != argument;
+        }
+
+        if (!instChanged)
+        {
+            return baseInst;
+        }
+        changed = true;
+        return il2cpp::vm::MetadataCache::GetGenericInst(mapped.data(), baseInst->type_argc);
+    };
+
+    currentContext.class_inst = remapInst(baseContext.class_inst);
+    currentContext.method_inst = remapInst(baseContext.method_inst);
+    return currentContext;
+}
+
 const MethodInfo* ResolveInterpreterMethod(const MethodInfo* baseMethod)
 {
     if (!baseMethod || !baseMethod->klass || !baseMethod->klass->image ||
@@ -654,8 +713,11 @@ const MethodInfo* ResolveInterpreterMethod(const MethodInfo* baseMethod)
     const MethodInfo* currentMethod = current->second;
     if (baseMethod->is_inflated && baseMethod->genericMethod)
     {
+        bool contextChanged = false;
+        Il2CppGenericContext currentContext = RemapDheGenericContext(
+            baseMethod->genericMethod->context, contextChanged);
         currentMethod = il2cpp::metadata::GenericMetadata::Inflate(currentMethod,
-            &baseMethod->genericMethod->context);
+            contextChanged ? &currentContext : &baseMethod->genericMethod->context);
     }
     return currentMethod;
 }
@@ -705,9 +767,15 @@ const MethodInfo* ResolveCurrentExecutionMethod(const MethodInfo* method)
     if (base == state->second.baseMethods.end() || base->second != definition ||
         current == state->second.resolvedMethods.end() || !current->second || current->second == definition)
         return method;
-    return method->is_inflated && method->genericMethod
-        ? il2cpp::metadata::GenericMetadata::Inflate(current->second, &method->genericMethod->context)
-        : current->second;
+    if (method->is_inflated && method->genericMethod)
+    {
+        bool contextChanged = false;
+        Il2CppGenericContext currentContext = RemapDheGenericContext(
+            method->genericMethod->context, contextChanged);
+        return il2cpp::metadata::GenericMetadata::Inflate(current->second,
+            contextChanged ? &currentContext : &method->genericMethod->context);
+    }
+    return current->second;
 }
 
 static void RollbackMethodPreparations(
