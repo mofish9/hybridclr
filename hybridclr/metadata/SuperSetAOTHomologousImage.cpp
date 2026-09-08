@@ -809,7 +809,15 @@ namespace metadata
 		{
 			if (!_isDheImage || !type) return type;
 			const Il2CppType* execution = GetDheExecutionType(type);
-			return execution ? execution : type;
+			if (execution) return execution;
+			// A Current method in another hotfix assembly can reference a
+			// selected value type by AssemblyRef. Resolve that public Base type
+			// through its owning DHE image before field lookup.
+			Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(type);
+			AOTHomologousImage* owner = klass && klass->image
+				? AOTHomologousImage::FindImageByAssembly(klass->image->assembly) : nullptr;
+			const Il2CppType* external = owner ? owner->GetDheExecutionType(type) : nullptr;
+			return external ? external : type;
 		};
 		TableType tokenType;
 		uint32_t rawIndex;
