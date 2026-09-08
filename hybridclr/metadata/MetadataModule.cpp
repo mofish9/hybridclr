@@ -1,5 +1,6 @@
 #include "MetadataModule.h"
 #include "DheCustomAttributeMetadata.h"
+#include "DheVirtualSlots.h"
 
 #include "os/Atomic.h"
 #include "os/Mutex.h"
@@ -433,6 +434,15 @@ namespace metadata
 			? method->genericMethod->methodDefinition : method;
 	}
 
+	static const MethodInfo* GetDheVirtualSlotDeclaration(Il2CppClass* klass, uint16_t slot)
+	{
+		const MethodInfo* method = klass->vtable[slot].method;
+		if (method && !il2cpp::vm::Method::IsEntryPointNotFoundMethodInfo(method))
+			return method;
+		il2cpp::vm::Class::SetupMethods(klass);
+		return FindDheVirtualSlotDeclaration(nullptr, klass->methods, klass->method_count, slot);
+	}
+
 	static const MethodInfo* GetDheBaseVirtualRoot(Il2CppClass* klass, uint16_t slot)
 	{
 		InitDheVTable(klass);
@@ -445,7 +455,7 @@ namespace metadata
 				break;
 			klass = klass->parent;
 		}
-		return klass->vtable[slot].method;
+		return GetDheVirtualSlotDeclaration(klass, slot);
 	}
 
 	static const MethodInfo* FindDheCurrentVirtualDeclaration(const MethodInfo* method)
@@ -455,6 +465,13 @@ namespace metadata
 		Il2CppClass* currentOwner = GetDheCurrentClass(method->klass);
 		InitDheVTable(currentOwner);
 		const MethodInfo* identity = DheLogicalDefinition(method);
+		il2cpp::vm::Class::SetupMethods(currentOwner);
+		for (uint16_t index = 0; index < currentOwner->method_count; ++index)
+		{
+			const MethodInfo* candidate = currentOwner->methods[index];
+			if (candidate && IsVirtualMethod(candidate->flags) && DheLogicalDefinition(candidate) == identity)
+				return candidate;
+		}
 		for (uint16_t slot = 0; slot < currentOwner->vtable_count; ++slot)
 		{
 			const MethodInfo* candidate = currentOwner->vtable[slot].method;
@@ -591,7 +608,7 @@ namespace metadata
 			InitDheVTable(parent);
 			if (current->slot >= parent->vtable_count)
 				break;
-			const MethodInfo* inherited = parent->vtable[current->slot].method;
+			const MethodInfo* inherited = GetDheVirtualSlotDeclaration(parent, current->slot);
 			if (!inherited)
 				RaiseExecutionEngineException("DHE Current base virtual declaration is missing.");
 			result = ResolveDheMethod(inherited);
