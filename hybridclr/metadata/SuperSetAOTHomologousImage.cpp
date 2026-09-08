@@ -805,6 +805,12 @@ namespace metadata
 
 	const Il2CppType* SuperSetAOTHomologousImage::ReadTypeFromResolutionScope(uint32_t scope, uint32_t typeNamespace, uint32_t typeName)
 	{
+		auto SelectExecutionType = [this](const Il2CppType* type) -> const Il2CppType*
+		{
+			if (!_isDheImage || !type) return type;
+			const Il2CppType* execution = GetDheExecutionType(type);
+			return execution ? execution : type;
+		};
 		TableType tokenType;
 		uint32_t rawIndex;
 		DecodeResolutionScopeCodedIndex(scope, tokenType, rawIndex);
@@ -813,7 +819,7 @@ namespace metadata
 		case TableType::MODULE:
 		{
 			const Il2CppType* retType = GetModuleIl2CppType(rawIndex, typeNamespace, typeName, false);
-			return retType ? retType : _defaultIl2CppType;
+			return SelectExecutionType(retType ? retType : _defaultIl2CppType);
 		}
 		case TableType::MODULEREF:
 		{
@@ -823,7 +829,7 @@ namespace metadata
 		case TableType::ASSEMBLYREF:
 		{
 			const Il2CppType* refType = GetIl2CppType(rawIndex, typeNamespace, typeName, false);
-			return refType ? refType : _defaultIl2CppType;
+			return SelectExecutionType(refType ? refType : _defaultIl2CppType);
 		}
 		case TableType::TYPEREF:
 		{
@@ -845,7 +851,7 @@ namespace metadata
 				IL2CPP_ASSERT(nestedTypeName);
 				if (!std::strcmp(name, nestedTypeName))
 				{
-					return GetIl2CppTypeFromTypeDefinition(nextTypeDef);
+					return SelectExecutionType(GetIl2CppTypeFromTypeDefinition(nextTypeDef));
 				}
 			}
 			return _defaultIl2CppType;
