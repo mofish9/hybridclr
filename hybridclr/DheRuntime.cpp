@@ -778,11 +778,20 @@ bool PrepareChangedMethods(const Il2CppAssembly* assembly,
 
     std::vector<MethodPreparationSnapshot> snapshots;
     snapshots.reserve(resolvedMethods.size());
-    if (!PrepareResolvedMethods(resolvedMethods, snapshots))
+    try
+    {
+        if (!PrepareResolvedMethods(resolvedMethods, snapshots))
+        {
+            RollbackMethodPreparations(snapshots);
+            resolvedMethods.clear();
+            return false;
+        }
+    }
+    catch (...)
     {
         RollbackMethodPreparations(snapshots);
         resolvedMethods.clear();
-        return false;
+        throw;
     }
     CommitMethodPreparations(snapshots);
     return true;
@@ -1007,27 +1016,34 @@ bool PrepareAndRegisterMetaVersions(
     }
 
     std::vector<MethodPreparationSnapshot> snapshots;
-    for (PendingMetaVersionRegistration& plan : pending)
+    std::unique_ptr<PublishedState> next;
+    try
     {
-        snapshots.reserve(snapshots.size() + plan.methodsToPrepare.size());
-        if (!PrepareResolvedMethods(plan.methodsToPrepare, snapshots))
+        for (PendingMetaVersionRegistration& plan : pending)
         {
-            RollbackMethodPreparations(snapshots);
-            return false;
+            snapshots.reserve(snapshots.size() + plan.methodsToPrepare.size());
+            if (!PrepareResolvedMethods(plan.methodsToPrepare, snapshots))
+            {
+                RollbackMethodPreparations(snapshots);
+                return false;
+            }
+            for (size_t index = 0; index < plan.methodsToPrepare.size(); ++index)
+                plan.state.resolvedMethods.emplace(plan.preparedMethodTokens[index],
+                    plan.methodsToPrepare[index]);
         }
-        for (size_t index = 0; index < plan.methodsToPrepare.size(); ++index)
-        {
-            plan.state.resolvedMethods.emplace(plan.preparedMethodTokens[index],
-                plan.methodsToPrepare[index]);
-        }
+        // Finish allocations before committing vtables. Signature resolution
+        // and state allocation can throw as well as return a failure code.
+        next.reset(new PublishedState(*published));
+        for (PendingMetaVersionRegistration& plan : pending)
+            next->assemblyStates.emplace(plan.baseAssembly, std::move(plan.state));
+    }
+    catch (...)
+    {
+        RollbackMethodPreparations(snapshots);
+        throw;
     }
 
     CommitMethodPreparations(snapshots);
-    std::unique_ptr<PublishedState> next(new PublishedState(*published));
-    for (PendingMetaVersionRegistration& plan : pending)
-    {
-        next->assemblyStates.emplace(plan.baseAssembly, std::move(plan.state));
-    }
     s_publishedState.store(next.release(), std::memory_order_release);
     return true;
 }
