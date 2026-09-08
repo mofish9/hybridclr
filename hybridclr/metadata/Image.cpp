@@ -22,6 +22,7 @@
 #include "utils/StringUtils.h"
 
 #include "MetadataUtil.h"
+#include "MetadataModule.h"
 #include "BlobReader.h"
 #include "MetadataPool.h"
 
