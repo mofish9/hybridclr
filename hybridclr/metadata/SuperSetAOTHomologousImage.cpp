@@ -12,6 +12,7 @@
 #include "InterpreterImage.h"
 #include "MetadataModule.h"
 #include "DheGenericFieldMetadata.h"
+#include "DheInterfaceSlots.h"
 
 namespace hybridclr
 {
@@ -264,6 +265,10 @@ namespace metadata
 		{
 			uint32_t nextTypeIndex = (uint32_t)(&type - &typeIntermediateInfos[0] + 1);
 			uint32_t nextTypeMethodStartIndex = nextTypeIndex < typeCount ? typeIntermediateInfos[nextTypeIndex].homoMethodStartIndex : methodCount + 1;
+			Il2CppClass* baseInterface = _isDheImage && type.aotTypeDef && IsInterface(type.aotTypeDef->flags)
+				? il2cpp::vm::Class::FromIl2CppType(type.aotIl2CppType) : nullptr;
+			if (baseInterface)
+				_interfaceMethods[baseInterface].resize(baseInterface->method_count, nullptr);
 
 
 			for (uint32_t i = type.homoMethodStartIndex; i < nextTypeMethodStartIndex ; i++)
@@ -310,6 +315,15 @@ namespace metadata
 				}
 				if (currentMethod && logicalMethod)
 				{
+					if (baseInterface && IsVirtualMethod(currentMethod->flags))
+					{
+						uint16_t slot;
+						if (!BindDheInterfaceSlot(_interfaceMethods[baseInterface],
+							method.interpreterFallback ? UINT16_MAX : logicalMethod->slot, currentMethod, slot))
+							RaiseBadImageException("Invalid DHE interface slot mapping.");
+						if (method.interpreterFallback)
+							const_cast<MethodInfo*>(logicalMethod)->slot = slot;
+					}
 					_logicalMethods[currentMethod] = logicalMethod;
 					if (!dhe::RegisterLogicalMethodMapping(_targetAssembly,
 						currentMethod, logicalMethod))
@@ -471,8 +485,55 @@ namespace metadata
 
 	const MethodInfo* SuperSetAOTHomologousImage::ResolveLogicalMethod(const MethodInfo* method)
 	{
+		if (method && method->is_inflated && method->genericMethod)
+		{
+			auto definition = _logicalMethods.find(method->genericMethod->methodDefinition);
+			if (definition != _logicalMethods.end())
+				return il2cpp::metadata::GenericMetadata::Inflate(definition->second, &method->genericMethod->context);
+		}
 		auto logical = _logicalMethods.find(method);
 		return logical == _logicalMethods.end() ? method : logical->second;
+	}
+
+	const Il2CppType* SuperSetAOTHomologousImage::GetDheCurrentType(const Il2CppType* type)
+	{
+		if (!_isDheImage || !_interpreterFallbackImage || !type)
+			return nullptr;
+		if (type->type == IL2CPP_TYPE_GENERICINST)
+		{
+			const Il2CppType* definition = GetDheCurrentType(type->data.generic_class->type);
+			if (!definition)
+				return nullptr;
+			return &il2cpp::vm::GenericClass::GetClass(il2cpp::metadata::GenericMetadata::GetGenericClass(
+				definition, type->data.generic_class->context.class_inst))->byval_arg;
+		}
+		if (type->type != IL2CPP_TYPE_CLASS && type->type != IL2CPP_TYPE_VALUETYPE)
+			return nullptr;
+		const Il2CppTypeDefinition* definition = GetUnderlyingTypeDefinition(type);
+		if (IsInterpreterType(definition))
+			return nullptr;
+		auto entry = _aotTypeIndex2TypeDefs.find(il2cpp::vm::GlobalMetadata::GetIndexForTypeDefinition(definition));
+		if (entry == _aotTypeIndex2TypeDefs.end())
+			return nullptr;
+		return _interpreterFallbackImage->GetRawTypeDefinitionType(
+			static_cast<uint32_t>(entry->second - _typeDefs.data()));
+	}
+
+	bool SuperSetAOTHomologousImage::TryGetDheCurrentInterfaceMethod(const Il2CppClass* klass,
+		uint16_t logicalSlot, const MethodInfo*& method)
+	{
+		const Il2CppClass* definition = klass->generic_class
+			? il2cpp::vm::GenericClass::GetTypeDefinition(klass->generic_class) : klass;
+		auto entry = _interfaceMethods.find(definition);
+		if (entry == _interfaceMethods.end())
+			return false;
+		if (logicalSlot >= entry->second.size() || !entry->second[logicalSlot])
+			il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetMissingMethodException(
+				"The Base interface member is not present in the current DHE assembly."));
+		method = entry->second[logicalSlot];
+		if (klass->generic_class)
+			method = il2cpp::metadata::GenericMetadata::Inflate(method, &klass->generic_class->context);
+		return true;
 	}
 
 	const MethodInfo* SuperSetAOTHomologousImage::GetLogicalMethod(

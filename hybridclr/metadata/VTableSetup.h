@@ -28,6 +28,7 @@ namespace metadata
 	};
 
 	class VTableSetUp;
+	class SuperSetAOTHomologousImage;
 
 	struct RawInterfaceOffsetInfo
 	{
@@ -36,7 +37,10 @@ namespace metadata
 		uint32_t offset;
 	};
 
-	typedef Il2CppHashMap<const Il2CppType*, VTableSetUp*, il2cpp::metadata::Il2CppTypeHash, il2cpp::metadata::Il2CppTypeEqualityComparer> Il2CppType2TypeDeclaringTreeMap;
+	struct Il2CppType2TypeDeclaringTreeMap : Il2CppHashMap<const Il2CppType*, VTableSetUp*, il2cpp::metadata::Il2CppTypeHash, il2cpp::metadata::Il2CppTypeEqualityComparer>
+	{
+		SuperSetAOTHomologousImage* homologousImage = nullptr;
+	};
 
 	class VTableSetUp
 	{

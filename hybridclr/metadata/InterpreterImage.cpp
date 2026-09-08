@@ -3322,6 +3322,7 @@ namespace metadata
 
 	void InterpreterImage::InitVTables()
 	{
+		_cacheTrees.homologousImage = _homologousTypeReferenceImage;
 		_vtableTreesByTypeDefinition.assign(_typesDefines.size(), nullptr);
 		_vtableInitializableTypeCount = 0;
 		// <Module> is never materialized, and interfaces do not enter ComputeVTable.

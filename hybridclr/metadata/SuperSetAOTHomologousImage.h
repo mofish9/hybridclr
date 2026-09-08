@@ -98,6 +98,9 @@ namespace hybridclr
 			Image* GetMethodResolveImage(const MethodInfo* method) override;
 			size_t GetSupplementalMethodCount(Il2CppClass* klass) override;
 			const MethodInfo* ResolveLogicalMethod(const MethodInfo* method) override;
+			const Il2CppType* GetDheCurrentType(const Il2CppType* type) override;
+			bool TryGetDheCurrentInterfaceMethod(const Il2CppClass* klass,
+				uint16_t logicalSlot, const MethodInfo*& method) override;
 			FieldInfo* GetFirstSupplementalField(Il2CppClass* klass, void** iter) override;
 			bool TryGetNextSupplementalField(Il2CppClass* klass, void** iter,
 				FieldInfo** field) override;
@@ -151,6 +154,7 @@ namespace hybridclr
 			std::unordered_map<Il2CppClass*, std::vector<const MethodInfo*>> _supplementalMethods;
 			std::unordered_map<const MethodInfo*, Image*> _supplementalMethodImages;
 			std::unordered_map<const MethodInfo*, const MethodInfo*> _logicalMethods;
+			std::unordered_map<const Il2CppClass*, std::vector<const MethodInfo*>> _interfaceMethods;
 			std::unordered_map<Il2CppClass*, std::vector<FieldInfo*>> _supplementalFields;
 			std::unordered_map<const FieldInfo*, FieldInfo*> _logicalFields;
 			// All accesses use g_MetadataLock; published vectors never change.

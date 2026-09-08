@@ -8,6 +8,7 @@
 struct Il2CppAssembly;
 struct Il2CppClass;
 struct MethodInfo;
+struct VirtualInvokeData;
 
 namespace hybridclr
 {
@@ -88,6 +89,8 @@ namespace dhe
         const std::vector<MetaVersionRegistration>& registrations);
 
     bool IsDheAssembly(const Il2CppAssembly* assembly);
+    bool TryGetInterfaceInvokeData(const Il2CppClass* klass, const Il2CppClass* interfaceType,
+        uint16_t logicalSlot, const VirtualInvokeData*& result);
     bool IsChangedMethod(const MethodInfo* method);
 	bool IsRemovedMethod(const MethodInfo* method);
 	bool IsRemovedType(const Il2CppClass* klass);

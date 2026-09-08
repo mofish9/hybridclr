@@ -15,6 +15,7 @@
 #include "vm/Image.h"
 #include "vm/MetadataLock.h"
 #include "vm/MetadataCache.h"
+#include "vm/Method.h"
 #include "gc/GarbageCollector.h"
 #include "gc/GCHandle.h"
 #include "gc/WriteBarrier.h"
@@ -38,6 +39,14 @@ using namespace il2cpp;
 
 namespace hybridclr
 {
+	namespace dhe
+	{
+		bool TryGetInterfaceInvokeData(const Il2CppClass* klass, const Il2CppClass* interfaceType,
+			uint16_t logicalSlot, const VirtualInvokeData*& result)
+		{
+			return metadata::MetadataModule::TryGetDheInterfaceInvokeData(klass, interfaceType, logicalSlot, result);
+		}
+	}
 
 namespace metadata
 {
@@ -78,6 +87,9 @@ namespace metadata
 
 		// Cell layouts are immutable after publication under g_MetadataLock.
 		std::unordered_map<Il2CppClass*, DheFieldCellLayout> s_dheFieldCellLayouts;
+		// Node addresses remain stable across rehash; entries are immutable after insertion.
+		std::unordered_map<const Il2CppClass*, std::unordered_map<const Il2CppClass*,
+			std::unordered_map<uint16_t, VirtualInvokeData>>> s_dheInterfaceDispatch;
 
 		std::mutex s_dheSidecarMutex;
 		std::unordered_map<const FieldInfo*, DheInstanceFieldSlot> s_dheInstanceFieldSlots;
@@ -365,6 +377,85 @@ namespace metadata
         AOTHomologousImage* homologous = AOTHomologousImage::FindImageByAssembly(image->assembly);
         return homologous && homologous->GetTargetAssembly()->image == image ? homologous : nullptr;
     }
+
+	bool MetadataModule::TryGetDheInterfaceInvokeData(const Il2CppClass* klass,
+		const Il2CppClass* interfaceType, uint16_t logicalSlot, const VirtualInvokeData*& result)
+	{
+		if (!klass || !interfaceType || !interfaceType->image || klass->is_import_or_windows_runtime ||
+			!dhe::IsDheAssembly(interfaceType->image->assembly))
+			return false;
+		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
+		AOTHomologousImage* interfaceImage = GetDheSupplementalImage(interfaceType->image);
+		const MethodInfo* currentInterfaceMethod = nullptr;
+		if (!interfaceImage || !interfaceImage->TryGetDheCurrentInterfaceMethod(
+			interfaceType, logicalSlot, currentInterfaceMethod))
+			return false;
+		auto receiverCache = s_dheInterfaceDispatch.find(klass);
+		if (receiverCache != s_dheInterfaceDispatch.end())
+		{
+			auto interfaceCache = receiverCache->second.find(interfaceType);
+			if (interfaceCache != receiverCache->second.end())
+			{
+				auto entry = interfaceCache->second.find(logicalSlot);
+				if (entry != interfaceCache->second.end())
+				{
+					result = &entry->second;
+					return true;
+				}
+			}
+		}
+		Il2CppClass* currentClass = const_cast<Il2CppClass*>(klass);
+		AOTHomologousImage* receiverImage = dhe::IsDheAssembly(klass->image->assembly)
+			? AOTHomologousImage::FindImageByAssembly(klass->image->assembly) : nullptr;
+		const Il2CppType* currentType = receiverImage ? receiverImage->GetDheCurrentType(&klass->byval_arg) : nullptr;
+		if (currentType)
+			currentClass = il2cpp::vm::Class::FromIl2CppType(currentType);
+		else if (!IsInterpreterType(klass))
+		{
+			// An external AOT implementation still owns its original interface slots.
+			if (logicalSlot < interfaceType->method_count)
+				return false;
+			il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetMissingMethodException(
+				"The AOT receiver has no current DHE interface implementation."));
+		}
+		il2cpp::vm::Class::Init(currentClass);
+#if UNITY_ENGINE_TUANJIE
+		il2cpp::vm::Class::SetupVTable(currentClass);
+#endif
+		for (uint16_t index = 0; index < currentClass->interface_offsets_count; ++index)
+		{
+			const Il2CppRuntimeInterfaceOffsetPair& pair = currentClass->interfaceOffsets[index];
+			if (pair.interfaceType != interfaceType)
+				continue;
+			const int64_t currentSlot = static_cast<int64_t>(pair.offset) + currentInterfaceMethod->slot;
+			if (pair.offset < 0 || currentSlot < 0 || currentSlot >= currentClass->vtable_count)
+				RaiseExecutionEngineException("DHE current interface slot exceeds its receiver vtable.");
+			const MethodInfo* target = currentClass->vtable[currentSlot].method;
+			if (!target || !target->klass || IsAbstractMethod(target->flags))
+				il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetMissingMethodException(
+					"The current DHE interface method has no implementation."));
+			AOTHomologousImage* targetImage = AOTHomologousImage::FindImageByAssembly(target->klass->image->assembly);
+			if (targetImage && dhe::IsDheAssembly(target->klass->image->assembly))
+				target = targetImage->ResolveLogicalMethod(target);
+#if HYBRIDCLR_UNITY_2021
+			Il2CppMethodPointer pointer = il2cpp::vm::Method::GetVirtualCallMethodPointer(target);
+#else
+			Il2CppMethodPointer pointer = ReadPublishedPointer(&const_cast<MethodInfo*>(target)->virtualMethodPointer);
+#endif
+			if (!pointer)
+				pointer = InitAndGetInterpreterDirectlyCallVirtualMethodPointer(target);
+			if (!pointer)
+				RaiseExecutionEngineException("DHE interface implementation has no callable entry.");
+			VirtualInvokeData entry = {};
+			entry.method = target;
+			entry.methodPtr = pointer;
+			result = &s_dheInterfaceDispatch[klass][interfaceType].emplace(logicalSlot, entry).first->second;
+			return true;
+		}
+		il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetMissingMethodException(
+			"The current DHE receiver does not implement the requested interface."));
+		return false;
+	}
 
 	const PropertyInfo* MetadataModule::GetDheCustomAttributeProperty(Il2CppClass* klass, uint32_t index)
 	{

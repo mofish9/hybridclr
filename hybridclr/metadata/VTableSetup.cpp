@@ -6,6 +6,7 @@
 #include "metadata/GenericMetadata.h"
 
 #include "MetadataModule.h"
+#include "SuperSetAOTHomologousImage.h"
 
 #if defined(HYBRIDCLR_LAB_INSTRUMENTED)
 #include <chrono>
@@ -86,8 +87,21 @@ namespace metadata
 		if (type->type != IL2CPP_TYPE_GENERICINST)
 		{
 			typeDef = GetUnderlyingTypeDefinition(type);
+			if (cache.homologousImage && !IsInterpreterType(typeDef) && IsInterface(typeDef->flags))
+			{
+				const Il2CppType* current = cache.homologousImage->GetDheCurrentType(type);
+				if (!current)
+				{
+					Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(type);
+					AOTHomologousImage* image = AOTHomologousImage::FindImageByAssembly(klass->image->assembly);
+					current = image ? image->GetDheCurrentType(type) : nullptr;
+				}
+				if (current)
+					typeDef = GetUnderlyingTypeDefinition(current);
+			}
 			interpreterImage = IsInterpreterType(typeDef) ? MetadataModule::GetImage(typeDef) : nullptr;
-			bool ownsInterpreterCache = interpreterImage && interpreterImage->OwnsVTableTreeCache(&cache);
+			bool ownsInterpreterCache = interpreterImage && interpreterImage->OwnsVTableTreeCache(&cache) &&
+				typeDef == GetUnderlyingTypeDefinition(type);
 			useDirectInterpreterCache = ownsInterpreterCache && interpreterImage->HasDirectVTableTreeCache();
 			if (useDirectInterpreterCache)
 			{
@@ -696,7 +710,7 @@ namespace metadata
 
 	void VTableSetUp::ApplyTypeExplicitImpls(const Il2CppType* type, const VTableSetUp* tree, const std::vector<uint16_t>& implInterfaceOffsetIdxs, Int32ToUin16Map& explicitImplToken2Slots)
 	{
-		const Il2CppTypeDefinition* typeDef = GetUnderlyingTypeDefinition(type);
+		const Il2CppTypeDefinition* typeDef = tree->_typeDef;
 		if (IsInterpreterType(typeDef))
 		{
 			const il2cpp::utils::dynamic_array<MethodImpl> explicitImpls = MetadataModule::GetImage(typeDef)->GetTypeMethodImplByTypeDefinition(typeDef);

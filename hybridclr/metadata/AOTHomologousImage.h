@@ -92,6 +92,17 @@ namespace metadata
 			return method;
 		}
 
+		virtual const Il2CppType* GetDheCurrentType(const Il2CppType* type)
+		{
+			return nullptr;
+		}
+
+		virtual bool TryGetDheCurrentInterfaceMethod(const Il2CppClass* klass,
+			uint16_t logicalSlot, const MethodInfo*& method)
+		{
+			return false;
+		}
+
 		virtual FieldInfo* GetFirstSupplementalField(Il2CppClass* klass, void** iter)
 		{
 			return nullptr;
