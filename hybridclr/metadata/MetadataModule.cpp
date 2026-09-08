@@ -41,6 +41,12 @@ namespace hybridclr
 {
 	namespace dhe
 	{
+		bool TryGetVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot,
+			const VirtualInvokeData*& result)
+		{
+			return metadata::MetadataModule::TryGetDheVirtualInvokeData(klass, logicalSlot, result);
+		}
+
 		bool TryGetInterfaceInvokeData(const Il2CppClass* klass, const Il2CppClass* interfaceType,
 			uint16_t logicalSlot, const VirtualInvokeData*& result)
 		{
@@ -90,6 +96,8 @@ namespace metadata
 		// Node addresses remain stable across rehash; entries are immutable after insertion.
 		std::unordered_map<const Il2CppClass*, std::unordered_map<const Il2CppClass*,
 			std::unordered_map<uint16_t, VirtualInvokeData>>> s_dheInterfaceDispatch;
+		std::unordered_map<const Il2CppClass*, std::unordered_map<uint16_t,
+			VirtualInvokeData>> s_dheVirtualDispatch;
 
 		std::mutex s_dheSidecarMutex;
 		std::unordered_map<const FieldInfo*, DheInstanceFieldSlot> s_dheInstanceFieldSlots;
@@ -377,6 +385,77 @@ namespace metadata
         AOTHomologousImage* homologous = AOTHomologousImage::FindImageByAssembly(image->assembly);
         return homologous && homologous->GetTargetAssembly()->image == image ? homologous : nullptr;
     }
+
+	bool MetadataModule::TryGetDheVirtualInvokeData(const Il2CppClass* klass,
+		uint16_t logicalSlot, const VirtualInvokeData*& result)
+	{
+		if (!klass || !IsInterpreterType(klass) || klass->is_import_or_windows_runtime)
+			return false;
+		Il2CppClass* ancestor = klass->parent;
+		while (ancestor && IsInterpreterType(ancestor))
+			ancestor = ancestor->parent;
+		if (!ancestor || logicalSlot >= ancestor->vtable_count ||
+			!dhe::IsDheAssembly(ancestor->image->assembly))
+			return false;
+		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
+		auto receiver = s_dheVirtualDispatch.find(klass);
+		if (receiver != s_dheVirtualDispatch.end())
+		{
+			auto entry = receiver->second.find(logicalSlot);
+			if (entry != receiver->second.end())
+			{
+				result = &entry->second;
+				return true;
+			}
+		}
+		AOTHomologousImage* image = AOTHomologousImage::FindImageByAssembly(ancestor->image->assembly);
+		const Il2CppType* currentType = image ? image->GetDheCurrentType(&ancestor->byval_arg) : nullptr;
+		if (!currentType)
+			return false;
+		Il2CppClass* currentAncestor = il2cpp::vm::Class::FromIl2CppType(currentType);
+		il2cpp::vm::Class::Init(ancestor);
+		il2cpp::vm::Class::Init(currentAncestor);
+		il2cpp::vm::Class::Init(const_cast<Il2CppClass*>(klass));
+#if UNITY_ENGINE_TUANJIE
+		il2cpp::vm::Class::SetupVTable(ancestor);
+		il2cpp::vm::Class::SetupVTable(currentAncestor);
+		il2cpp::vm::Class::SetupVTable(const_cast<Il2CppClass*>(klass));
+#endif
+		const MethodInfo* baseMethod = ancestor->vtable[logicalSlot].method;
+		// New interpreter descendants inherit the Current vtable, while calls
+		// to a Base declaration still carry its immutable native slot. Match
+		// by logical method identity before selecting the descendant override.
+		for (uint16_t slot = 0; slot < currentAncestor->vtable_count; ++slot)
+		{
+			const MethodInfo* candidate = currentAncestor->vtable[slot].method;
+			if (!candidate || !baseMethod || ResolveDheMethod(candidate) != baseMethod)
+				continue;
+			if (slot >= klass->vtable_count)
+				RaiseExecutionEngineException("DHE inherited virtual slot exceeds the Current receiver vtable.");
+			const MethodInfo* target = ResolveDheMethod(klass->vtable[slot].method);
+			if (!target || IsAbstractMethod(target->flags))
+				break;
+#if HYBRIDCLR_UNITY_2021
+			Il2CppMethodPointer pointer = il2cpp::vm::Method::GetVirtualCallMethodPointer(target);
+#else
+			Il2CppMethodPointer pointer = ReadPublishedPointer(&const_cast<MethodInfo*>(target)->virtualMethodPointer);
+#endif
+			if (!pointer)
+				pointer = InitAndGetInterpreterDirectlyCallVirtualMethodPointer(target);
+			if (!pointer)
+				RaiseExecutionEngineException("DHE inherited virtual method has no callable entry.");
+			VirtualInvokeData entry = {};
+			entry.method = target;
+			entry.methodPtr = pointer;
+			// Entries are immutable and node addresses survive rehash. Both
+			// reads and publication stay under the existing metadata lock.
+			result = &s_dheVirtualDispatch[klass].emplace(logicalSlot, entry).first->second;
+			return true;
+		}
+		il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetMissingMethodException(
+			"The Current descendant has no implementation for the requested Base virtual method."));
+		return false;
+	}
 
 	bool MetadataModule::TryGetDheInterfaceInvokeData(const Il2CppClass* klass,
 		const Il2CppClass* interfaceType, uint16_t logicalSlot, const VirtualInvokeData*& result)

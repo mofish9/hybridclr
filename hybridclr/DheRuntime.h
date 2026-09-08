@@ -89,6 +89,9 @@ namespace dhe
         const std::vector<MetaVersionRegistration>& registrations);
 
     bool IsDheAssembly(const Il2CppAssembly* assembly);
+    bool TryGetVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot,
+        const VirtualInvokeData*& result);
+
     bool TryGetInterfaceInvokeData(const Il2CppClass* klass, const Il2CppClass* interfaceType,
         uint16_t logicalSlot, const VirtualInvokeData*& result);
     bool IsChangedMethod(const MethodInfo* method);
