@@ -767,8 +767,21 @@ namespace metadata
 		{
 			const Il2CppType* currentDefinition = GetDheExecutionType(type->data.generic_class->type);
 			if (!currentDefinition) return nullptr;
+			const Il2CppGenericInst* baseInst = type->data.generic_class->context.class_inst;
+			std::vector<const Il2CppType*> mappedArgs(baseInst->type_argc);
+			bool argumentsChanged = false;
+			for (uint32_t i = 0; i < baseInst->type_argc; ++i)
+			{
+				const Il2CppType* argument = baseInst->type_argv[i];
+				const Il2CppType* mapped = GetDheExecutionType(argument);
+				mappedArgs[i] = mapped ? mapped : argument;
+				argumentsChanged |= mappedArgs[i] != argument;
+			}
+			const Il2CppGenericInst* currentInst = argumentsChanged
+				? il2cpp::vm::MetadataCache::GetGenericInst(mappedArgs.data(), baseInst->type_argc)
+				: baseInst;
 			Il2CppGenericClass* currentGeneric = il2cpp::metadata::GenericMetadata::GetGenericClass(
-				currentDefinition, type->data.generic_class->context.class_inst);
+				currentDefinition, currentInst);
 			return &il2cpp::vm::GenericClass::GetClass(currentGeneric)->byval_arg;
 		}
 		// TypeRef decoding supplies a definition; byref/array wrappers are built
