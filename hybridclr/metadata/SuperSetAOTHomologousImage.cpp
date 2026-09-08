@@ -1067,7 +1067,13 @@ namespace metadata
 			*logical = *physical;
 			logical->type = il2cpp::metadata::GenericMetadata::InflateIfNeeded(
 				definitionField->type, context, false);
-			if ((logical->type->attrs & FIELD_ATTRIBUTE_STATIC) == 0)
+			// Closed generic value types are laid out in the Current value
+			// representation and travel inline through interpreter frames. A
+			// reference sidecar would manufacture a separate cell and lose the
+			// value on copies/arrays. Only reference-type generic owners need the
+			// sidecar bridge for old Base object instances.
+			if (!klass->byval_arg.valuetype &&
+				(logical->type->attrs & FIELD_ATTRIBUTE_STATIC) == 0)
 				MetadataModule::RegisterDheSupplementalInstanceField(physical, logical, definitionField);
 			fields.push_back(logical);
 		}
