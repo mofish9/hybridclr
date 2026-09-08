@@ -765,6 +765,18 @@ namespace metadata
 	const Il2CppType* SuperSetAOTHomologousImage::GetDheExecutionType(const Il2CppType* type)
 	{
 		if (!type || _currentStorageTypeTokens.empty()) return nullptr;
+		if (type->type == IL2CPP_TYPE_ARRAY)
+		{
+			const Il2CppType* currentElement = GetDheExecutionType(type->data.array->etype);
+			if (!currentElement)
+				currentElement = GetDheCurrentType(type->data.array->etype);
+			if (!currentElement)
+				return nullptr;
+			Il2CppClass* elementClass = il2cpp::vm::Class::FromIl2CppType(currentElement);
+			return elementClass
+				? &il2cpp::vm::Class::GetArrayClass(elementClass, type->data.array->rank)->byval_arg
+				: nullptr;
+		}
 		// Generic instances carry a Base generic definition plus a class
 		// instantiation. Preserve the arguments and replace only the selected
 		// physical definition; this avoids routing Current generic fields through
