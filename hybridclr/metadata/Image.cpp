@@ -984,9 +984,10 @@ namespace metadata
     {
 		const Il2CppType* executionType = &type;
 		Il2CppClass* logicalClass = il2cpp::vm::Class::FromIl2CppType(&type);
+		AOTHomologousImage* homologous = nullptr;
 		if (logicalClass && logicalClass->image && logicalClass->image->assembly)
 		{
-			AOTHomologousImage* homologous = AOTHomologousImage::FindImageByAssembly(logicalClass->image->assembly);
+			homologous = AOTHomologousImage::FindImageByAssembly(logicalClass->image->assembly);
 			if (homologous)
 			{
 				if (const Il2CppType* current = homologous->GetDheExecutionType(&type))
@@ -1003,6 +1004,25 @@ namespace metadata
                 return MetadataModule::ResolveDheSupplementalField(cur);
             }
         }
+		// A historical Base can resolve the logical owner to its old AOT
+		// class, whose field token/layout no longer matches Current. Retry
+		// against the Current physical owner by stable field name so the
+		// interpreter uses the Current offset and field type.
+		if (homologous)
+		{
+			const Il2CppType* currentType = homologous->GetDheCurrentType(&type);
+			if (currentType)
+			{
+				Il2CppClass* currentClass = il2cpp::vm::Class::FromIl2CppType(currentType);
+				void* currentIter = nullptr;
+				for (const FieldInfo* cur = nullptr;
+					(cur = il2cpp::vm::Class::GetFields(currentClass, &currentIter)) != nullptr; )
+				{
+					if (cur->name && std::strcmp(cur->name, name) == 0)
+						return MetadataModule::ResolveDheSupplementalField(cur);
+				}
+			}
+		}
         RaiseMissingFieldException(&type, name);
         return nullptr;
     }
