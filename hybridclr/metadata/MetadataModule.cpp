@@ -934,6 +934,16 @@ namespace metadata
 		return logical ? logical : field->parent;
 	}
 
+	bool MetadataModule::IsDheField(const FieldInfo* field)
+	{
+		if (!field || !field->parent || !field->parent->image ||
+			!field->parent->image->assembly)
+			return false;
+		AOTHomologousImage* homologous = AOTHomologousImage::FindImageByAssembly(
+			field->parent->image->assembly);
+		return homologous && homologous->IsDheField(field);
+	}
+
 	const FieldInfo* MetadataModule::ResolveDheSupplementalField(const FieldInfo* field)
 	{
 		if (!field || !field->parent || !field->parent->image ||

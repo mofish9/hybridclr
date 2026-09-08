@@ -789,6 +789,12 @@ namespace metadata
 		return MetadataPool::GetPooledIl2CppType(current);
 	}
 
+	bool SuperSetAOTHomologousImage::IsDheField(const FieldInfo* field)
+	{
+		return field && (_logicalFields.find(field) != _logicalFields.end() ||
+			_supplementalFieldLogicalParents.find(field) != _supplementalFieldLogicalParents.end());
+	}
+
 	Il2CppGenericContainer* SuperSetAOTHomologousImage::GetGenericContainerByRawIndex(uint32_t index)
 	{
 		return (Il2CppGenericContainer*)il2cpp::vm::GlobalMetadata::GetGenericContainerFromIndex(index);

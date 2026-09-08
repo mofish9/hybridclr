@@ -105,6 +105,11 @@ namespace metadata
 			return nullptr;
 		}
 
+		virtual bool IsDheField(const FieldInfo* field)
+		{
+			return false;
+		}
+
 		virtual bool AppendDheCurrentExecutions(dhe::MetaVersionRegistration& registration)
 		{
 			return true;

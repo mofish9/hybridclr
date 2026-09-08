@@ -81,7 +81,8 @@ namespace hybridclr
 			bool SetCurrentImagePlan(const dhe::CurrentImagePlan& plan);
 			bool HasCurrentImagePlan() const { return !_currentImagePlan.assemblyName.empty(); }
 			const Il2CppType* GetExecutionTypeFromRawTypeDefIndex(uint32_t index);
-			const Il2CppType* GetDheExecutionType(const Il2CppType* type) override;
+		const Il2CppType* GetDheExecutionType(const Il2CppType* type) override;
+		bool IsDheField(const FieldInfo* field) override;
 			bool AppendDheCurrentExecutions(dhe::MetaVersionRegistration& registration) override;
 
 			const Il2CppType* ReadTypeFromResolutionScope(uint32_t scope, uint32_t typeNamespace, uint32_t typeName) override;

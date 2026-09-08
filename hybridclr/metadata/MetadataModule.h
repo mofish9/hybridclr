@@ -119,6 +119,7 @@ namespace metadata
 		static size_t GetDheRemovedFieldCount(Il2CppClass* klass);
 
 		static Il2CppClass* GetDheLogicalFieldParent(FieldInfo* field);
+		static bool IsDheField(const FieldInfo* field);
 
 		static void RegisterDheSupplementalInstanceField(FieldInfo* runtimeField,
 			FieldInfo* logicalField, const FieldInfo* definitionField = nullptr);
