@@ -87,8 +87,12 @@ namespace metadata
 		if (type->type != IL2CPP_TYPE_GENERICINST)
 		{
 			typeDef = GetUnderlyingTypeDefinition(type);
-			if (cache.homologousImage && !IsInterpreterType(typeDef) && IsInterface(typeDef->flags))
+			if (cache.homologousImage && !IsInterpreterType(typeDef))
 			{
+				// A Current derived tree must inherit the Current implementation
+				// slots as well as the Current interface declarations. Combining
+				// an old AOT parent offset with a new interface slot can select an
+				// unrelated virtual method with a different native signature.
 				const Il2CppType* current = cache.homologousImage->GetDheCurrentType(type);
 				if (!current)
 				{
