@@ -989,7 +989,7 @@ namespace metadata
             if (cur->token == fieldDef->token)
             {
                 IL2CPP_ASSERT(std::strcmp(cur->name, name) == 0);
-                return cur;
+                return MetadataModule::ResolveDheSupplementalField(cur);
             }
         }
         RaiseMissingFieldException(&type, name);

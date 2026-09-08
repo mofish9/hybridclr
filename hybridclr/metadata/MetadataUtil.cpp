@@ -717,8 +717,8 @@ namespace metadata
 				return true;
 			}
 		}
-		retFieldDef = nullptr;
-		return false;
+		retFieldDef = MetadataModule::ResolveDheSupplementalFieldDefinition(type, resolveFieldName, resolveFieldType);
+		return retFieldDef != nullptr;
 	}
 
 	const Il2CppGenericContainer* GetGenericContainerFromIl2CppType(const Il2CppType* type)

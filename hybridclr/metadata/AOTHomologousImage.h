@@ -113,6 +113,17 @@ namespace metadata
 			return false;
 		}
 
+		virtual const FieldInfo* ResolveSupplementalField(const FieldInfo* field)
+		{
+			return field;
+		}
+
+		virtual const Il2CppFieldDefinition* ResolveSupplementalFieldDefinition(
+			const Il2CppType* type, const char* name, const Il2CppType* fieldType)
+		{
+			return nullptr;
+		}
+
 		virtual Il2CppClass* GetSupplementalFieldLogicalParent(const FieldInfo* field)
 		{
 			return nullptr;

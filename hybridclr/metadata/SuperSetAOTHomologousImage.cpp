@@ -3,6 +3,7 @@
 #include "vm/MetadataLock.h"
 #include "vm/GlobalMetadata.h"
 #include "vm/Class.h"
+#include "vm/GenericClass.h"
 #include "vm/Image.h"
 #include "vm/Exception.h"
 #include "vm/MetadataCache.h"
@@ -10,6 +11,7 @@
 #include "MetadataPool.h"
 #include "InterpreterImage.h"
 #include "MetadataModule.h"
+#include "DheGenericFieldMetadata.h"
 
 namespace hybridclr
 {
@@ -381,6 +383,19 @@ namespace metadata
 
 					const char* fieldName = _rawImage->GetStringFromRawIndex(data.name);
 					field.aotFieldDef = FindMatchField(type.aotTypeDef, field, fieldName, frs.type);
+					if (!field.aotFieldDef && _isDheImage &&
+						type.aotTypeDef->genericContainerIndex != kGenericContainerIndexInvalid)
+					{
+						// Matching uses positional variables, but runtime field types
+						// must refer to the public Base's actual generic parameters.
+						BlobReader logicalReader = _rawImage->GetBlobReaderByRawIndex(data.signature);
+						FieldRefSig logicalSignature;
+						ReadFieldRefSig(logicalReader, GetGenericContainerFromIl2CppType(type.aotIl2CppType),
+							logicalSignature);
+						Il2CppType* logicalType = MetadataPool::ShallowCloneIl2CppType(logicalSignature.type);
+						logicalType->attrs = data.flags;
+						logicalFieldType = logicalType;
+					}
 					if (field.aotFieldDef)
 					{
 						_matchedAotFieldTokens.insert(field.aotFieldDef->token);
@@ -413,10 +428,12 @@ namespace metadata
 						}
 						_supplementalFields[baseClass].push_back(logicalField);
 						_supplementalFieldLogicalParents[logicalField] = baseClass;
+						_logicalFields[fallbackField] = logicalField;
+						_logicalFields[logicalField] = logicalField;
 						if ((data.flags & FIELD_ATTRIBUTE_STATIC) == 0)
 						{
 							if (baseClass->byval_arg.valuetype ||
-								type.aotTypeDef->genericContainerIndex != kGenericContainerIndexInvalid ||
+								(!_isDheImage && type.aotTypeDef->genericContainerIndex != kGenericContainerIndexInvalid) ||
 								logicalField->type->byref || logicalField->type->type == IL2CPP_TYPE_PTR ||
 								logicalField->type->type == IL2CPP_TYPE_FNPTR ||
 								logicalField->type->type == IL2CPP_TYPE_TYPEDBYREF)
@@ -785,62 +802,149 @@ namespace metadata
 		return methods == _supplementalMethods.end() ? 0 : methods->second.size();
 	}
 
+	const std::vector<FieldInfo*>* SuperSetAOTHomologousImage::GetSupplementalFields(Il2CppClass* klass)
+	{
+		auto direct = _supplementalFields.find(klass);
+		if (direct != _supplementalFields.end())
+			return &direct->second;
+		if (!_isDheImage || !klass->generic_class)
+			return nullptr;
+		Il2CppClass* definition = il2cpp::vm::GenericClass::GetTypeDefinition(klass->generic_class);
+		auto declared = _supplementalFields.find(definition);
+		if (declared == _supplementalFields.end())
+			return nullptr;
+
+		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
+		auto cached = _genericSupplementalFields.find(klass);
+		if (cached != _genericSupplementalFields.end())
+			return &cached->second;
+		const Il2CppGenericContext* context = il2cpp::vm::GenericClass::GetContext(klass->generic_class);
+		std::vector<FieldInfo*> fields;
+		fields.reserve(declared->second.size());
+		for (FieldInfo* definitionField : declared->second)
+		{
+			Il2CppClass* physicalOwner = il2cpp::vm::GenericClass::GetClass(
+				il2cpp::metadata::GenericMetadata::GetGenericClass(definitionField->parent, context->class_inst));
+			il2cpp::vm::Class::SetupFields(physicalOwner);
+			FieldInfo* physical = FindDhePhysicalField(physicalOwner, definitionField);
+			if (!physical)
+				RaiseMissingFieldException(&physicalOwner->byval_arg, definitionField->name);
+			FieldInfo* logical = static_cast<FieldInfo*>(HYBRIDCLR_METADATA_MALLOC(sizeof(FieldInfo)));
+			*logical = *physical;
+			logical->type = il2cpp::metadata::GenericMetadata::InflateIfNeeded(
+				definitionField->type, context, false);
+			if ((logical->type->attrs & FIELD_ATTRIBUTE_STATIC) == 0)
+				MetadataModule::RegisterDheSupplementalInstanceField(physical, logical, definitionField);
+			fields.push_back(logical);
+		}
+		// The metadata lock publishes the complete vector and its sidecar aliases.
+		return &_genericSupplementalFields.emplace(klass, std::move(fields)).first->second;
+	}
+
 	FieldInfo* SuperSetAOTHomologousImage::GetFirstSupplementalField(
 		Il2CppClass* klass, void** iter)
 	{
-		auto fields = _supplementalFields.find(klass);
-		if (fields == _supplementalFields.end() || fields->second.empty())
+		const std::vector<FieldInfo*>* fields = GetSupplementalFields(klass);
+		if (!fields || fields->empty())
 		{
 			return nullptr;
 		}
-		*iter = &fields->second[0];
-		return fields->second[0];
+		*iter = const_cast<FieldInfo**>(fields->data());
+		return (*fields)[0];
 	}
 
 	bool SuperSetAOTHomologousImage::TryGetNextSupplementalField(Il2CppClass* klass,
 		void** iter, FieldInfo** field)
 	{
-		auto fields = _supplementalFields.find(klass);
-		if (fields == _supplementalFields.end() || fields->second.empty() || !*iter)
+		const std::vector<FieldInfo*>* fields = GetSupplementalFields(klass);
+		if (!fields || fields->empty() || !*iter)
 		{
 			return false;
 		}
 		const uintptr_t current = reinterpret_cast<uintptr_t>(*iter);
-		const uintptr_t begin = reinterpret_cast<uintptr_t>(&fields->second[0]);
+		const uintptr_t begin = reinterpret_cast<uintptr_t>(fields->data());
 		const uintptr_t end = reinterpret_cast<uintptr_t>(
-			&fields->second[0] + fields->second.size());
+			fields->data() + fields->size());
 		if (current < begin || current >= end ||
 			(current - begin) % sizeof(FieldInfo*) != 0)
 		{
 			return false;
 		}
 		const size_t nextIndex = (current - begin) / sizeof(FieldInfo*) + 1;
-		if (nextIndex >= fields->second.size())
+		if (nextIndex >= fields->size())
 		{
 			*field = nullptr;
 			return true;
 		}
-		*iter = &fields->second[nextIndex];
-		*field = fields->second[nextIndex];
+		*iter = const_cast<FieldInfo**>(fields->data() + nextIndex);
+		*field = (*fields)[nextIndex];
 		return true;
 	}
 
 	size_t SuperSetAOTHomologousImage::GetSupplementalFieldCount(Il2CppClass* klass)
 	{
-		auto fields = _supplementalFields.find(klass);
-		return fields == _supplementalFields.end() ? 0 : fields->second.size();
+		const std::vector<FieldInfo*>* fields = GetSupplementalFields(klass);
+		return fields ? fields->size() : 0;
 	}
 
 	bool SuperSetAOTHomologousImage::IsRemovedField(const FieldInfo* field)
 	{
+		if (_isDheImage && field->parent->generic_class)
+			field = FindDhePhysicalField(il2cpp::vm::GenericClass::GetTypeDefinition(
+				field->parent->generic_class), field);
 		return _removedFields.find(field) != _removedFields.end();
+	}
+
+	const FieldInfo* SuperSetAOTHomologousImage::ResolveSupplementalField(const FieldInfo* field)
+	{
+		auto direct = _logicalFields.find(field);
+		if (direct != _logicalFields.end())
+			return direct->second;
+		Il2CppClass* owner = GetSupplementalFieldLogicalParent(field);
+		const std::vector<FieldInfo*>* fields = owner ? GetSupplementalFields(owner) : nullptr;
+		if (fields)
+			for (FieldInfo* candidate : *fields)
+				if (candidate->token == field->token && std::strcmp(candidate->name, field->name) == 0)
+					return candidate;
+		return field;
+	}
+
+	const Il2CppFieldDefinition* SuperSetAOTHomologousImage::ResolveSupplementalFieldDefinition(
+		const Il2CppType* type, const char* name, const Il2CppType* fieldType)
+	{
+		Il2CppClass* definition = type->type == IL2CPP_TYPE_GENERICINST
+			? il2cpp::vm::GenericClass::GetTypeDefinition(type->data.generic_class)
+			: il2cpp::vm::Class::FromIl2CppType(type);
+		auto fields = _supplementalFields.find(definition);
+		if (fields == _supplementalFields.end())
+			return nullptr;
+		const Il2CppGenericContainer* container = GetGenericContainerFromIl2CppType(type);
+		for (FieldInfo* field : fields->second)
+			if (std::strcmp(field->name, name) == 0 && IsMatchSigType(field->type, fieldType, container, nullptr))
+				return _interpreterFallbackImage->GetFieldDefinitionFromRawIndex(DecodeTokenRowIndex(field->token) - 1);
+		return nullptr;
 	}
 
 	Il2CppClass* SuperSetAOTHomologousImage::GetSupplementalFieldLogicalParent(
 		const FieldInfo* field)
 	{
+		auto logical = _logicalFields.find(field);
+		if (_isDheImage && logical != _logicalFields.end())
+			field = logical->second;
 		auto parent = _supplementalFieldLogicalParents.find(field);
-		return parent == _supplementalFieldLogicalParents.end() ? nullptr : parent->second;
+		if (parent != _supplementalFieldLogicalParents.end())
+			return parent->second;
+		if (!_isDheImage || !field || !field->parent->generic_class)
+			return nullptr;
+		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
+		Il2CppGenericClass* generic = field->parent->generic_class;
+		FieldInfo* definitionField = FindDhePhysicalField(il2cpp::vm::GenericClass::GetTypeDefinition(generic), field);
+		auto alias = _logicalFields.find(definitionField);
+		if (alias == _logicalFields.end())
+			return nullptr;
+		Il2CppClass* baseDefinition = _supplementalFieldLogicalParents.at(alias->second);
+		return il2cpp::vm::GenericClass::GetClass(il2cpp::metadata::GenericMetadata::GetGenericClass(
+			baseDefinition, il2cpp::vm::GenericClass::GetContext(generic)->class_inst));
 	}
 
 	bool SuperSetAOTHomologousImage::TryGetCustomAttributeSource(uint32_t token,

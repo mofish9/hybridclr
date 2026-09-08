@@ -268,7 +268,7 @@ namespace metadata
 			// though their metadata and executable bodies live in this hidden image.
 			fallbackIl2CppImage->assembly = const_cast<Il2CppAssembly*>(aotAss);
 			static_cast<SuperSetAOTHomologousImage*>(image)->SetInterpreterFallbackImage(
-				interpreterFallbackImage);
+				interpreterFallbackImage, expectedAssemblyName != nullptr);
 			if (expectedAssemblyName)
 			{
 				interpreterFallbackImage->SetHomologousTypeReferenceImage(

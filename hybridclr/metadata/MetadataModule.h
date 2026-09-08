@@ -84,6 +84,11 @@ namespace metadata
 
 		static size_t GetDheSupplementalFieldCount(Il2CppClass* klass);
 
+		static const FieldInfo* ResolveDheSupplementalField(const FieldInfo* field);
+
+		static const Il2CppFieldDefinition* ResolveDheSupplementalFieldDefinition(
+			const Il2CppType* type, const char* name, const Il2CppType* fieldType);
+
 		static bool IsDheRemovedMethod(const MethodInfo* method)
 		{
 			return dhe::IsRemovedMethod(method);
@@ -105,7 +110,7 @@ namespace metadata
 		static Il2CppClass* GetDheLogicalFieldParent(FieldInfo* field);
 
 		static void RegisterDheSupplementalInstanceField(FieldInfo* runtimeField,
-			FieldInfo* logicalField);
+			FieldInfo* logicalField, const FieldInfo* definitionField = nullptr);
 
 		static bool IsDheSupplementalInstanceField(const FieldInfo* field);
 

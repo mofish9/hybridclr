@@ -478,10 +478,37 @@ namespace metadata
 		return logical ? logical : field->parent;
 	}
 
+	const FieldInfo* MetadataModule::ResolveDheSupplementalField(const FieldInfo* field)
+	{
+		if (!field || !field->parent || !field->parent->image ||
+			!dhe::IsDheAssembly(field->parent->image->assembly))
+			return field;
+		AOTHomologousImage* image = AOTHomologousImage::FindImageByAssembly(field->parent->image->assembly);
+		return image ? image->ResolveSupplementalField(field) : field;
+	}
+
+	const Il2CppFieldDefinition* MetadataModule::ResolveDheSupplementalFieldDefinition(
+		const Il2CppType* type, const char* name, const Il2CppType* fieldType)
+	{
+		Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(type);
+		AOTHomologousImage* image = GetDheSupplementalImage(klass->image);
+		return image ? image->ResolveSupplementalFieldDefinition(type, name, fieldType) : nullptr;
+	}
+
 	void MetadataModule::RegisterDheSupplementalInstanceField(FieldInfo* runtimeField,
-		FieldInfo* logicalField)
+		FieldInfo* logicalField, const FieldInfo* definitionField)
 	{
 		std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
+		if (definitionField)
+		{
+			auto definition = s_dheInstanceFieldSlots.find(definitionField);
+			if (definition == s_dheInstanceFieldSlots.end())
+				RaiseExecutionEngineException("DHE generic field definition has no sidecar slot.");
+			DheInstanceFieldSlot slot = { definition->second.slot, logicalField };
+			s_dheInstanceFieldSlots[runtimeField] = slot;
+			s_dheInstanceFieldSlots[logicalField] = slot;
+			return;
+		}
 		auto runtimeSlot = s_dheInstanceFieldSlots.find(runtimeField);
 		if (runtimeSlot != s_dheInstanceFieldSlots.end())
 		{
@@ -502,14 +529,15 @@ namespace metadata
 	bool MetadataModule::TryGetDheSupplementalInstanceFieldValue(Il2CppObject* obj,
 		FieldInfo* field, void* value)
 	{
-		std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
 		uint32_t slot;
 		FieldInfo* logicalField;
-		if (!TryGetDheFieldSlotLocked(field, slot, logicalField))
+		Il2CppObject* stored;
 		{
-			return false;
+			std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
+			if (!TryGetDheFieldSlotLocked(field, slot, logicalField))
+				return false;
+			stored = GetDheSidecarValueLocked(obj, slot);
 		}
-		Il2CppObject* stored = GetDheSidecarValueLocked(obj, slot);
 		if (!stored)
 		{
 			il2cpp::vm::Field::SetValueRaw(logicalField->type, value, nullptr, false);
@@ -542,6 +570,8 @@ namespace metadata
 		}
 		Il2CppClass* fieldType = il2cpp::vm::Class::FromIl2CppType(logicalField->type);
 		Il2CppObject* boxed = il2cpp::vm::Object::Box(fieldType, value);
+		// Sidecar allocation can enter engine metadata; keep one lock order.
+		il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
 		std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
 		SetDheSidecarValueLocked(obj, slot, boxed);
 		return true;
@@ -550,18 +580,23 @@ namespace metadata
 	bool MetadataModule::TryGetDheSupplementalInstanceFieldValueObject(Il2CppObject* obj,
 		FieldInfo* field, Il2CppObject** value)
 	{
-		std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
 		uint32_t slot;
 		FieldInfo* logicalField;
-		if (!TryGetDheFieldSlotLocked(field, slot, logicalField))
+		Il2CppObject* stored;
 		{
-			return false;
+			std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
+			if (!TryGetDheFieldSlotLocked(field, slot, logicalField))
+				return false;
+			stored = GetDheSidecarValueLocked(obj, slot);
 		}
-		Il2CppObject* stored = GetDheSidecarValueLocked(obj, slot);
 		Il2CppClass* fieldType = il2cpp::vm::Class::FromIl2CppType(logicalField->type);
 		if (!stored && fieldType->byval_arg.valuetype && !il2cpp::vm::Class::IsNullable(fieldType))
 		{
 			stored = il2cpp::vm::Object::New(fieldType);
+		}
+		else if (stored && fieldType->byval_arg.valuetype)
+		{
+			stored = il2cpp::vm::Object::Box(stored->klass, il2cpp::vm::Object::Unbox(stored));
 		}
 		*value = stored;
 		return true;
@@ -570,13 +605,18 @@ namespace metadata
 	bool MetadataModule::TrySetDheSupplementalInstanceFieldValueObject(Il2CppObject* obj,
 		FieldInfo* field, Il2CppObject* value)
 	{
-		std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
 		uint32_t slot;
 		FieldInfo* logicalField;
-		if (!TryGetDheFieldSlotLocked(field, slot, logicalField))
 		{
-			return false;
+			std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
+			if (!TryGetDheFieldSlotLocked(field, slot, logicalField))
+				return false;
 		}
+		Il2CppClass* fieldType = il2cpp::vm::Class::FromIl2CppType(logicalField->type);
+		if (value && fieldType->byval_arg.valuetype)
+			value = il2cpp::vm::Object::Box(value->klass, il2cpp::vm::Object::Unbox(value));
+		il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
+		std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
 		SetDheSidecarValueLocked(obj, slot, value);
 		return true;
 	}

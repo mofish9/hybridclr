@@ -70,9 +70,10 @@ namespace hybridclr
 		public:
 			SuperSetAOTHomologousImage() : AOTHomologousImage() {}
 
-			void SetInterpreterFallbackImage(InterpreterImage* image)
+			void SetInterpreterFallbackImage(InterpreterImage* image, bool isDheImage = false)
 			{
 				_interpreterFallbackImage = image;
+				_isDheImage = isDheImage;
 			}
 
 			void InitRuntimeMetadatas() override;
@@ -102,6 +103,9 @@ namespace hybridclr
 				FieldInfo** field) override;
 			size_t GetSupplementalFieldCount(Il2CppClass* klass) override;
 			bool IsRemovedField(const FieldInfo* field) override;
+			const FieldInfo* ResolveSupplementalField(const FieldInfo* field) override;
+			const Il2CppFieldDefinition* ResolveSupplementalFieldDefinition(
+				const Il2CppType* type, const char* name, const Il2CppType* fieldType) override;
 			Il2CppClass* GetSupplementalFieldLogicalParent(const FieldInfo* field) override;
 			bool TryGetCustomAttributeSource(uint32_t token,
 				const Il2CppImage*& sourceImage, uint32_t& sourceToken) override;
@@ -128,6 +132,7 @@ namespace hybridclr
 			void InitPropertiesAndEvents(
 				std::vector<SuperSetTypeIntermediateInfo>& typeIntermediateInfos);
 			const MethodInfo* GetLogicalMethod(const MethodInfo* currentMethod);
+			const std::vector<FieldInfo*>* GetSupplementalFields(Il2CppClass* klass);
 
 			const Il2CppType* _defaultIl2CppType;
 
@@ -140,12 +145,16 @@ namespace hybridclr
 
 			std::vector<SuperSetFieldDefDetail> _fields;
 			InterpreterImage* _interpreterFallbackImage = nullptr;
+			bool _isDheImage = false;
 			std::vector<Il2CppClass*> _supplementalTypes;
 			std::unordered_map<Il2CppClass*, std::vector<Il2CppClass*>> _supplementalNestedTypes;
 			std::unordered_map<Il2CppClass*, std::vector<const MethodInfo*>> _supplementalMethods;
 			std::unordered_map<const MethodInfo*, Image*> _supplementalMethodImages;
 			std::unordered_map<const MethodInfo*, const MethodInfo*> _logicalMethods;
 			std::unordered_map<Il2CppClass*, std::vector<FieldInfo*>> _supplementalFields;
+			std::unordered_map<const FieldInfo*, FieldInfo*> _logicalFields;
+			// All accesses use g_MetadataLock; published vectors never change.
+			std::unordered_map<Il2CppClass*, std::vector<FieldInfo*>> _genericSupplementalFields;
 			std::unordered_map<const FieldInfo*, Il2CppClass*> _supplementalFieldLogicalParents;
 			std::unordered_set<uint32_t> _matchedAotFieldTokens;
 			std::unordered_set<const FieldInfo*> _removedFields;
