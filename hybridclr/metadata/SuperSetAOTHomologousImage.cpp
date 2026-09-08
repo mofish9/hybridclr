@@ -1134,6 +1134,29 @@ namespace metadata
 	const Il2CppFieldDefinition* SuperSetAOTHomologousImage::ResolveSupplementalFieldDefinition(
 		const Il2CppType* type, const char* name, const Il2CppType* fieldType)
 	{
+		// Resolve against the physical Current class first. This is required
+		// while an unchanged Base caller names a field whose Current type has a
+		// different layout or field type; signature comparison against the old
+		// Base field would reject the valid Current declaration.
+		if (_isDheImage && _interpreterFallbackImage && type && name)
+		{
+			const Il2CppType* executionType = GetDheExecutionType(type);
+			if (executionType)
+			{
+				Il2CppClass* physicalClass = il2cpp::vm::Class::FromIl2CppType(executionType);
+				if (physicalClass)
+				{
+					il2cpp::vm::Class::SetupFields(physicalClass);
+					for (uint16_t index = 0; index < physicalClass->field_count; ++index)
+					{
+						FieldInfo* physicalField = physicalClass->fields + index;
+						if (physicalField->name && std::strcmp(physicalField->name, name) == 0)
+							return _interpreterFallbackImage->GetFieldDefinitionFromRawIndex(
+								DecodeTokenRowIndex(physicalField->token) - 1);
+					}
+				}
+			}
+		}
 		Il2CppClass* definition = type->type == IL2CPP_TYPE_GENERICINST
 			? il2cpp::vm::GenericClass::GetTypeDefinition(type->data.generic_class)
 			: il2cpp::vm::Class::FromIl2CppType(type);
