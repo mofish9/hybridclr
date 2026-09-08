@@ -807,17 +807,11 @@ namespace metadata
 	{
 		auto SelectExecutionType = [this](const Il2CppType* type) -> const Il2CppType*
 		{
-			if (!_isDheImage || !type) return type;
-			const Il2CppType* execution = GetDheExecutionType(type);
-			if (execution) return execution;
-			// A Current method in another hotfix assembly can reference a
-			// selected value type by AssemblyRef. Resolve that public Base type
-			// through its owning DHE image before field lookup.
-			Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(type);
-			AOTHomologousImage* owner = klass && klass->image
-				? AOTHomologousImage::FindImageByAssembly(klass->image->assembly) : nullptr;
-			const Il2CppType* external = owner ? owner->GetDheExecutionType(type) : nullptr;
-			return external ? external : type;
+			// Keep resolution signatures on the logical Base representation. The
+			// execution image translates only field owners after method matching;
+			// mixing Current types here makes an unchanged Base method signature
+			// fail its lookup before the Current execution binding is applied.
+			return type;
 		};
 		TableType tokenType;
 		uint32_t rawIndex;

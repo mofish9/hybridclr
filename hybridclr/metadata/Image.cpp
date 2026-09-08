@@ -982,7 +982,18 @@ namespace metadata
 
     const FieldInfo* Image::GetFieldInfoFromFieldRef(const Il2CppType& type, const Il2CppFieldDefinition* fieldDef)
     {
-        Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(&type);
+		const Il2CppType* executionType = &type;
+		Il2CppClass* logicalClass = il2cpp::vm::Class::FromIl2CppType(&type);
+		if (logicalClass && logicalClass->image && logicalClass->image->assembly)
+		{
+			AOTHomologousImage* homologous = AOTHomologousImage::FindImageByAssembly(logicalClass->image->assembly);
+			if (homologous)
+			{
+				if (const Il2CppType* current = homologous->GetDheExecutionType(&type))
+					executionType = current;
+			}
+		}
+		Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(executionType);
         const char* name = il2cpp::vm::GlobalMetadata::GetStringFromIndex(fieldDef->nameIndex);
         void* iter = nullptr;
         for (const FieldInfo* cur = nullptr; (cur = il2cpp::vm::Class::GetFields(klass, &iter)) != nullptr; )
