@@ -97,6 +97,8 @@ namespace dhe
         const VirtualInvokeData*& result);
     bool TryGetVirtualBaseMethod(const MethodInfo* method, bool definition,
         const MethodInfo*& result);
+    bool TryGetVirtualReflectionIdentity(const Il2CppClass* reflectedType, const MethodInfo* method,
+        const MethodInfo*& result);
 
     bool TryGetInterfaceInvokeData(const Il2CppClass* klass, const Il2CppClass* interfaceType,
         uint16_t logicalSlot, const VirtualInvokeData*& result);

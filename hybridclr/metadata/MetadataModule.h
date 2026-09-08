@@ -61,6 +61,8 @@ namespace metadata
 			const VirtualInvokeData*& result);
 		static bool TryGetDheVirtualBaseMethod(const MethodInfo* method, bool definition,
 			const MethodInfo*& result);
+		static bool TryGetDheVirtualReflectionIdentity(const Il2CppClass* reflectedType,
+			const MethodInfo* method, const MethodInfo*& result);
 
 		static bool TryGetDheInterfaceInvokeData(const Il2CppClass* klass,
 			const Il2CppClass* interfaceType, uint16_t logicalSlot, const VirtualInvokeData*& result);

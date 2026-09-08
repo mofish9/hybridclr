@@ -59,6 +59,12 @@ namespace hybridclr
 			return metadata::MetadataModule::TryGetDheVirtualBaseMethod(method, definition, result);
 		}
 
+		bool TryGetVirtualReflectionIdentity(const Il2CppClass* reflectedType, const MethodInfo* method,
+			const MethodInfo*& result)
+		{
+			return metadata::MetadataModule::TryGetDheVirtualReflectionIdentity(reflectedType, method, result);
+		}
+
 		bool TryGetInterfaceInvokeData(const Il2CppClass* klass, const Il2CppClass* interfaceType,
 			uint16_t logicalSlot, const VirtualInvokeData*& result)
 		{
@@ -590,19 +596,12 @@ namespace metadata
 		return true;
 	}
 
-	bool MetadataModule::TryGetDheVirtualBaseMethod(const MethodInfo* method, bool definition,
-		const MethodInfo*& result)
+	static const MethodInfo* GetDheCurrentVirtualBaseMethod(const MethodInfo* current, bool definition)
 	{
-		if (!method || !IsVirtualMethod(method->flags) || IsInterface(method->klass->flags) ||
-			!HasDheVirtualHierarchy(method->klass))
-			return false;
-		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
-		const MethodInfo* current = FindDheCurrentVirtualDeclaration(method);
-		Il2CppClass* owner = GetDheCurrentClass(method->klass);
-		result = method;
+		const MethodInfo* result = current;
 		if (current->flags & METHOD_ATTRIBUTE_NEW_SLOT)
-			return true;
-		for (Il2CppClass* parent = GetDheCurrentClass(owner->parent); parent;
+			return result;
+		for (Il2CppClass* parent = GetDheCurrentClass(current->klass->parent); parent;
 			parent = GetDheCurrentClass(parent->parent))
 		{
 			InitDheVTable(parent);
@@ -611,10 +610,36 @@ namespace metadata
 			const MethodInfo* inherited = GetDheVirtualSlotDeclaration(parent, current->slot);
 			if (!inherited)
 				RaiseExecutionEngineException("DHE Current base virtual declaration is missing.");
-			result = ResolveDheMethod(inherited);
+			result = inherited;
 			if (!definition)
 				break;
 		}
+		return result;
+	}
+
+	bool MetadataModule::TryGetDheVirtualReflectionIdentity(const Il2CppClass* reflectedType,
+		const MethodInfo* method, const MethodInfo*& result)
+	{
+		if (!method || !IsVirtualMethod(method->flags) || IsInterface(method->klass->flags) ||
+			!HasDheVirtualHierarchy(reflectedType))
+			return false;
+		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
+		// Reflection walks logical Base parents alongside Current aliases.
+		// Their numeric slots belong to different tables; use the logical root
+		// declaration to suppress overrides without conflating new-slot methods.
+		result = ResolveDheMethod(GetDheCurrentVirtualBaseMethod(GetDheVirtualDeclaration(method), true));
+		return true;
+	}
+
+	bool MetadataModule::TryGetDheVirtualBaseMethod(const MethodInfo* method, bool definition,
+		const MethodInfo*& result)
+	{
+		if (!method || !IsVirtualMethod(method->flags) || IsInterface(method->klass->flags) ||
+			!HasDheVirtualHierarchy(method->klass))
+			return false;
+		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
+		const MethodInfo* current = FindDheCurrentVirtualDeclaration(method);
+		result = ResolveDheMethod(GetDheCurrentVirtualBaseMethod(current, definition));
 		return true;
 	}
 
