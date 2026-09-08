@@ -970,6 +970,19 @@ namespace metadata
 
         const Il2CppType* originType = ReadTypeFromToken(klassGenericContainer, methodGenericContainer, DecodeTokenTableType(token), DecodeTokenRowIndex(token));
         const Il2CppType* resultType = genericContext != nullptr ? il2cpp::metadata::GenericMetadata::InflateIfNeeded(originType, genericContext, true) : originType;
+		// TypeSpec tokens such as SZARRAY are resolved as a complete type. Let
+		// the DHE owner remap the complete result so arrays use the Current
+		// element stride, including when the element was already decoded from
+		// the Current interpreter image.
+		Il2CppClass* logicalClass = il2cpp::vm::Class::FromIl2CppType(resultType);
+		if (logicalClass && logicalClass->image && logicalClass->image->assembly)
+		{
+			AOTHomologousImage* homologous = AOTHomologousImage::FindImageByAssembly(
+				logicalClass->image->assembly);
+			if (homologous)
+				if (const Il2CppType* current = homologous->GetDheExecutionType(resultType))
+					resultType = current;
+		}
         Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(resultType);
         if (!klass)
         {
