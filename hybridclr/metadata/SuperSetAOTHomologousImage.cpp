@@ -755,7 +755,7 @@ namespace metadata
 		{
 			const Il2CppType* currentDefinition = GetDheExecutionType(type->data.generic_class->type);
 			if (!currentDefinition) return nullptr;
-			const Il2CppGenericClass* currentGeneric = il2cpp::metadata::GenericMetadata::GetGenericClass(
+			Il2CppGenericClass* currentGeneric = il2cpp::metadata::GenericMetadata::GetGenericClass(
 				currentDefinition, type->data.generic_class->context.class_inst);
 			return &il2cpp::vm::GenericClass::GetClass(currentGeneric)->byval_arg;
 		}
