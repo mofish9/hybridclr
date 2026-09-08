@@ -475,11 +475,12 @@ namespace metadata
 					Il2CppClass* baseClass = il2cpp::vm::Class::FromIl2CppType(type.aotIl2CppType);
 					FieldInfo* physical = const_cast<FieldInfo*>(GetFieldInfoFromFieldRef(
 						*field.declaringIl2CppType, field.aotFieldDef));
-					// The selected type is represented by its Current physical
-					// fields, while old Base callers still resolve FieldInfo handles
-					// from the AOT class. Alias the stable field name so those callers
-					// receive the Current offset/type as well. This is required for an
-					// older Base whose value layout differs from Current.
+					// The selected type is represented by Current physical fields,
+					// while old Base callers still resolve FieldInfo handles from the
+					// AOT class. Create a logical alias whose parent remains Base but
+					// whose offset/type come from Current. Reflection and interpreted
+					// callers can then use the same field on either class identity.
+					FieldInfo* logical = physical;
 					if (baseClass && physical && physical->name)
 					{
 						il2cpp::vm::Class::SetupFields(baseClass);
@@ -488,14 +489,21 @@ namespace metadata
 							FieldInfo* baseField = baseClass->fields + baseIndex;
 							if (baseField->name && std::strcmp(baseField->name, physical->name) == 0)
 							{
-								_logicalFields[baseField] = physical;
+								logical = static_cast<FieldInfo*>(HYBRIDCLR_METADATA_MALLOC(sizeof(FieldInfo)));
+								*logical = *physical;
+								logical->parent = baseClass;
+								logical->token = baseField->token;
+								_logicalFields[baseField] = logical;
 								break;
 							}
 						}
 					}
-					_supplementalFields[baseClass].push_back(physical);
-					_supplementalFieldLogicalParents[physical] = baseClass;
-					_logicalFields[physical] = physical;
+					_supplementalFields[baseClass].push_back(logical);
+					_supplementalFieldLogicalParents[logical] = baseClass;
+					_logicalFields[physical] = logical;
+					if (logical != physical && baseClass && !baseClass->byval_arg.valuetype &&
+						(data.flags & FIELD_ATTRIBUTE_STATIC) == 0)
+						MetadataModule::RegisterDheSupplementalInstanceField(physical, logical);
 					continue;
 				}
 				//field.name = _rawImage->GetStringFromRawIndex(data.name);
