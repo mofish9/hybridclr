@@ -598,23 +598,35 @@ namespace metadata
 
 	static const MethodInfo* GetDheCurrentVirtualBaseMethod(const MethodInfo* current, bool definition)
 	{
-		const MethodInfo* result = current;
-		if (current->flags & METHOD_ATTRIBUTE_NEW_SLOT)
-			return result;
-		for (Il2CppClass* parent = GetDheCurrentClass(current->klass->parent); parent;
-			parent = GetDheCurrentClass(parent->parent))
+		while (!(current->flags & METHOD_ATTRIBUTE_NEW_SLOT))
 		{
-			InitDheVTable(parent);
-			if (current->slot >= parent->vtable_count)
+			Il2CppClass* nativeParent = current->klass->parent;
+			if (!nativeParent)
 				break;
-			const MethodInfo* inherited = GetDheVirtualSlotDeclaration(parent, current->slot);
+			Il2CppClass* parent = GetDheCurrentClass(nativeParent);
+			InitDheVTable(parent);
+			uint16_t slot = current->slot;
+			if (parent != nativeParent && !IsInterpreterType(current->klass))
+			{
+				// Ordinary AOT descendants keep Base slots. Translate the root
+				// declaration when crossing into a Current parent's table;
+				// inserted Current methods may have reused the old slot number.
+				const MethodInfo* root = GetDheBaseVirtualRoot(current->klass, slot);
+				slot = FindDheCurrentVirtualDeclaration(root)->slot;
+			}
+			if (slot >= parent->vtable_count)
+				break;
+			const MethodInfo* inherited = GetDheVirtualSlotDeclaration(parent, slot);
 			if (!inherited)
 				RaiseExecutionEngineException("DHE Current base virtual declaration is missing.");
-			result = inherited;
+			// Follow each actual declaration, including intermediate native
+			// overrides for inherited attributes. A new-slot declaration at
+			// any level terminates GetBaseDefinition's walk.
+			current = inherited;
 			if (!definition)
 				break;
 		}
-		return result;
+		return current;
 	}
 
 	bool MetadataModule::TryGetDheVirtualReflectionIdentity(const Il2CppClass* reflectedType,
