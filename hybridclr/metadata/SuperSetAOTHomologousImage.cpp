@@ -793,7 +793,11 @@ namespace metadata
 		// by the signature reader afterwards.
 		if (type->type != IL2CPP_TYPE_CLASS && type->type != IL2CPP_TYPE_VALUETYPE) return nullptr;
 		const Il2CppTypeDefinition* definition = GetUnderlyingTypeDefinition(type);
-		if (!definition || IsInterpreterType(definition)) return nullptr;
+		// A type already decoded from the Current interpreter image is its own
+		// execution representation. This matters for arrays whose element type
+		// is a Current TypeRef rather than a Base AOT type.
+		if (definition && IsInterpreterType(definition)) return type;
+		if (!definition) return nullptr;
 		auto entry = _aotTypeIndex2TypeDefs.find(il2cpp::vm::GlobalMetadata::GetIndexForTypeDefinition(definition));
 		if (entry == _aotTypeIndex2TypeDefs.end()) return nullptr;
 		const uint32_t index = static_cast<uint32_t>(entry->second - _typeDefs.data());
