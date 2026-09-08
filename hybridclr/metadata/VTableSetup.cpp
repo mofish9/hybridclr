@@ -6,6 +6,7 @@
 #include "metadata/GenericMetadata.h"
 
 #include "MetadataModule.h"
+#include "MetadataPool.h"
 #include "SuperSetAOTHomologousImage.h"
 
 #if defined(HYBRIDCLR_LAB_INSTRUMENTED)
@@ -45,6 +46,25 @@ namespace metadata
 	VTableSetUp* VTableSetUp::InflateVts(Il2CppType2TypeDeclaringTreeMap& cache, VTableSetUp* genericType, const Il2CppType* type)
 	{
 		IL2CPP_ASSERT(genericType->_type->data.typeHandle == type->data.generic_class->type->data.typeHandle);
+		const Il2CppType* declarationInstance = type;
+		if (GetUnderlyingTypeDefinition(genericType->_type) != genericType->_typeDef)
+		{
+			// The cache key is Base, but a published Current vtable can name
+			// its own open declaring type. Bind that self declaration as well.
+			const Il2CppType* declaration = il2cpp::vm::GlobalMetadata::GetIl2CppTypeFromIndex(
+				genericType->_typeDef->byvalTypeIndex);
+			Il2CppType instance = *type;
+			instance.data.generic_class = il2cpp::metadata::GenericMetadata::GetGenericClass(
+				declaration, type->data.generic_class->context.class_inst);
+			declarationInstance = MetadataPool::GetPooledIl2CppType(instance);
+		}
+		auto inflateMemberType = [&](const Il2CppType* memberType) -> const Il2CppType*
+		{
+			if ((memberType->type == IL2CPP_TYPE_CLASS || memberType->type == IL2CPP_TYPE_VALUETYPE)
+				&& GetUnderlyingTypeDefinition(memberType) == genericType->_typeDef)
+				return declarationInstance;
+			return TryInflateIfNeed(type, genericType->_type, memberType);
+		};
 		VTableSetUp* tdt = new (HYBRIDCLR_MALLOC_ZERO(sizeof(VTableSetUp))) VTableSetUp();
 		tdt->_type = type;
 		tdt->_typeDef = genericType->_typeDef;
@@ -60,19 +80,19 @@ namespace metadata
 
 		for (GenericClassMethod& gcm : genericType->_virtualMethods)
 		{
-			tdt->_virtualMethods.push_back({ TryInflateIfNeed(type, genericType->_type, gcm.type), gcm.method, gcm.name });
+			tdt->_virtualMethods.push_back({ inflateMemberType(gcm.type), gcm.method, gcm.name });
 		}
 
 		for (RawInterfaceOffsetInfo& roi : genericType->_interfaceOffsetInfos)
 		{
-			const Il2CppType* intType = TryInflateIfNeed(type, genericType->_type, roi.type);
+			const Il2CppType* intType = inflateMemberType(roi.type);
 			VTableSetUp* intf = BuildByType(cache, intType);
 			tdt->_interfaceOffsetInfos.push_back({ intType, intf, roi.offset });
 		}
 
 		for (VirtualMethodImpl& vmi : genericType->_methodImpls)
 		{
-			const Il2CppType* declaringType = vmi.type ? TryInflateIfNeed(type, genericType->_type, vmi.type) : nullptr;
+			const Il2CppType* declaringType = vmi.type ? inflateMemberType(vmi.type) : nullptr;
 			tdt->_methodImpls.push_back({ vmi.method, declaringType, vmi.slot /*, vmi.name*/});
 		}
 
