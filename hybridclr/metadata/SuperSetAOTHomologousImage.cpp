@@ -746,10 +746,22 @@ namespace metadata
 
 	const Il2CppType* SuperSetAOTHomologousImage::GetDheExecutionType(const Il2CppType* type)
 	{
-		// TypeRef decoding supplies a definition; generic instantiation and
-		// byref/array wrappers are built by the signature reader afterwards.
-		if (!type || _currentStorageTypeTokens.empty() ||
-			(type->type != IL2CPP_TYPE_CLASS && type->type != IL2CPP_TYPE_VALUETYPE)) return nullptr;
+		if (!type || _currentStorageTypeTokens.empty()) return nullptr;
+		// Generic instances carry a Base generic definition plus a class
+		// instantiation. Preserve the arguments and replace only the selected
+		// physical definition; this avoids routing Current generic fields through
+		// the reference sidecar used by ordinary AOT representations.
+		if (type->type == IL2CPP_TYPE_GENERICINST)
+		{
+			const Il2CppType* currentDefinition = GetDheExecutionType(type->data.generic_class->type);
+			if (!currentDefinition) return nullptr;
+			const Il2CppGenericClass* currentGeneric = il2cpp::metadata::GenericMetadata::GetGenericClass(
+				currentDefinition, type->data.generic_class->context.class_inst);
+			return &il2cpp::vm::GenericClass::GetClass(currentGeneric)->byval_arg;
+		}
+		// TypeRef decoding supplies a definition; byref/array wrappers are built
+		// by the signature reader afterwards.
+		if (type->type != IL2CPP_TYPE_CLASS && type->type != IL2CPP_TYPE_VALUETYPE) return nullptr;
 		const Il2CppTypeDefinition* definition = GetUnderlyingTypeDefinition(type);
 		if (!definition || IsInterpreterType(definition)) return nullptr;
 		auto entry = _aotTypeIndex2TypeDefs.find(il2cpp::vm::GlobalMetadata::GetIndexForTypeDefinition(definition));
