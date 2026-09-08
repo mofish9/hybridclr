@@ -143,7 +143,11 @@ namespace metadata
 
 		static const PropertyInfo* GetDheCustomAttributeProperty(Il2CppClass* klass, uint32_t index);
 
-		static const MethodInfo* ResolveDheCustomAttributeConstructor(const MethodInfo* method);
+		static const MethodInfo* ResolveDheMethod(const MethodInfo* method);
+		static const MethodInfo* ResolveDheCustomAttributeConstructor(const MethodInfo* method)
+		{
+			return ResolveDheMethod(method);
+		}
 
 		static bool HasDheLogicalEventView(Il2CppClass* klass);
 

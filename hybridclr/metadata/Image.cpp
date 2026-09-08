@@ -1237,6 +1237,9 @@ namespace metadata
             nullptr, DecodeTokenTableType(token), DecodeTokenRowIndex(token));
 
         IL2CPP_ASSERT(method);
+        // Cache the public identity and logical slot, not the hidden Current
+        // interface declaration returned by a new MethodDef token.
+        method = MetadataModule::ResolveDheMethod(method);
         il2cpp::vm::Class::Init(method->klass);
 
         tokenCache.insert({ key, (void*)method });

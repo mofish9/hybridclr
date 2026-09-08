@@ -462,7 +462,7 @@ namespace metadata
 		return GetDheAttributePropertyByIndex(GetDheSupplementalImage(klass->image), klass, index);
 	}
 
-	const MethodInfo* MetadataModule::ResolveDheCustomAttributeConstructor(const MethodInfo* method)
+	const MethodInfo* MetadataModule::ResolveDheMethod(const MethodInfo* method)
 	{
 		if (!method || !method->klass || !method->klass->image ||
 			!IsInterpreterImage(method->klass->image) ||
