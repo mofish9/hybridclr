@@ -436,13 +436,16 @@ namespace metadata
 			if (!target || IsAbstractMethod(target->flags))
 				break;
 #if HYBRIDCLR_UNITY_2021
-			Il2CppMethodPointer pointer = il2cpp::vm::Method::GetVirtualCallMethodPointer(target);
+			Il2CppMethodPointer pointer = target->is_generic ? nullptr : il2cpp::vm::Method::GetVirtualCallMethodPointer(target);
 #else
-			Il2CppMethodPointer pointer = ReadPublishedPointer(&const_cast<MethodInfo*>(target)->virtualMethodPointer);
+			Il2CppMethodPointer pointer = target->is_generic ? nullptr : ReadPublishedPointer(&const_cast<MethodInfo*>(target)->virtualMethodPointer);
 #endif
-			if (!pointer)
+			// Generic dispatch first resolves this definition, then IL2CPP
+			// inflates it with the caller's method arguments. Open native
+			// definitions have no callable pointer at this stage.
+			if (!pointer && !target->is_generic)
 				pointer = InitAndGetInterpreterDirectlyCallVirtualMethodPointer(target);
-			if (!pointer)
+			if (!pointer && !target->is_generic)
 				RaiseExecutionEngineException("DHE inherited virtual method has no callable entry.");
 			VirtualInvokeData entry = {};
 			entry.method = target;
@@ -517,13 +520,16 @@ namespace metadata
 			if (targetImage && dhe::IsDheAssembly(target->klass->image->assembly))
 				target = targetImage->ResolveLogicalMethod(target);
 #if HYBRIDCLR_UNITY_2021
-			Il2CppMethodPointer pointer = il2cpp::vm::Method::GetVirtualCallMethodPointer(target);
+			Il2CppMethodPointer pointer = target->is_generic ? nullptr : il2cpp::vm::Method::GetVirtualCallMethodPointer(target);
 #else
-			Il2CppMethodPointer pointer = ReadPublishedPointer(&const_cast<MethodInfo*>(target)->virtualMethodPointer);
+			Il2CppMethodPointer pointer = target->is_generic ? nullptr : ReadPublishedPointer(&const_cast<MethodInfo*>(target)->virtualMethodPointer);
 #endif
-			if (!pointer)
+			// The generic interface caller needs the definition before it can
+			// inflate a callable implementation. A null entry is valid only
+			// for that open method definition, as in an ordinary IL2CPP vtable.
+			if (!pointer && !target->is_generic)
 				pointer = InitAndGetInterpreterDirectlyCallVirtualMethodPointer(target);
-			if (!pointer)
+			if (!pointer && !target->is_generic)
 				RaiseExecutionEngineException("DHE interface implementation has no callable entry.");
 			VirtualInvokeData entry = {};
 			entry.method = target;
