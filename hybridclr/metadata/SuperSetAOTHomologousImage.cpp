@@ -1141,8 +1141,19 @@ namespace metadata
 		if (fields == _supplementalFields.end())
 			return nullptr;
 		const Il2CppGenericContainer* container = GetGenericContainerFromIl2CppType(type);
+		bool currentStorage = false;
+		if (definition && definition->image)
+		{
+			const Il2CppTypeDefinition* baseDefinition = GetUnderlyingTypeDefinition(&definition->byval_arg);
+			auto typeEntry = _aotTypeIndex2TypeDefs.find(
+				il2cpp::vm::GlobalMetadata::GetIndexForTypeDefinition(baseDefinition));
+			if (typeEntry != _aotTypeIndex2TypeDefs.end())
+				currentStorage = _currentStorageTypeTokens.count(EncodeToken(TableType::TYPEDEF,
+					static_cast<uint32_t>(typeEntry->second - _typeDefs.data()) + 1)) != 0;
+		}
 		for (FieldInfo* field : fields->second)
-			if (std::strcmp(field->name, name) == 0 && IsMatchSigType(field->type, fieldType, container, nullptr))
+			if (std::strcmp(field->name, name) == 0 &&
+				(currentStorage || IsMatchSigType(field->type, fieldType, container, nullptr)))
 				return _interpreterFallbackImage->GetFieldDefinitionFromRawIndex(DecodeTokenRowIndex(field->token) - 1);
 		return nullptr;
 	}
