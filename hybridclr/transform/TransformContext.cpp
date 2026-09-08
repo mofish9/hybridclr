@@ -3778,7 +3778,7 @@ else \
 				directDelegateReceiverOffset = -1;
 				uint32_t token = (uint32_t)GetI4LittleEndian(ip + 1);
 				ip += 5;
-				shareMethod = const_cast<MethodInfo*>(image->GetMethodInfoFromToken(tokenCache, token, klassContainer, methodContainer, genericContext));
+				shareMethod = const_cast<MethodInfo*>(image->GetMethodExecutionInfoFromToken(tokenCache, token, klassContainer, methodContainer, genericContext));
 				IL2CPP_ASSERT(shareMethod);
 			}
 
@@ -3973,7 +3973,7 @@ else \
 				directDelegateReceiverOffset = -1;
 				uint32_t token = (uint32_t)GetI4LittleEndian(ip + 1);
 				ip += 5;
-				shareMethod = image->GetMethodInfoFromToken(tokenCache, token, klassContainer, methodContainer, genericContext);
+				shareMethod = image->GetMethodExecutionInfoFromToken(tokenCache, token, klassContainer, methodContainer, genericContext);
 			}
 		LabelCallVir:
 			{
@@ -5102,7 +5102,7 @@ else \
 				uint32_t token = (uint32_t)GetI4LittleEndian(ip + 1);
 				ip += 5;
 				// TODO token cache optimistic
-				shareMethod = const_cast<MethodInfo*>(image->GetMethodInfoFromToken(tokenCache, token, klassContainer, methodContainer, genericContext));
+				shareMethod = const_cast<MethodInfo*>(image->GetMethodExecutionInfoFromToken(tokenCache, token, klassContainer, methodContainer, genericContext));
 				IL2CPP_ASSERT(shareMethod);
 				IL2CPP_ASSERT(!std::strcmp(shareMethod->name, ".ctor"));
 				IL2CPP_ASSERT(hybridclr::metadata::IsInstanceMethod(shareMethod));
@@ -6335,7 +6335,7 @@ ir->ele = ele.locOffset;
 				case OpcodeValue::LDFTN:
 				{
 					uint32_t methodToken = (uint32_t)GetI4LittleEndian(ip + 2);
-					MethodInfo* methodInfo = const_cast<MethodInfo*>(image->GetMethodInfoFromToken(tokenCache, methodToken, klassContainer, methodContainer, genericContext));
+					MethodInfo* methodInfo = const_cast<MethodInfo*>(image->GetMethodExecutionInfoFromToken(tokenCache, methodToken, klassContainer, methodContainer, genericContext));
 					IL2CPP_ASSERT(methodInfo);
 					CreateAddIR(ir, LdcVarConst_8);
 					ir->dst = GetEvalStackNewTopOffset();
@@ -6349,7 +6349,7 @@ ir->ele = ele.locOffset;
 				{
 					IL2CPP_ASSERT(evalStackTop > 0);
 					uint32_t methodToken = (uint32_t)GetI4LittleEndian(ip + 2);
-					MethodInfo* methodInfo = const_cast<MethodInfo*>(image->GetMethodInfoFromToken(tokenCache, methodToken, klassContainer, methodContainer, genericContext));
+					MethodInfo* methodInfo = const_cast<MethodInfo*>(image->GetMethodExecutionInfoFromToken(tokenCache, methodToken, klassContainer, methodContainer, genericContext));
 					IL2CPP_ASSERT(methodInfo);
 
 					CreateAddIR(ir, LdvirftnVarVar);
@@ -6618,7 +6618,7 @@ ir->ele = ele.locOffset;
 					ip += 5;
 
 					// TODO token cache optimistic
-					shareMethod = const_cast<MethodInfo*>(image->GetMethodInfoFromToken(tokenCache, methodToken, klassContainer, methodContainer, genericContext));
+					shareMethod = const_cast<MethodInfo*>(image->GetMethodExecutionInfoFromToken(tokenCache, methodToken, klassContainer, methodContainer, genericContext));
 					IL2CPP_ASSERT(shareMethod);
 
 

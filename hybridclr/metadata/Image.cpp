@@ -1245,15 +1245,24 @@ namespace metadata
             nullptr, DecodeTokenTableType(token), DecodeTokenRowIndex(token));
 
         IL2CPP_ASSERT(method);
-        // First preserve the logical declaration/slot. A selected execution
-        // binding then supplies the physical Current signature used to size
-        // interpreter arguments and return values before emitting the call.
+        // Runtime method handles and reflection retain the logical declaration.
+        // Call sites select their physical signature outside this shared cache.
         method = MetadataModule::ResolveDheMethod(method);
-        method = dhe::ResolveCurrentExecutionMethod(method);
         il2cpp::vm::Class::Init(method->klass);
 
         tokenCache.insert({ key, (void*)method });
         return method;
+    }
+
+    const MethodInfo* Image::GetMethodExecutionInfoFromToken(Token2RuntimeHandleMap& tokenCache, uint32_t token,
+        const Il2CppGenericContainer* klassGenericContainer, const Il2CppGenericContainer* methodGenericContainer,
+        const Il2CppGenericContext* genericContext)
+    {
+        const MethodInfo* logical = GetMethodInfoFromToken(tokenCache, token,
+            klassGenericContainer, methodGenericContainer, genericContext);
+        const MethodInfo* execution = dhe::ResolveCurrentExecutionMethod(logical);
+        if (execution != logical) il2cpp::vm::Class::Init(execution->klass);
+        return execution;
     }
 
     const MethodInfo* Image::GetMethodInfo(const Il2CppType* containerType, const Il2CppMethodDefinition* methodDef, const Il2CppGenericInst* instantiation, const Il2CppGenericContext* genericContext)
