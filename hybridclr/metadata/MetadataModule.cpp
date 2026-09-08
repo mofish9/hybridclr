@@ -959,7 +959,15 @@ namespace metadata
 		{
 			auto definition = s_dheInstanceFieldSlots.find(definitionField);
 			if (definition == s_dheInstanceFieldSlots.end())
-				RaiseExecutionEngineException("DHE generic field definition has no sidecar slot.");
+			{
+				// Generic Current fields are materialized lazily. Seed the
+				// definition slot at the first inflated view instead of during
+				// image initialization, which can recurse through Class::SetupFields.
+				DheInstanceFieldSlot slot = { s_dheInstanceFieldSlotCount++,
+					const_cast<FieldInfo*>(definitionField) };
+				s_dheInstanceFieldSlots.emplace(definitionField, slot);
+				definition = s_dheInstanceFieldSlots.find(definitionField);
+			}
 			DheInstanceFieldSlot slot = { definition->second.slot, logicalField };
 			s_dheInstanceFieldSlots[runtimeField] = slot;
 			s_dheInstanceFieldSlots[logicalField] = slot;

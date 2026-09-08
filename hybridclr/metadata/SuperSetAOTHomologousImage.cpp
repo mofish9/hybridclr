@@ -478,16 +478,6 @@ namespace metadata
 					_supplementalFields[baseClass].push_back(physical);
 					_supplementalFieldLogicalParents[physical] = baseClass;
 					_logicalFields[physical] = physical;
-					// A selected generic type is materialized again for each class
-					// instantiation. Register the definition field before the generic
-					// field view is inflated, so its instantiations can inherit the
-					// same sidecar slot. Non-generic selected types use their physical
-					// layout directly and must not be routed through a sidecar.
-					if (type.aotTypeDef->genericContainerIndex != kGenericContainerIndexInvalid &&
-						(data.flags & FIELD_ATTRIBUTE_STATIC) == 0)
-					{
-						MetadataModule::RegisterDheSupplementalInstanceField(physical, physical);
-					}
 					continue;
 				}
 				//field.name = _rawImage->GetStringFromRawIndex(data.name);
