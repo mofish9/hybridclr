@@ -657,6 +657,18 @@ namespace metadata
 	const Il2CppMethodDefinition* ResolveMethodDefinition(const Il2CppType* type, const char* resolveMethodName, const MethodRefSig& resolveSig)
 	{
 		const Il2CppTypeDefinition* typeDef = GetUnderlyingTypeDefinition(type);
+		if (!IsInterpreterType(typeDef))
+		{
+			// MethodImpl MemberRefs keep the public Base container identity, but
+			// their declarations belong to Current. During atomic registration
+			// the logical MethodInfo aliases are not all published yet; resolve
+			// from the staged definition table without enumerating Class methods.
+			Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(type);
+			AOTHomologousImage* image = AOTHomologousImage::FindImageByAssembly(klass->image->assembly);
+			const Il2CppType* current = image ? image->GetDheCurrentType(type) : nullptr;
+			if (current)
+				typeDef = GetUnderlyingTypeDefinition(current);
+		}
 		const Il2CppGenericContainer* klassGenericContainer = GetGenericContainerFromIl2CppType(type);
 		const char* typeName = il2cpp::vm::GlobalMetadata::GetStringFromIndex(typeDef->nameIndex);
 		for (uint32_t i = 0; i < typeDef->method_count; i++)
