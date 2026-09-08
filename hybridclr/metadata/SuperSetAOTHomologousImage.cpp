@@ -475,6 +475,24 @@ namespace metadata
 					Il2CppClass* baseClass = il2cpp::vm::Class::FromIl2CppType(type.aotIl2CppType);
 					FieldInfo* physical = const_cast<FieldInfo*>(GetFieldInfoFromFieldRef(
 						*field.declaringIl2CppType, field.aotFieldDef));
+					// The selected type is represented by its Current physical
+					// fields, while old Base callers still resolve FieldInfo handles
+					// from the AOT class. Alias the stable field name so those callers
+					// receive the Current offset/type as well. This is required for an
+					// older Base whose value layout differs from Current.
+					if (baseClass && physical && physical->name)
+					{
+						il2cpp::vm::Class::SetupFields(baseClass);
+						for (uint16_t baseIndex = 0; baseIndex < baseClass->field_count; ++baseIndex)
+						{
+							FieldInfo* baseField = baseClass->fields + baseIndex;
+							if (baseField->name && std::strcmp(baseField->name, physical->name) == 0)
+							{
+								_logicalFields[baseField] = physical;
+								break;
+							}
+						}
+					}
 					_supplementalFields[baseClass].push_back(physical);
 					_supplementalFieldLogicalParents[physical] = baseClass;
 					_logicalFields[physical] = physical;
