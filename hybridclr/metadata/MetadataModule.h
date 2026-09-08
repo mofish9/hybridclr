@@ -57,6 +57,10 @@ namespace metadata
         static const Il2CppImage* GetDheMethodMetadataImage(const MethodInfo* method);
 		static bool TryGetDheVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot,
 			const VirtualInvokeData*& result);
+		static bool TryGetDheVirtualInvokeData(const Il2CppClass* klass, const MethodInfo* method,
+			const VirtualInvokeData*& result);
+		static bool TryGetDheVirtualBaseMethod(const MethodInfo* method, bool definition,
+			const MethodInfo*& result);
 
 		static bool TryGetDheInterfaceInvokeData(const Il2CppClass* klass,
 			const Il2CppClass* interfaceType, uint16_t logicalSlot, const VirtualInvokeData*& result);

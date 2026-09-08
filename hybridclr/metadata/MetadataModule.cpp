@@ -47,6 +47,17 @@ namespace hybridclr
 			return metadata::MetadataModule::TryGetDheVirtualInvokeData(klass, logicalSlot, result);
 		}
 
+		bool TryGetVirtualInvokeData(const Il2CppClass* klass, const MethodInfo* method,
+			const VirtualInvokeData*& result)
+		{
+			return metadata::MetadataModule::TryGetDheVirtualInvokeData(klass, method, result);
+		}
+
+		bool TryGetVirtualBaseMethod(const MethodInfo* method, bool definition, const MethodInfo*& result)
+		{
+			return metadata::MetadataModule::TryGetDheVirtualBaseMethod(method, definition, result);
+		}
+
 		bool TryGetInterfaceInvokeData(const Il2CppClass* klass, const Il2CppClass* interfaceType,
 			uint16_t logicalSlot, const VirtualInvokeData*& result)
 		{
@@ -98,6 +109,8 @@ namespace metadata
 			std::unordered_map<uint16_t, VirtualInvokeData>>> s_dheInterfaceDispatch;
 		std::unordered_map<const Il2CppClass*, std::unordered_map<uint16_t,
 			VirtualInvokeData>> s_dheVirtualDispatch;
+		std::unordered_map<const Il2CppClass*, std::unordered_map<const MethodInfo*,
+			VirtualInvokeData>> s_dheVirtualMethodDispatch;
 
 		std::mutex s_dheSidecarMutex;
 		std::unordered_map<const FieldInfo*, DheInstanceFieldSlot> s_dheInstanceFieldSlots;
@@ -386,78 +399,206 @@ namespace metadata
         return homologous && homologous->GetTargetAssembly()->image == image ? homologous : nullptr;
     }
 
+	static bool HasDheVirtualHierarchy(const Il2CppClass* klass)
+	{
+		if (!klass || klass->is_import_or_windows_runtime)
+			return false;
+		for (const Il2CppClass* owner = klass; owner; owner = owner->parent)
+			if (owner->image && dhe::IsDheAssembly(owner->image->assembly))
+				return true; // acquire the completed registration before accessing Current metadata
+		return false;
+	}
+
+	static void InitDheVTable(Il2CppClass* klass)
+	{
+		il2cpp::vm::Class::Init(klass);
+#if UNITY_ENGINE_TUANJIE
+		il2cpp::vm::Class::SetupVTable(klass);
+#endif
+	}
+
+	static Il2CppClass* GetDheCurrentClass(Il2CppClass* klass)
+	{
+		if (!klass)
+			return nullptr;
+		AOTHomologousImage* image = GetDheSupplementalImage(klass->image);
+		const Il2CppType* type = image ? image->GetDheCurrentType(&klass->byval_arg) : nullptr;
+		return type ? il2cpp::vm::Class::FromIl2CppType(type) : klass;
+	}
+
+	static const MethodInfo* DheLogicalDefinition(const MethodInfo* method)
+	{
+		method = MetadataModule::ResolveDheMethod(method);
+		return method && method->is_inflated && method->genericMethod
+			? method->genericMethod->methodDefinition : method;
+	}
+
+	static const MethodInfo* GetDheBaseVirtualRoot(Il2CppClass* klass, uint16_t slot)
+	{
+		InitDheVTable(klass);
+		if (slot >= klass->vtable_count)
+			RaiseExecutionEngineException("DHE Base virtual slot exceeds its native vtable.");
+		while (klass->parent)
+		{
+			InitDheVTable(klass->parent);
+			if (slot >= klass->parent->vtable_count)
+				break;
+			klass = klass->parent;
+		}
+		return klass->vtable[slot].method;
+	}
+
+	static const MethodInfo* FindDheCurrentVirtualDeclaration(const MethodInfo* method)
+	{
+		if (!method || !method->klass)
+			RaiseExecutionEngineException("DHE virtual declaration is missing.");
+		Il2CppClass* currentOwner = GetDheCurrentClass(method->klass);
+		InitDheVTable(currentOwner);
+		const MethodInfo* identity = DheLogicalDefinition(method);
+		for (uint16_t slot = 0; slot < currentOwner->vtable_count; ++slot)
+		{
+			const MethodInfo* candidate = currentOwner->vtable[slot].method;
+			if (candidate && DheLogicalDefinition(candidate) == identity)
+				return candidate;
+		}
+		il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetMissingMethodException(
+			"The Current type has no matching virtual declaration."));
+		return nullptr;
+	}
+
+	static const MethodInfo* GetDheVirtualDeclaration(const MethodInfo* method)
+	{
+		// Base methods carry native slots; Current-only aliases carry Current
+		// slots. Never infer which domain a number belongs to from its range.
+		AOTHomologousImage* image = GetDheSupplementalImage(method->klass->image);
+		if (!IsInterpreterType(method->klass) && (!image || !image->GetSupplementalMethodImage(method)))
+			method = GetDheBaseVirtualRoot(method->klass, method->slot);
+		return FindDheCurrentVirtualDeclaration(method);
+	}
+
+	static VirtualInvokeData GetDheVirtualEntry(const MethodInfo* method)
+	{
+		const MethodInfo* target = MetadataModule::ResolveDheMethod(method);
+		if (!target || IsAbstractMethod(target->flags))
+			il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetMissingMethodException(
+				"The Current receiver has no concrete virtual implementation."));
+#if HYBRIDCLR_UNITY_2021
+		Il2CppMethodPointer pointer = target->is_generic ? nullptr : il2cpp::vm::Method::GetVirtualCallMethodPointer(target);
+#else
+		Il2CppMethodPointer pointer = target->is_generic ? nullptr : ReadPublishedPointer(&const_cast<MethodInfo*>(target)->virtualMethodPointer);
+#endif
+		// Open generic definitions are resolved before IL2CPP applies the call's
+		// method arguments, and do not have a callable entry at this stage.
+		if (!pointer && !target->is_generic)
+			pointer = InitAndGetInterpreterDirectlyCallVirtualMethodPointer(target);
+		if (!pointer && !target->is_generic)
+			RaiseExecutionEngineException("DHE virtual method has no callable entry.");
+		VirtualInvokeData entry = {};
+		entry.method = target;
+		entry.methodPtr = pointer;
+		return entry;
+	}
+
+	static VirtualInvokeData ResolveDheVirtualEntry(const Il2CppClass* klass, const MethodInfo* declaration)
+	{
+		Il2CppClass* receiver = GetDheCurrentClass(const_cast<Il2CppClass*>(klass));
+		InitDheVTable(receiver);
+		if (receiver == klass && !IsInterpreterType(receiver))
+		{
+			// An ordinary AOT descendant has no Current shadow of its own.
+			// Preserve its native overrides, but resolve inherited implementations
+			// through the nearest Current parent. Never index its Base table with
+			// a Current slot, including for a newly added inherited declaration.
+			const MethodInfo* logical = MetadataModule::ResolveDheMethod(declaration);
+			AOTHomologousImage* image = GetDheSupplementalImage(logical->klass->image);
+			if (!IsInterpreterType(logical->klass) && (!image || !image->GetSupplementalMethodImage(logical)) &&
+				logical->slot < receiver->vtable_count)
+			{
+				const MethodInfo* nativeTarget = receiver->vtable[logical->slot].method;
+				if (nativeTarget && !dhe::IsDheAssembly(nativeTarget->klass->image->assembly))
+					return GetDheVirtualEntry(nativeTarget);
+			}
+			if (!receiver->parent)
+				RaiseExecutionEngineException("DHE receiver has no Current virtual parent.");
+			return ResolveDheVirtualEntry(receiver->parent, declaration);
+		}
+		if (declaration->slot >= receiver->vtable_count)
+			RaiseExecutionEngineException("DHE Current virtual slot exceeds the receiver vtable.");
+		return GetDheVirtualEntry(receiver->vtable[declaration->slot].method);
+	}
+
 	bool MetadataModule::TryGetDheVirtualInvokeData(const Il2CppClass* klass,
 		uint16_t logicalSlot, const VirtualInvokeData*& result)
 	{
-		if (!klass || !IsInterpreterType(klass) || klass->is_import_or_windows_runtime)
+		if (!HasDheVirtualHierarchy(klass))
 			return false;
-		Il2CppClass* ancestor = klass->parent;
-		while (ancestor && IsInterpreterType(ancestor))
-			ancestor = ancestor->parent;
-		if (!ancestor || logicalSlot >= ancestor->vtable_count ||
-			!dhe::IsDheAssembly(ancestor->image->assembly))
+		Il2CppClass* nativeAncestor = const_cast<Il2CppClass*>(klass);
+		while (nativeAncestor && IsInterpreterType(nativeAncestor))
+			nativeAncestor = nativeAncestor->parent;
+		if (!nativeAncestor)
 			return false;
 		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
-		auto receiver = s_dheVirtualDispatch.find(klass);
-		if (receiver != s_dheVirtualDispatch.end())
-		{
-			auto entry = receiver->second.find(logicalSlot);
-			if (entry != receiver->second.end())
-			{
-				result = &entry->second;
-				return true;
-			}
-		}
-		AOTHomologousImage* image = AOTHomologousImage::FindImageByAssembly(ancestor->image->assembly);
-		const Il2CppType* currentType = image ? image->GetDheCurrentType(&ancestor->byval_arg) : nullptr;
-		if (!currentType)
+		InitDheVTable(nativeAncestor);
+		if (logicalSlot >= nativeAncestor->vtable_count)
 			return false;
-		Il2CppClass* currentAncestor = il2cpp::vm::Class::FromIl2CppType(currentType);
-		il2cpp::vm::Class::Init(ancestor);
-		il2cpp::vm::Class::Init(currentAncestor);
-		il2cpp::vm::Class::Init(const_cast<Il2CppClass*>(klass));
-#if UNITY_ENGINE_TUANJIE
-		il2cpp::vm::Class::SetupVTable(ancestor);
-		il2cpp::vm::Class::SetupVTable(currentAncestor);
-		il2cpp::vm::Class::SetupVTable(const_cast<Il2CppClass*>(klass));
-#endif
-		const MethodInfo* baseMethod = ancestor->vtable[logicalSlot].method;
-		// New interpreter descendants inherit the Current vtable, while calls
-		// to a Base declaration still carry its immutable native slot. Match
-		// by logical method identity before selecting the descendant override.
-		for (uint16_t slot = 0; slot < currentAncestor->vtable_count; ++slot)
+		auto& cache = s_dheVirtualDispatch[klass];
+		auto cached = cache.find(logicalSlot);
+		if (cached == cache.end())
 		{
-			const MethodInfo* candidate = currentAncestor->vtable[slot].method;
-			if (!candidate || !baseMethod || ResolveDheMethod(candidate) != baseMethod)
-				continue;
-			if (slot >= klass->vtable_count)
-				RaiseExecutionEngineException("DHE inherited virtual slot exceeds the Current receiver vtable.");
-			const MethodInfo* target = ResolveDheMethod(klass->vtable[slot].method);
-			if (!target || IsAbstractMethod(target->flags))
-				break;
-#if HYBRIDCLR_UNITY_2021
-			Il2CppMethodPointer pointer = target->is_generic ? nullptr : il2cpp::vm::Method::GetVirtualCallMethodPointer(target);
-#else
-			Il2CppMethodPointer pointer = target->is_generic ? nullptr : ReadPublishedPointer(&const_cast<MethodInfo*>(target)->virtualMethodPointer);
-#endif
-			// Generic dispatch first resolves this definition, then IL2CPP
-			// inflates it with the caller's method arguments. Open native
-			// definitions have no callable pointer at this stage.
-			if (!pointer && !target->is_generic)
-				pointer = InitAndGetInterpreterDirectlyCallVirtualMethodPointer(target);
-			if (!pointer && !target->is_generic)
-				RaiseExecutionEngineException("DHE inherited virtual method has no callable entry.");
-			VirtualInvokeData entry = {};
-			entry.method = target;
-			entry.methodPtr = pointer;
-			// Entries are immutable and node addresses survive rehash. Both
-			// reads and publication stay under the existing metadata lock.
-			result = &s_dheVirtualDispatch[klass].emplace(logicalSlot, entry).first->second;
-			return true;
+			const MethodInfo* root = GetDheBaseVirtualRoot(nativeAncestor, logicalSlot);
+			VirtualInvokeData entry = ResolveDheVirtualEntry(klass, FindDheCurrentVirtualDeclaration(root));
+			cached = cache.emplace(logicalSlot, entry).first;
 		}
-		il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetMissingMethodException(
-			"The Current descendant has no implementation for the requested Base virtual method."));
-		return false;
+		// No pointer escapes before full construction. Node addresses survive
+		// rehash, and both readers and writers hold the metadata lock.
+		result = &cached->second;
+		return true;
+	}
+
+	bool MetadataModule::TryGetDheVirtualInvokeData(const Il2CppClass* klass,
+		const MethodInfo* method, const VirtualInvokeData*& result)
+	{
+		if (!method || !IsVirtualMethod(method->flags) || IsInterface(method->klass->flags) ||
+			!HasDheVirtualHierarchy(klass))
+			return false;
+		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
+		auto& cache = s_dheVirtualMethodDispatch[klass];
+		auto cached = cache.find(method);
+		if (cached == cache.end())
+		{
+			VirtualInvokeData entry = ResolveDheVirtualEntry(klass, GetDheVirtualDeclaration(method));
+			cached = cache.emplace(method, entry).first;
+		}
+		result = &cached->second;
+		return true;
+	}
+
+	bool MetadataModule::TryGetDheVirtualBaseMethod(const MethodInfo* method, bool definition,
+		const MethodInfo*& result)
+	{
+		if (!method || !IsVirtualMethod(method->flags) || IsInterface(method->klass->flags) ||
+			!HasDheVirtualHierarchy(method->klass))
+			return false;
+		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
+		const MethodInfo* current = FindDheCurrentVirtualDeclaration(method);
+		Il2CppClass* owner = GetDheCurrentClass(method->klass);
+		result = method;
+		if (current->flags & METHOD_ATTRIBUTE_NEW_SLOT)
+			return true;
+		for (Il2CppClass* parent = GetDheCurrentClass(owner->parent); parent;
+			parent = GetDheCurrentClass(parent->parent))
+		{
+			InitDheVTable(parent);
+			if (current->slot >= parent->vtable_count)
+				break;
+			const MethodInfo* inherited = parent->vtable[current->slot].method;
+			if (!inherited)
+				RaiseExecutionEngineException("DHE Current base virtual declaration is missing.");
+			result = ResolveDheMethod(inherited);
+			if (!definition)
+				break;
+		}
+		return true;
 	}
 
 	bool MetadataModule::TryGetDheInterfaceInvokeData(const Il2CppClass* klass,

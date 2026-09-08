@@ -91,6 +91,12 @@ namespace dhe
     bool IsDheAssembly(const Il2CppAssembly* assembly);
     bool TryGetVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot,
         const VirtualInvokeData*& result);
+    // Current aliases can reuse a Base slot number for a different declaration.
+    // Calls with method metadata must preserve that identity through dispatch.
+    bool TryGetVirtualInvokeData(const Il2CppClass* klass, const MethodInfo* method,
+        const VirtualInvokeData*& result);
+    bool TryGetVirtualBaseMethod(const MethodInfo* method, bool definition,
+        const MethodInfo*& result);
 
     bool TryGetInterfaceInvokeData(const Il2CppClass* klass, const Il2CppClass* interfaceType,
         uint16_t logicalSlot, const VirtualInvokeData*& result);

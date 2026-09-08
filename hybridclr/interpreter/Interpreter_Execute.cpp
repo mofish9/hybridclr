@@ -689,7 +689,9 @@ namespace interpreter
 		}
 		else
 		{
-			result = il2cpp_codegen_get_virtual_invoke_data(method->slot, obj).method;
+			const VirtualInvokeData* dheData;
+			result = hybridclr::dhe::TryGetVirtualInvokeData(klass, method, dheData)
+				? dheData->method : il2cpp_codegen_get_virtual_invoke_data(method->slot, obj).method;
 		}
 		IL2CPP_ASSERT(!method->genericMethod || method->is_inflated);
 		if (method->genericMethod && method->genericMethod->context.method_inst/* && method->genericMethod*/) // means it's genericInstance method 或generic method
