@@ -70,6 +70,10 @@ namespace dhe
             : baseToken(baseValue), currentToken(currentValue) {}
         uint32_t baseToken;
         uint32_t currentToken;
+        bool operator==(const CurrentMetadataTokenBinding& other) const
+        {
+            return baseToken == other.baseToken && currentToken == other.currentToken;
+        }
     };
 
     // Internal image preparation input. It is bound to one Base/Current pair;
@@ -81,6 +85,11 @@ namespace dhe
         Sha256Digest currentAssemblyHash{};
         std::vector<CurrentMetadataTokenBinding> types;
         std::vector<CurrentMetadataTokenBinding> methods;
+        bool operator==(const CurrentImagePlan& other) const
+        {
+            return assemblyName == other.assemblyName && baseAssemblyHash == other.baseAssemblyHash &&
+                currentAssemblyHash == other.currentAssemblyHash && types == other.types && methods == other.methods;
+        }
     };
 
     // Select existing declarations by Current tokens, matching their stable

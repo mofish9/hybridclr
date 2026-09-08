@@ -1,6 +1,7 @@
 #include "RuntimeApi.h"
 
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -20,6 +21,7 @@
 #include "vm/Assembly.h"
 #include "vm/MetadataLock.h"
 #include "vm/MetadataCache.h"
+#include "vm/Reflection.h"
 
 #include "metadata/MetadataModule.h"
 #include "metadata/MetadataUtil.h"
@@ -56,6 +58,7 @@ namespace hybridclr
 		{
 			metadata::AOTHomologousImage* image;
 			dhe::Sha256Digest currentAssemblyHash;
+			std::shared_ptr<const dhe::CurrentImagePlan> executionPlan;
 		};
 
 		// DHE images are one-shot process metadata. If MV registration fails
@@ -74,6 +77,7 @@ namespace hybridclr
 			dhe::MetaVersionData currentMetaVersion;
 			const Il2CppAssembly* baseAssembly = nullptr;
 			metadata::AOTHomologousImage* currentImage = nullptr;
+			std::shared_ptr<const dhe::CurrentImagePlan> executionPlan;
 		};
 
 		int32_t ParseDheLoadPayload(Il2CppArray* dllBytes, Il2CppArray* baseMvBytes,
@@ -133,7 +137,9 @@ namespace hybridclr
 				}
 				auto pending = s_pendingDheImages.find(payload.baseAssembly);
 				if (pending != s_pendingDheImages.end() &&
-					pending->second.currentAssemblyHash != payload.currentAssemblyHash)
+					(pending->second.currentAssemblyHash != payload.currentAssemblyHash ||
+					 bool(pending->second.executionPlan) != bool(payload.executionPlan) ||
+					 (payload.executionPlan && !(*pending->second.executionPlan == *payload.executionPlan))))
 				{
 					return (int32_t)metadata::LoadImageErrorCode::
 						HOMOLOGOUS_ASSEMBLY_HAS_BEEN_LOADED;
@@ -157,14 +163,14 @@ namespace hybridclr
 							payload.dllData, payload.dllSize,
 							metadata::HomologousImageMode::SUPERSET,
 							&loadedAssembly, &payload.currentImage,
-							payload.baseMetaVersion.assemblyName.c_str());
+							payload.baseMetaVersion.assemblyName.c_str(), payload.executionPlan.get());
 					if (loadError != metadata::LoadImageErrorCode::OK ||
 						loadedAssembly != payload.baseAssembly || !payload.currentImage)
 					{
 						for (DheLoadPayload* previous : loaded)
 						{
 							s_pendingDheImages[previous->baseAssembly] = {
-								previous->currentImage, previous->currentAssemblyHash };
+								previous->currentImage, previous->currentAssemblyHash, previous->executionPlan };
 						}
 						return (int32_t)(loadError == metadata::LoadImageErrorCode::OK
 							? metadata::LoadImageErrorCode::DHE_MV_REGISTRATION_FAILED
@@ -188,7 +194,7 @@ namespace hybridclr
 				for (DheLoadPayload& payload : payloads)
 				{
 					s_pendingDheImages[payload.baseAssembly] = {
-						payload.currentImage, payload.currentAssemblyHash };
+						payload.currentImage, payload.currentAssemblyHash, payload.executionPlan };
 				}
 				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_REGISTRATION_FAILED;
 			}
@@ -197,6 +203,54 @@ namespace hybridclr
 				s_pendingDheImages.erase(payload.baseAssembly);
 			}
 			return (int32_t)metadata::LoadImageErrorCode::OK;
+		}
+
+		// Research-only managed entry, owned by the lab fixture rather than the
+		// Unity package. Its explicit selections do not bypass the public build
+		// workflow's layout/ABI rejection or advertise a supported capability.
+		int32_t LoadDheCurrentStorageProbe(Il2CppArray* dllBytes, Il2CppArray* baseMvBytes,
+			Il2CppArray* currentMvBytes, Il2CppArray* typeSelections, Il2CppArray* methodSelections)
+		{
+			if (!dllBytes || !baseMvBytes || !currentMvBytes || !typeSelections || !methodSelections)
+				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
+			const uint32_t count = il2cpp::vm::Array::GetLength(dllBytes);
+			if (!count || il2cpp::vm::Array::GetLength(baseMvBytes) != count ||
+				il2cpp::vm::Array::GetLength(currentMvBytes) != count ||
+				il2cpp::vm::Array::GetLength(typeSelections) != count ||
+				il2cpp::vm::Array::GetLength(methodSelections) != count)
+				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
+			auto elements = [](Il2CppArray* array) {
+				return reinterpret_cast<Il2CppArray**>(il2cpp::vm::Array::GetFirstElementAddress(array));
+			};
+			std::vector<DheLoadPayload> payloads(count);
+			for (uint32_t index = 0; index < count; ++index)
+			{
+				DheLoadPayload& payload = payloads[index];
+				int32_t error = ParseDheLoadPayload(elements(dllBytes)[index], elements(baseMvBytes)[index],
+					elements(currentMvBytes)[index], payload);
+				if (error != (int32_t)metadata::LoadImageErrorCode::OK) return error;
+				Il2CppArray* types = elements(typeSelections)[index];
+				Il2CppArray* methods = elements(methodSelections)[index];
+				if (!types || !methods) return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
+				const uint32_t* typeTokens = reinterpret_cast<const uint32_t*>(il2cpp::vm::Array::GetFirstElementAddress(types));
+				const uint32_t* methodTokens = reinterpret_cast<const uint32_t*>(il2cpp::vm::Array::GetFirstElementAddress(methods));
+				auto plan = std::make_shared<dhe::CurrentImagePlan>();
+				if (!dhe::BuildCurrentImagePlan(payload.baseMetaVersion, payload.currentMetaVersion,
+					std::vector<uint32_t>(typeTokens, typeTokens + il2cpp::vm::Array::GetLength(types)),
+					std::vector<uint32_t>(methodTokens, methodTokens + il2cpp::vm::Array::GetLength(methods)), *plan))
+					return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
+				payload.executionPlan = plan;
+			}
+			return LoadDhePayloads(payloads);
+		}
+
+		Il2CppReflectionMethod* ResolveDheCurrentStorageProbe(Il2CppReflectionMethod* method)
+		{
+			if (!method || !method->method || method->method->parameters_count ||
+				!(method->method->flags & METHOD_ATTRIBUTE_STATIC))
+				return nullptr;
+			const MethodInfo* current = dhe::ResolveInterpreterMethod(method->method);
+			return current ? il2cpp::vm::Reflection::GetMethodObject(current, current->klass) : nullptr;
 		}
 	}
 
@@ -495,6 +549,8 @@ namespace hybridclr
 
 	void RuntimeApi::RegisterInternalCalls()
 	{
+		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.CurrentStorageRuntime::Load(System.Byte[][],System.Byte[][],System.Byte[][],System.UInt32[][],System.UInt32[][])", (Il2CppMethodPointer)LoadDheCurrentStorageProbe);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.CurrentStorageRuntime::Resolve(System.Reflection.MethodInfo)", (Il2CppMethodPointer)ResolveDheCurrentStorageProbe);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadMetadataForAOTAssembly(System.Byte[],HybridCLR.HomologousImageMode)", (Il2CppMethodPointer)LoadMetadataForAOTAssembly);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssemblyWithMetaVersion(System.Byte[],System.Byte[],System.Byte[])", (Il2CppMethodPointer)LoadDifferentialHybridAssemblyWithMetaVersion);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssembliesWithMetaVersion(System.Byte[][],System.Byte[][],System.Byte[][])", (Il2CppMethodPointer)LoadDifferentialHybridAssembliesWithMetaVersion);
