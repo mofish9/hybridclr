@@ -506,6 +506,7 @@ namespace metadata
 		const Il2CppType* GetIl2CppTypeFromRawIndex(uint32_t index) const;
 
 		const Il2CppType* GetIl2CppTypeFromRawTypeDefIndex(uint32_t index) override;
+		const Il2CppType* ReadTypeFromResolutionScope(uint32_t scope, uint32_t typeNamespace, uint32_t typeName) override;
 
 		const Il2CppType* GetRawTypeDefinitionType(uint32_t index) const
 		{

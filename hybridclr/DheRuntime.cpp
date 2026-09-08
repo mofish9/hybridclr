@@ -690,6 +690,26 @@ const MethodInfo* ResolveMethodByNameAndToken(const char* assemblyName,
     return method && method->token == token ? method : nullptr;
 }
 
+const MethodInfo* ResolveCurrentExecutionMethod(const MethodInfo* method)
+{
+    if (!method || !method->klass || !method->klass->image) return method;
+    const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
+    auto state = published->assemblyStates.find(method->klass->image->assembly);
+    if (state == published->assemblyStates.end()) return method;
+    const MethodInfo* definition = method->is_inflated && method->genericMethod
+        ? method->genericMethod->methodDefinition : method;
+    auto identity = state->second.methodBaseTokens.find(definition);
+    if (identity == state->second.methodBaseTokens.end()) return method;
+    auto base = state->second.baseMethods.find(identity->second);
+    auto current = state->second.resolvedMethods.find(identity->second);
+    if (base == state->second.baseMethods.end() || base->second != definition ||
+        current == state->second.resolvedMethods.end() || !current->second || current->second == definition)
+        return method;
+    return method->is_inflated && method->genericMethod
+        ? il2cpp::metadata::GenericMetadata::Inflate(current->second, &method->genericMethod->context)
+        : current->second;
+}
+
 static void RollbackMethodPreparations(
     const std::vector<MethodPreparationSnapshot>& snapshots)
 {
@@ -803,6 +823,90 @@ static bool MethodCanHaveAotEntry(const MetaVersionMethod& method)
     constexpr uint32_t kPInvoke = 4u;
     constexpr uint32_t kHasBody = 8u;
     return (method.flags & kHasBody) != 0 && (method.flags & (kAbstract | kPInvoke)) == 0;
+}
+
+bool BuildCurrentImagePlan(const MetaVersionData& baseMetaVersion,
+    const MetaVersionData& currentMetaVersion,
+    const std::vector<uint32_t>& currentTypeTokens,
+    const std::vector<uint32_t>& currentMethodTokens, CurrentImagePlan& result)
+{
+    if (baseMetaVersion.assemblyName.empty() || baseMetaVersion.assemblyName != currentMetaVersion.assemblyName)
+        return false;
+    std::unordered_map<std::string, const MetaVersionType*> baseTypes;
+    std::unordered_map<std::string, const MetaVersionMethod*> baseMethods;
+    std::unordered_map<uint32_t, const MetaVersionType*> currentTypes;
+    std::unordered_map<uint32_t, const MetaVersionMethod*> currentMethods;
+    for (uint32_t side = 0; side < 2; ++side)
+    {
+        const MetaVersionData* mv = side == 0 ? &baseMetaVersion : &currentMetaVersion;
+        std::unordered_set<std::string> typeIds, methodIds;
+        std::unordered_set<uint32_t> typeTokens, methodTokens;
+        for (const MetaVersionType& type : mv->types)
+        {
+            const std::string id = DigestKey(type.stableId);
+            if ((type.token >> 24) != 2 || (type.token & 0xffffffu) <= 1 ||
+                (type.flags & ~kMetaVersionKnownTypeFlags) ||
+                !typeIds.insert(id).second || !typeTokens.insert(type.token).second)
+                return false;
+            if (side == 0) baseTypes.emplace(id, &type);
+            else currentTypes.emplace(type.token, &type);
+        }
+        for (const MetaVersionMethod& method : mv->methods)
+        {
+            const std::string id = DigestKey(method.stableId);
+            if ((method.token >> 24) != 6 || (method.token & 0xffffffu) == 0 ||
+                (method.flags & ~kMetaVersionKnownMethodFlags) ||
+                !methodIds.insert(id).second || !methodTokens.insert(method.token).second ||
+                typeIds.find(DigestKey(method.declaringTypeStableId)) == typeIds.end())
+                return false;
+            if (side == 0) baseMethods.emplace(id, &method);
+            else currentMethods.emplace(method.token, &method);
+        }
+    }
+    CurrentImagePlan plan;
+    plan.assemblyName = baseMetaVersion.assemblyName;
+    plan.baseAssemblyHash = baseMetaVersion.assemblyHash;
+    plan.currentAssemblyHash = currentMetaVersion.assemblyHash;
+    std::unordered_set<std::string> selectedTypes;
+    std::unordered_set<uint32_t> selectedMethods;
+    for (uint32_t token : currentTypeTokens)
+    {
+        auto entry = currentTypes.find(token);
+        if (entry == currentTypes.end()) return false;
+        const MetaVersionType& type = *entry->second;
+        const std::string id = DigestKey(type.stableId);
+        auto old = baseTypes.find(id);
+        if (old == baseTypes.end() || old->second->flags != type.flags || !selectedTypes.insert(id).second)
+            return false;
+        plan.types.emplace_back(old->second->token, token);
+    }
+    for (uint32_t token : currentMethodTokens)
+    {
+        auto entry = currentMethods.find(token);
+        if (entry == currentMethods.end() || !selectedMethods.insert(token).second)
+            return false;
+    }
+    for (const MetaVersionMethod& method : currentMetaVersion.methods)
+    {
+        auto old = baseMethods.find(DigestKey(method.stableId));
+        const bool explicitSelection = selectedMethods.find(method.token) != selectedMethods.end();
+        const bool storageMember = selectedTypes.find(DigestKey(method.declaringTypeStableId)) != selectedTypes.end();
+        if (!explicitSelection && (!storageMember || old == baseMethods.end())) continue;
+        if (old == baseMethods.end() || old->second->declaringTypeStableId != method.declaringTypeStableId)
+            return false;
+        // Abstract members do not execute or store a receiver. Native-only
+        // members need a separately verified ABI bridge, even on a selected type.
+        if (!explicitSelection && (method.flags & 2u) && (old->second->flags & 2u)) continue;
+        if (!MethodCanHaveAotEntry(*old->second) || !MethodCanHaveAotEntry(method)) return false;
+        plan.methods.emplace_back(old->second->token, method.token);
+    }
+    auto byBaseToken = [](const CurrentMetadataTokenBinding& left, const CurrentMetadataTokenBinding& right) {
+        return left.baseToken < right.baseToken;
+    };
+    std::sort(plan.types.begin(), plan.types.end(), byBaseToken);
+    std::sort(plan.methods.begin(), plan.methods.end(), byBaseToken);
+    result = std::move(plan);
+    return true;
 }
 
 static bool SameStableBaseAbiType(const Il2CppType* baseType, const Il2CppType* currentType)

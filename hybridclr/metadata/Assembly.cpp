@@ -179,7 +179,8 @@ namespace metadata
 
     LoadImageErrorCode Assembly::LoadMetadataForAOTAssembly(const void* dllBytes, uint32_t dllSize,
         HomologousImageMode mode, const Il2CppAssembly** targetAssembly,
-        AOTHomologousImage** targetImage, const char* expectedAssemblyName)
+        AOTHomologousImage** targetImage, const char* expectedAssemblyName,
+        const dhe::CurrentImagePlan* currentImagePlan)
     {
         if (targetAssembly)
         {
@@ -188,6 +189,15 @@ namespace metadata
         if (targetImage)
         {
             *targetImage = nullptr;
+        }
+        if (currentImagePlan)
+        {
+            dhe::Sha256Digest currentHash{};
+            if (mode != HomologousImageMode::SUPERSET || !expectedAssemblyName ||
+                currentImagePlan->assemblyName != expectedAssemblyName ||
+                !dhe::ComputeSha256(dllBytes, dllSize, currentHash) ||
+                currentHash != currentImagePlan->currentAssemblyHash)
+                return LoadImageErrorCode::DHE_MV_BAD_FORMAT;
         }
         il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
 
@@ -255,6 +265,14 @@ namespace metadata
 				delete image;
 				return fallbackError;
 			}
+			SuperSetAOTHomologousImage* superSet = static_cast<SuperSetAOTHomologousImage*>(image);
+			superSet->SetInterpreterFallbackImage(interpreterFallbackImage, expectedAssemblyName != nullptr);
+			if (currentImagePlan && !superSet->SetCurrentImagePlan(*currentImagePlan))
+			{
+				delete interpreterFallbackImage;
+				delete image;
+				return LoadImageErrorCode::DHE_MV_BAD_FORMAT;
+			}
 
 			Il2CppAssembly* fallbackAssembly = new (HYBRIDCLR_MALLOC_ZERO(sizeof(Il2CppAssembly))) Il2CppAssembly;
 			Il2CppImage* fallbackIl2CppImage = new (HYBRIDCLR_MALLOC_ZERO(sizeof(Il2CppImage))) Il2CppImage;
@@ -267,8 +285,6 @@ namespace metadata
 			// Supplemental types must report the public Base assembly identity even
 			// though their metadata and executable bodies live in this hidden image.
 			fallbackIl2CppImage->assembly = const_cast<Il2CppAssembly*>(aotAss);
-			static_cast<SuperSetAOTHomologousImage*>(image)->SetInterpreterFallbackImage(
-				interpreterFallbackImage, expectedAssemblyName != nullptr);
 			if (expectedAssemblyName)
 			{
 				interpreterFallbackImage->SetHomologousTypeReferenceImage(

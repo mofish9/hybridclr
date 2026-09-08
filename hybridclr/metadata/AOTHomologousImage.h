@@ -1,5 +1,6 @@
 #pragma once
 #include "Image.h"
+#include "../DheRuntime.h"
 
 namespace hybridclr
 {
@@ -95,6 +96,18 @@ namespace metadata
 		virtual const Il2CppType* GetDheCurrentType(const Il2CppType* type)
 		{
 			return nullptr;
+		}
+
+		// Execution storage is selective; GetDheCurrentType also serves virtual
+		// metadata views and must not be used to choose a physical representation.
+		virtual const Il2CppType* GetDheExecutionType(const Il2CppType* type)
+		{
+			return nullptr;
+		}
+
+		virtual bool AppendDheCurrentExecutions(dhe::MetaVersionRegistration& registration)
+		{
+			return true;
 		}
 
 		virtual bool TryGetDheCurrentInterfaceMethod(const Il2CppClass* klass,

@@ -105,6 +105,84 @@ namespace metadata
 		InitTypes1(_typeIntermediateInfos);
 	}
 
+	bool SuperSetAOTHomologousImage::SetCurrentImagePlan(const dhe::CurrentImagePlan& plan)
+	{
+		if (!_isDheImage || !_interpreterFallbackImage || !_targetAssembly ||
+			!_targetAssembly->aname.name || plan.assemblyName != _targetAssembly->aname.name ||
+			!_typeDefs.empty() || !_currentImagePlan.assemblyName.empty())
+			return false;
+		const uint32_t typeCount = _rawImage->GetTable(TableType::TYPEDEF).rowNum;
+		const uint32_t methodCount = _rawImage->GetTable(TableType::METHOD).rowNum;
+		std::unordered_map<uint32_t, uint32_t> selectedTypes;
+		std::unordered_set<uint32_t> baseTypes, baseMethods, currentMethods;
+		for (const dhe::CurrentMetadataTokenBinding& binding : plan.types)
+		{
+			if (DecodeTokenTableType(binding.currentToken) != TableType::TYPEDEF ||
+				DecodeTokenTableType(binding.baseToken) != TableType::TYPEDEF ||
+				DecodeTokenRowIndex(binding.currentToken) <= 1 ||
+				DecodeTokenRowIndex(binding.currentToken) > typeCount ||
+				DecodeTokenRowIndex(binding.baseToken) <= 1 ||
+				!baseTypes.insert(binding.baseToken).second ||
+				!selectedTypes.emplace(binding.currentToken, binding.baseToken).second)
+				return false;
+		}
+		for (const dhe::CurrentMetadataTokenBinding& binding : plan.methods)
+		{
+			if (DecodeTokenTableType(binding.currentToken) != TableType::METHOD ||
+				DecodeTokenTableType(binding.baseToken) != TableType::METHOD ||
+				DecodeTokenRowIndex(binding.currentToken) == 0 ||
+				DecodeTokenRowIndex(binding.currentToken) > methodCount ||
+				DecodeTokenRowIndex(binding.baseToken) == 0 ||
+				!baseMethods.insert(binding.baseToken).second ||
+				!currentMethods.insert(binding.currentToken).second)
+				return false;
+		}
+		_currentImagePlan = plan;
+		_currentStorageTypeTokens.swap(selectedTypes);
+		return true;
+	}
+
+	bool SuperSetAOTHomologousImage::AppendDheCurrentExecutions(dhe::MetaVersionRegistration& registration)
+	{
+		if (_currentImagePlan.assemblyName.empty()) return true;
+		if (registration.baseAssembly != _targetAssembly || !registration.baseMetaVersion ||
+			!registration.currentMetaVersion ||
+			registration.baseMetaVersion->assemblyHash != _currentImagePlan.baseAssemblyHash ||
+			registration.currentMetaVersion->assemblyHash != _currentImagePlan.currentAssemblyHash)
+			return false;
+		std::vector<uint32_t> typeTokens, methodTokens;
+		std::unordered_map<uint32_t, uint32_t> providedMethods;
+		for (const dhe::CurrentMetadataTokenBinding& binding : _currentImagePlan.types) typeTokens.push_back(binding.currentToken);
+		for (const dhe::CurrentMetadataTokenBinding& binding : _currentImagePlan.methods)
+		{
+			methodTokens.push_back(binding.currentToken);
+			providedMethods.emplace(binding.currentToken, binding.baseToken);
+		}
+		dhe::CurrentImagePlan checked;
+		if (!dhe::BuildCurrentImagePlan(*registration.baseMetaVersion, *registration.currentMetaVersion,
+			typeTokens, methodTokens, checked) || checked.methods.size() != _currentImagePlan.methods.size())
+			return false;
+		// Recheck the whole MV identity selection before dispatch publication,
+		// including implicit members of a selected Current storage type.
+		for (const dhe::CurrentMetadataTokenBinding& binding : checked.types)
+			if (_currentStorageTypeTokens.at(binding.currentToken) != binding.baseToken) return false;
+		std::vector<dhe::CurrentMethodExecution> executions(registration.currentExecutions);
+		for (const dhe::CurrentMetadataTokenBinding& binding : checked.methods)
+		{
+			if (providedMethods.at(binding.currentToken) != binding.baseToken) return false;
+			const MethodInfo* current = _interpreterFallbackImage->GetMethodInfoFromMethodDefinitionRawIndex(
+				DecodeTokenRowIndex(binding.currentToken) - 1);
+			auto logical = _logicalMethods.find(current);
+			if (logical == _logicalMethods.end() || !logical->second ||
+				logical->second->klass->image != _targetAssembly->image ||
+				logical->second->token != binding.baseToken)
+				return false;
+			executions.emplace_back(binding.baseToken, current);
+		}
+		registration.currentExecutions.swap(executions);
+		return true;
+	}
+
 	void SuperSetAOTHomologousImage::InitTypes0(std::vector< SuperSetTypeIntermediateInfo>& typeIntermediateInfos)
 	{
 		const Table& typeDefTb = _rawImage->GetTable(TableType::TYPEDEF);
@@ -220,6 +298,11 @@ namespace metadata
 				_customAttributeTokens[td.aotTypeDef->token] =
 					EncodeToken(TableType::TYPEDEF, rawTypeIndex + 1);
 			}
+			auto selected = _currentStorageTypeTokens.find(EncodeToken(TableType::TYPEDEF, rawTypeIndex + 1));
+			if (selected != _currentStorageTypeTokens.end() &&
+				(!td.aotTypeDef || td.aotTypeDef->token != selected->second ||
+				 td.aotIl2CppType->type != _interpreterFallbackImage->GetRawTypeDefinitionType(rawTypeIndex)->type))
+				RaiseBadImageException("DHE Current storage selection does not match the Base type identity.");
 		}
 	}
 
@@ -265,6 +348,7 @@ namespace metadata
 		{
 			uint32_t nextTypeIndex = (uint32_t)(&type - &typeIntermediateInfos[0] + 1);
 			uint32_t nextTypeMethodStartIndex = nextTypeIndex < typeCount ? typeIntermediateInfos[nextTypeIndex].homoMethodStartIndex : methodCount + 1;
+			const bool currentStorage = _currentStorageTypeTokens.count(EncodeToken(TableType::TYPEDEF, nextTypeIndex)) != 0;
 			Il2CppClass* baseInterface = _isDheImage && type.aotTypeDef && IsInterface(type.aotTypeDef->flags)
 				? il2cpp::vm::Class::FromIl2CppType(type.aotIl2CppType) : nullptr;
 			if (baseInterface)
@@ -297,13 +381,16 @@ namespace metadata
 					if (type.aotTypeDef)
 					{
 						Il2CppClass* baseClass = il2cpp::vm::Class::FromIl2CppType(type.aotIl2CppType);
-						MethodInfo* alias = static_cast<MethodInfo*>(
-							HYBRIDCLR_METADATA_MALLOC(sizeof(MethodInfo)));
-						*alias = *currentMethod;
-						alias->klass = baseClass;
-						_supplementalMethods[baseClass].push_back(alias);
-						_supplementalMethodImages[alias] = _interpreterFallbackImage;
-						logicalMethod = alias;
+						logicalMethod = currentMethod;
+						if (!currentStorage)
+						{
+							MethodInfo* alias = static_cast<MethodInfo*>(HYBRIDCLR_METADATA_MALLOC(sizeof(MethodInfo)));
+							*alias = *currentMethod;
+							alias->klass = baseClass;
+							logicalMethod = alias;
+						}
+						_supplementalMethods[baseClass].push_back(logicalMethod);
+						_supplementalMethodImages[logicalMethod] = _interpreterFallbackImage;
 					}
 				}
 				if (method.aotMethodDef && !method.interpreterFallback)
@@ -325,7 +412,7 @@ namespace metadata
 							const_cast<MethodInfo*>(logicalMethod)->slot = slot;
 					}
 					_logicalMethods[currentMethod] = logicalMethod;
-					if (!dhe::RegisterLogicalMethodMapping(_targetAssembly,
+					if (currentMethod != logicalMethod && !dhe::RegisterLogicalMethodMapping(_targetAssembly,
 						currentMethod, logicalMethod))
 					{
 						RaiseExecutionEngineException(
@@ -377,6 +464,22 @@ namespace metadata
 				SuperSetFieldDefDetail& field = _fields[i - 1];
 				//field.homoRowIndex = i;
 				TbField data = _rawImage->ReadField(i);
+				if (_currentStorageTypeTokens.count(EncodeToken(TableType::TYPEDEF, nextTypeIndex)))
+				{
+					// Inline values and selected containing objects own real Current
+					// fields. A Base offset or a reference sidecar cannot represent a
+					// larger value, independent value copies or array element stride.
+					field.declaringIl2CppType = _interpreterFallbackImage->GetRawTypeDefinitionType(nextTypeIndex - 1);
+					field.aotFieldDef = _interpreterFallbackImage->GetFieldDefinitionFromRawIndex(i - 1);
+					field.interpreterFallback = true;
+					Il2CppClass* baseClass = il2cpp::vm::Class::FromIl2CppType(type.aotIl2CppType);
+					FieldInfo* physical = const_cast<FieldInfo*>(GetFieldInfoFromFieldRef(
+						*field.declaringIl2CppType, field.aotFieldDef));
+					_supplementalFields[baseClass].push_back(physical);
+					_supplementalFieldLogicalParents[physical] = baseClass;
+					_logicalFields[physical] = physical;
+					continue;
+				}
 				//field.name = _rawImage->GetStringFromRawIndex(data.name);
 
 				//field.declaringTypeDef = type.aotTypeDef;
@@ -632,6 +735,30 @@ namespace metadata
 	{
 		IL2CPP_ASSERT((size_t)index < _typeDefs.size());
 		return _typeDefs[index].aotIl2CppType;
+	}
+
+	const Il2CppType* SuperSetAOTHomologousImage::GetExecutionTypeFromRawTypeDefIndex(uint32_t index)
+	{
+		return _currentStorageTypeTokens.count(EncodeToken(TableType::TYPEDEF, index + 1))
+			? _interpreterFallbackImage->GetRawTypeDefinitionType(index)
+			: GetIl2CppTypeFromRawTypeDefIndex(index);
+	}
+
+	const Il2CppType* SuperSetAOTHomologousImage::GetDheExecutionType(const Il2CppType* type)
+	{
+		// TypeRef decoding supplies a definition; generic instantiation and
+		// byref/array wrappers are built by the signature reader afterwards.
+		if (!type || _currentStorageTypeTokens.empty() ||
+			(type->type != IL2CPP_TYPE_CLASS && type->type != IL2CPP_TYPE_VALUETYPE)) return nullptr;
+		const Il2CppTypeDefinition* definition = GetUnderlyingTypeDefinition(type);
+		if (!definition || IsInterpreterType(definition)) return nullptr;
+		auto entry = _aotTypeIndex2TypeDefs.find(il2cpp::vm::GlobalMetadata::GetIndexForTypeDefinition(definition));
+		if (entry == _aotTypeIndex2TypeDefs.end()) return nullptr;
+		const uint32_t index = static_cast<uint32_t>(entry->second - _typeDefs.data());
+		if (!_currentStorageTypeTokens.count(EncodeToken(TableType::TYPEDEF, index + 1))) return nullptr;
+		Il2CppType current = *type;
+		current.data = _interpreterFallbackImage->GetRawTypeDefinitionType(index)->data;
+		return MetadataPool::GetPooledIl2CppType(current);
 	}
 
 	Il2CppGenericContainer* SuperSetAOTHomologousImage::GetGenericContainerByRawIndex(uint32_t index)

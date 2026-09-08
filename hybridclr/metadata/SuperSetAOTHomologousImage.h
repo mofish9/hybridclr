@@ -78,6 +78,11 @@ namespace hybridclr
 
 			void InitRuntimeMetadatas() override;
 			void InitTypeReferences();
+			bool SetCurrentImagePlan(const dhe::CurrentImagePlan& plan);
+			bool HasCurrentImagePlan() const { return !_currentImagePlan.assemblyName.empty(); }
+			const Il2CppType* GetExecutionTypeFromRawTypeDefIndex(uint32_t index);
+			const Il2CppType* GetDheExecutionType(const Il2CppType* type) override;
+			bool AppendDheCurrentExecutions(dhe::MetaVersionRegistration& registration) override;
 
 			const Il2CppType* ReadTypeFromResolutionScope(uint32_t scope, uint32_t typeNamespace, uint32_t typeName) override;
 			MethodBody* GetMethodBody(uint32_t token) override;
@@ -150,6 +155,8 @@ namespace hybridclr
 			std::vector<SuperSetFieldDefDetail> _fields;
 			InterpreterImage* _interpreterFallbackImage = nullptr;
 			bool _isDheImage = false;
+			dhe::CurrentImagePlan _currentImagePlan;
+			std::unordered_map<uint32_t, uint32_t> _currentStorageTypeTokens;
 			std::vector<Il2CppClass*> _supplementalTypes;
 			std::unordered_map<Il2CppClass*, std::vector<Il2CppClass*>> _supplementalNestedTypes;
 			std::unordered_map<Il2CppClass*, std::vector<const MethodInfo*>> _supplementalMethods;

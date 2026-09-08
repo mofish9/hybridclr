@@ -3859,8 +3859,30 @@ namespace metadata
 	const Il2CppType* InterpreterImage::GetIl2CppTypeFromRawTypeDefIndex(uint32_t index)
 	{
 		return _homologousTypeReferenceImage
-			? _homologousTypeReferenceImage->GetIl2CppTypeFromRawTypeDefIndex(index)
+			? _homologousTypeReferenceImage->GetExecutionTypeFromRawTypeDefIndex(index)
 			: GetRawTypeDefinitionType(index);
+	}
+
+	const Il2CppType* InterpreterImage::ReadTypeFromResolutionScope(uint32_t scope,
+		uint32_t typeNamespace, uint32_t typeName)
+	{
+		const Il2CppType* type = Image::ReadTypeFromResolutionScope(scope, typeNamespace, typeName);
+		if (!_homologousTypeReferenceImage || !_homologousTypeReferenceImage->HasCurrentImagePlan() || !type ||
+			(type->type != IL2CPP_TYPE_CLASS && type->type != IL2CPP_TYPE_VALUETYPE)) return type;
+		const Il2CppTypeDefinition* definition = GetUnderlyingTypeDefinition(type);
+		if (IsInterpreterType(definition))
+		{
+			// A nested TypeRef may have traversed a physical Current parent.
+			// Reapply that image's selection for the nested declaration itself.
+			InterpreterImage* owner = MetadataModule::GetImage(definition);
+			return owner->GetIl2CppTypeFromRawTypeDefIndex(owner->GetTypeRawIndex(definition));
+		}
+		if (const Il2CppType* current = _homologousTypeReferenceImage->GetDheExecutionType(type)) return current;
+		Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(type);
+		AOTHomologousImage* owner = klass && klass->image
+			? AOTHomologousImage::FindImageByAssembly(klass->image->assembly) : nullptr;
+		const Il2CppType* current = owner ? owner->GetDheExecutionType(type) : nullptr;
+		return current ? current : type;
 	}
 }
 }

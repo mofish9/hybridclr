@@ -6,6 +6,7 @@
 #include <vector>
 
 #define HYBRIDCLR_DHE_HAS_CURRENT_EXECUTION 1
+#define HYBRIDCLR_DHE_HAS_CURRENT_IMAGE_PLAN 1
 
 struct Il2CppAssembly;
 struct Il2CppClass;
@@ -62,6 +63,35 @@ namespace dhe
         uint32_t baseMethodToken = 0;
         const MethodInfo* currentMethod = nullptr;
     };
+
+    struct CurrentMetadataTokenBinding
+    {
+        CurrentMetadataTokenBinding(uint32_t baseValue, uint32_t currentValue)
+            : baseToken(baseValue), currentToken(currentValue) {}
+        uint32_t baseToken;
+        uint32_t currentToken;
+    };
+
+    // Internal image preparation input. It is bound to one Base/Current pair;
+    // it does not change the immutable MV format or authorize a resource load.
+    struct CurrentImagePlan
+    {
+        std::string assemblyName;
+        Sha256Digest baseAssemblyHash{};
+        Sha256Digest currentAssemblyHash{};
+        std::vector<CurrentMetadataTokenBinding> types;
+        std::vector<CurrentMetadataTokenBinding> methods;
+    };
+
+    // Select existing declarations by Current tokens, matching their stable
+    // identities against Base. Members of selected storage types are included
+    // automatically. Additional methods cover callers whose IL is unchanged.
+    // A failed selection leaves result untouched. Dependency closure and native
+    // boundary checks are obligations of the complete resource preparation.
+    bool BuildCurrentImagePlan(const MetaVersionData& baseMetaVersion,
+        const MetaVersionData& currentMetaVersion,
+        const std::vector<uint32_t>& currentTypeTokens,
+        const std::vector<uint32_t>& currentMethodTokens, CurrentImagePlan& result);
 
     struct MetaVersionRegistration
     {
@@ -136,6 +166,10 @@ namespace dhe
     const MethodInfo* ResolveMethodByNameAndToken(const char* assemblyName,
         const char* declaringType, const char* methodName, uint32_t parameterCount, uint32_t token);
     const MethodInfo* ResolveInterpreterMethod(const MethodInfo* baseMethod);
+    // Interpreter call-site metadata needs the Current signature before stack
+    // sizing. This only substitutes explicit physical Current bindings; it
+    // does not raise tombstones while transforming an untaken call branch.
+    const MethodInfo* ResolveCurrentExecutionMethod(const MethodInfo* method);
     // Direct bridge for supported generated native ABI shapes. It executes
     // current IL through Interpreter::Execute instead of calling
     // methodPointerCallByInterp, whose generated entry may be the AOT guard.

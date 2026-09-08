@@ -176,12 +176,14 @@ namespace hybridclr
 
 			std::vector<dhe::MetaVersionRegistration> registrations;
 			registrations.reserve(payloads.size());
+			bool executionPlansReady = true;
 			for (DheLoadPayload& payload : payloads)
 			{
 				registrations.push_back({ payload.baseAssembly,
 					&payload.baseMetaVersion, &payload.currentMetaVersion });
+				executionPlansReady = payload.currentImage->AppendDheCurrentExecutions(registrations.back()) && executionPlansReady;
 			}
-			if (!dhe::PrepareAndRegisterMetaVersions(registrations))
+			if (!executionPlansReady || !dhe::PrepareAndRegisterMetaVersions(registrations))
 			{
 				for (DheLoadPayload& payload : payloads)
 				{
