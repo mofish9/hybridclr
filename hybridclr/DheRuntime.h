@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#define HYBRIDCLR_DHE_HAS_CURRENT_EXECUTION 1
+
 struct Il2CppAssembly;
 struct Il2CppClass;
 struct MethodInfo;
@@ -52,6 +54,15 @@ namespace dhe
         std::vector<MetaVersionMethod> methods;
     };
 
+    struct CurrentMethodExecution
+    {
+        CurrentMethodExecution() = default;
+        CurrentMethodExecution(uint32_t token, const MethodInfo* method)
+            : baseMethodToken(token), currentMethod(method) {}
+        uint32_t baseMethodToken = 0;
+        const MethodInfo* currentMethod = nullptr;
+    };
+
     struct MetaVersionRegistration
     {
         MetaVersionRegistration() = default;
@@ -67,6 +78,11 @@ namespace dhe
         const Il2CppAssembly* baseAssembly = nullptr;
         const MetaVersionData* baseMetaVersion = nullptr;
         const MetaVersionData* currentMetaVersion = nullptr;
+        // Internal preparation result, not a mutable/payload-owned lookup.
+        // Registration copies the bindings into its atomic published state.
+        // Current metadata may use a new physical value layout even when the
+        // immutable Base method fingerprint is unchanged.
+        std::vector<CurrentMethodExecution> currentExecutions;
     };
 
     bool ParseMetaVersion(const void* data, uint32_t size, MetaVersionData& result);
@@ -109,6 +125,9 @@ namespace dhe
     // Called by generated AOT entry guards to select changed methods without
     // replacing the AOT method pointer used by unchanged methods.
     bool ShouldDispatchToInterpreter(const MethodInfo* method);
+    // A typed native entry must not interpret Current using an old value ABI.
+    // Such calls must enter through a prepared Current frame instead.
+    bool CanEnterWithBaseAbi(const MethodInfo* method);
 
     // Unity's generated direct static calls may pass a null RuntimeMethod
     // context. Resolve the method from the loaded image so a token-only guard

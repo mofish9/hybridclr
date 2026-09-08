@@ -38,6 +38,7 @@ namespace
     struct DHEAssemblyState
     {
         std::unordered_set<uint32_t> changedMethodTokens;
+		std::unordered_set<uint32_t> incompatibleBaseAbiTokens;
 		std::unordered_set<uint32_t> removedTypeTokens;
         std::unordered_map<uint32_t, const MethodInfo*> resolvedMethods;
         std::unordered_map<uint32_t, const MethodInfo*> baseMethods;
@@ -523,11 +524,34 @@ bool IsRemovedType(const Il2CppClass* klass)
 		state->second.removedTypeTokens.end();
 }
 
+bool CanEnterWithBaseAbi(const MethodInfo* method)
+{
+    if (!method || !method->klass || !method->klass->image)
+        return true;
+    const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
+    auto state = published->assemblyStates.find(method->klass->image->assembly);
+    if (state == published->assemblyStates.end())
+        return true;
+    const MethodInfo* definition = method->is_inflated && method->genericMethod
+        ? method->genericMethod->methodDefinition : method;
+    auto identity = state->second.methodBaseTokens.find(definition);
+    if (identity == state->second.methodBaseTokens.end())
+        return true;
+    auto native = state->second.baseMethods.find(identity->second);
+    // Current execution metadata already describes a Current frame.
+    return native == state->second.baseMethods.end() || native->second != definition ||
+        state->second.incompatibleBaseAbiTokens.find(identity->second) ==
+            state->second.incompatibleBaseAbiTokens.end();
+}
+
 bool ShouldDispatchToInterpreter(const MethodInfo* method)
 {
-    // Keep the selector cheap; registration resolves all changed methods once,
-    // while preparation is completed on the first helper call.
-    return IsChangedMethod(method);
+    if (!IsChangedMethod(method))
+        return false;
+    if (!CanEnterWithBaseAbi(method))
+        il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetExecutionEngineException(
+            "DHE Current value layout requires a Current call frame; the old AOT ABI cannot be used."));
+    return true;
 }
 
 static const MethodInfo* ResolveMethodInAssembly(const Il2CppAssembly* assembly, uint32_t token)
@@ -772,6 +796,49 @@ static bool MethodCanHaveAotEntry(const MetaVersionMethod& method)
     return (method.flags & kHasBody) != 0 && (method.flags & (kAbstract | kPInvoke)) == 0;
 }
 
+static bool SameStableBaseAbiType(const Il2CppType* baseType, const Il2CppType* currentType)
+{
+    if (!baseType || !currentType || baseType->byref || currentType->byref ||
+        baseType->type != currentType->type)
+        return false;
+    switch (baseType->type)
+    {
+    case IL2CPP_TYPE_VOID: case IL2CPP_TYPE_BOOLEAN: case IL2CPP_TYPE_CHAR:
+    case IL2CPP_TYPE_I1: case IL2CPP_TYPE_U1: case IL2CPP_TYPE_I2: case IL2CPP_TYPE_U2:
+    case IL2CPP_TYPE_I4: case IL2CPP_TYPE_U4: case IL2CPP_TYPE_I8: case IL2CPP_TYPE_U8:
+    case IL2CPP_TYPE_R4: case IL2CPP_TYPE_R8: case IL2CPP_TYPE_I: case IL2CPP_TYPE_U:
+    case IL2CPP_TYPE_STRING: case IL2CPP_TYPE_OBJECT:
+        return true;
+    default:
+        // Value types, byrefs and generic contexts require the prepared Current
+        // route. Matching names or sizes alone does not establish ABI identity.
+        return false;
+    }
+}
+
+static bool HasCompatibleStaticBaseFrame(const MethodInfo* baseMethod, const MethodInfo* currentMethod)
+{
+    if (!(baseMethod->flags & METHOD_ATTRIBUTE_STATIC) || !(currentMethod->flags & METHOD_ATTRIBUTE_STATIC) ||
+        baseMethod->is_generic || currentMethod->is_generic || baseMethod->is_inflated || currentMethod->is_inflated ||
+        baseMethod->klass->genericContainerHandle || currentMethod->klass->genericContainerHandle ||
+        baseMethod->parameters_count != currentMethod->parameters_count ||
+        !SameStableBaseAbiType(baseMethod->return_type, currentMethod->return_type))
+        return false;
+    for (uint8_t index = 0; index < baseMethod->parameters_count; ++index)
+    {
+#if HYBRIDCLR_UNITY_2021
+        const Il2CppType* baseType = baseMethod->parameters[index].parameter_type;
+        const Il2CppType* currentType = currentMethod->parameters[index].parameter_type;
+#else
+        const Il2CppType* baseType = baseMethod->parameters[index];
+        const Il2CppType* currentType = currentMethod->parameters[index];
+#endif
+        if (!SameStableBaseAbiType(baseType, currentType))
+            return false;
+    }
+    return true;
+}
+
 struct PendingMetaVersionRegistration
 {
     const Il2CppAssembly* baseAssembly = nullptr;
@@ -836,6 +903,16 @@ bool PrepareAndRegisterMetaVersions(
 
         PendingMetaVersionRegistration plan;
         plan.baseAssembly = registration.baseAssembly;
+        std::unordered_map<uint32_t, const MethodInfo*> currentExecutions;
+        for (const CurrentMethodExecution& execution : registration.currentExecutions)
+        {
+            const MethodInfo* method = execution.currentMethod;
+            if (!method || !method->klass || !method->klass->image || method->is_inflated ||
+                method->klass->image->assembly != registration.baseAssembly ||
+                method->klass->image == registration.baseAssembly->image ||
+                !currentExecutions.emplace(execution.baseMethodToken, method).second)
+                return false;
+        }
 
         auto logicalMappings = s_logicalMethodMappings.find(registration.baseAssembly);
         if (logicalMappings != s_logicalMethodMappings.end())
@@ -876,8 +953,13 @@ bool PrepareAndRegisterMetaVersions(
             const MetaVersionMethod* currentMethodVersion =
                 currentVersionEntry == currentMethods.end() ? nullptr :
                     currentVersionEntry->second;
+            auto execution = currentExecutions.find(baseMethodVersion.token);
+            const MethodInfo* currentExecution = execution == currentExecutions.end() ? nullptr : execution->second;
+            if (currentExecution && (!currentMethodVersion || !MethodCanHaveAotEntry(baseMethodVersion) ||
+                !MethodCanHaveAotEntry(*currentMethodVersion) || currentExecution->token != currentMethodVersion->token))
+                return false;
             const bool changed = !currentMethodVersion ||
-                baseMethodVersion.version != currentMethodVersion->version;
+                baseMethodVersion.version != currentMethodVersion->version || currentExecution;
             if (!MethodCanHaveAotEntry(baseMethodVersion) || !changed)
             {
                 continue;
@@ -906,10 +988,21 @@ bool PrepareAndRegisterMetaVersions(
             }
             else
             {
-                plan.methodsToPrepare.push_back(baseMethod);
+                if (currentExecution)
+                {
+                    auto currentIdentity = plan.state.methodBaseTokens.emplace(currentExecution, baseMethodVersion.token);
+                    if (!currentIdentity.second && currentIdentity.first->second != baseMethodVersion.token)
+                        return false;
+                    if (!HasCompatibleStaticBaseFrame(baseMethod, currentExecution))
+                        plan.state.incompatibleBaseAbiTokens.insert(baseMethodVersion.token);
+                    currentExecutions.erase(execution);
+                }
+                plan.methodsToPrepare.push_back(currentExecution ? currentExecution : baseMethod);
                 plan.preparedMethodTokens.push_back(baseMethodVersion.token);
             }
         }
+        if (!currentExecutions.empty())
+            return false;
         pending.push_back(std::move(plan));
     }
 
