@@ -1033,7 +1033,8 @@ namespace metadata
 				const Il2CppTypeDefinition* declaringType = reinterpret_cast<const Il2CppTypeDefinition*>(
 					il2cpp::vm::GlobalMetadata::GetTypeHandleFromIndex(declaration->declaringType));
 				const Il2CppGenericContainer* declarationContainer = declaringType->genericContainerIndex == kGenericContainerIndexInvalid
-					? nullptr : il2cpp::vm::GlobalMetadata::GetGenericContainerFromIndex(declaringType->genericContainerIndex);
+					? nullptr : reinterpret_cast<const Il2CppGenericContainer*>(
+						il2cpp::vm::GlobalMetadata::GetGenericContainerFromIndex(declaringType->genericContainerIndex));
 				// MemberRef signatures retain generic ordinals. Match Current's
 				// uninflated declaration and owner, then use the closed method.
 				if (!IsMatchMethodSig(definition, resolveSig, declarationContainer))
