@@ -1025,8 +1025,18 @@ namespace metadata
 			void* iter = nullptr;
 			while (const MethodInfo* method = il2cpp::vm::Class::GetMethods(klass, &iter))
 			{
-				if (std::strcmp(resolveMethodName, method->name) != 0 ||
-					!IsMatchMethodSig(method, resolveSig, klassGenericContainer))
+				if (std::strcmp(resolveMethodName, method->name) != 0)
+					continue;
+				const MethodInfo* definition = method->is_inflated
+					? method->genericMethod->methodDefinition : method;
+				const Il2CppMethodDefinition* declaration = reinterpret_cast<const Il2CppMethodDefinition*>(definition->methodMetadataHandle);
+				const Il2CppTypeDefinition* declaringType = reinterpret_cast<const Il2CppTypeDefinition*>(
+					il2cpp::vm::GlobalMetadata::GetTypeHandleFromIndex(declaration->declaringType));
+				const Il2CppGenericContainer* declarationContainer = declaringType->genericContainerIndex == kGenericContainerIndexInvalid
+					? nullptr : il2cpp::vm::GlobalMetadata::GetGenericContainerFromIndex(declaringType->genericContainerIndex);
+				// MemberRef signatures retain generic ordinals. Match Current's
+				// uninflated declaration and owner, then use the closed method.
+				if (!IsMatchMethodSig(definition, resolveSig, declarationContainer))
 				{
 					continue;
 				}
@@ -1040,9 +1050,6 @@ namespace metadata
 					: nullptr;
 				Il2CppGenericContext finalGenericContext = {
 					classInstantiation, genericInstantiation };
-				const MethodInfo* definition = method->is_inflated
-					? method->genericMethod->methodDefinition
-					: method;
 				return il2cpp::metadata::GenericMetadata::Inflate(definition,
 					&finalGenericContext);
 			}
