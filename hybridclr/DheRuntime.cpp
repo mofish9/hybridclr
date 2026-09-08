@@ -718,6 +718,15 @@ const MethodInfo* ResolveInterpreterMethod(const MethodInfo* baseMethod)
             baseMethod->genericMethod->context, contextChanged);
         currentMethod = il2cpp::metadata::GenericMetadata::Inflate(currentMethod,
             contextChanged ? &currentContext : &baseMethod->genericMethod->context);
+        if (currentMethod && currentMethod->is_inflated)
+        {
+            // Full generic sharing normally keeps the generated AOT entry even
+            // when the definition is selected. A value-type layout change
+            // makes that entry unsafe for this concrete instantiation, so
+            // materialize the interpreter bridge on the inflated MethodInfo.
+            hybridclr::InitAndGetInterpreterDirectlyCallMethodPointer(currentMethod);
+            const_cast<MethodInfo*>(currentMethod)->isInterpterImpl = true;
+        }
     }
     return currentMethod;
 }
@@ -772,8 +781,14 @@ const MethodInfo* ResolveCurrentExecutionMethod(const MethodInfo* method)
         bool contextChanged = false;
         Il2CppGenericContext currentContext = RemapDheGenericContext(
             method->genericMethod->context, contextChanged);
-        return il2cpp::metadata::GenericMetadata::Inflate(current->second,
+        const MethodInfo* execution = il2cpp::metadata::GenericMetadata::Inflate(current->second,
             contextChanged ? &currentContext : &method->genericMethod->context);
+        if (execution && execution->is_inflated)
+        {
+            hybridclr::InitAndGetInterpreterDirectlyCallMethodPointer(execution);
+            const_cast<MethodInfo*>(execution)->isInterpterImpl = true;
+        }
+        return execution;
     }
     return current->second;
 }
