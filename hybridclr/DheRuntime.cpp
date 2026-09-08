@@ -811,14 +811,12 @@ static bool PrepareResolvedMethods(const std::vector<const MethodInfo*>& methods
             return false;
         }
 
-        // A MV token identifies a method definition. Generic method
-        // definitions and methods declared on generic types do not have a
-        // concrete direct-call ABI until an inflated instantiation is used;
-        // the generated-code resolver excludes those shapes. Leave them to
-        // the normal interpreter metadata path instead of rejecting an
-        // otherwise valid partial DHE image at load time.
-        if (method->is_generic ||
-            (method->klass && (method->klass->generic_class || method->klass->genericContainerHandle)))
+        // Methods declared on generic classes do not have a concrete
+        // direct-call ABI until an inflated instantiation is used; leave
+        // those shapes to the normal interpreter metadata path. Generic
+        // method definitions themselves still need an interpreter bridge so
+        // a changed value-type instantiation cannot fall back to the Base ABI.
+        if (method->klass && (method->klass->generic_class || method->klass->genericContainerHandle))
         {
             continue;
         }
