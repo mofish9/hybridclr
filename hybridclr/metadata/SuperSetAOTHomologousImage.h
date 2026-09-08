@@ -135,6 +135,7 @@ namespace hybridclr
 			void InitPropertiesAndEvents(
 				std::vector<SuperSetTypeIntermediateInfo>& typeIntermediateInfos);
 			const MethodInfo* GetLogicalMethod(const MethodInfo* currentMethod);
+			const std::vector<const MethodInfo*>* GetSupplementalMethods(Il2CppClass* klass);
 			const std::vector<FieldInfo*>* GetSupplementalFields(Il2CppClass* klass);
 
 			const Il2CppType* _defaultIl2CppType;
@@ -152,6 +153,7 @@ namespace hybridclr
 			std::vector<Il2CppClass*> _supplementalTypes;
 			std::unordered_map<Il2CppClass*, std::vector<Il2CppClass*>> _supplementalNestedTypes;
 			std::unordered_map<Il2CppClass*, std::vector<const MethodInfo*>> _supplementalMethods;
+			std::unordered_map<Il2CppClass*, std::vector<const MethodInfo*>> _genericSupplementalMethods;
 			std::unordered_map<const MethodInfo*, Image*> _supplementalMethodImages;
 			std::unordered_map<const MethodInfo*, const MethodInfo*> _logicalMethods;
 			std::unordered_map<const Il2CppClass*, std::vector<const MethodInfo*>> _interfaceMethods;

@@ -792,43 +792,69 @@ namespace metadata
 		return true;
 	}
 
+	const std::vector<const MethodInfo*>* SuperSetAOTHomologousImage::GetSupplementalMethods(Il2CppClass* klass)
+	{
+		auto direct = _supplementalMethods.find(klass);
+		if (direct != _supplementalMethods.end())
+			return &direct->second;
+		if (!_isDheImage || !klass->generic_class)
+			return nullptr;
+		Il2CppClass* definition = il2cpp::vm::GenericClass::GetTypeDefinition(klass->generic_class);
+		auto declared = _supplementalMethods.find(definition);
+		if (declared == _supplementalMethods.end())
+			return nullptr;
+
+		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
+		auto cached = _genericSupplementalMethods.find(klass);
+		if (cached != _genericSupplementalMethods.end())
+			return &cached->second;
+		const Il2CppGenericContext* context = il2cpp::vm::GenericClass::GetContext(klass->generic_class);
+		std::vector<const MethodInfo*> methods;
+		methods.reserve(declared->second.size());
+		for (const MethodInfo* method : declared->second)
+			methods.push_back(il2cpp::metadata::GenericMetadata::Inflate(method, context));
+		// Publish the complete immutable list last. The map's node and the
+		// moved vector storage stay stable for Class::GetMethods iterators.
+		return &_genericSupplementalMethods.emplace(klass, std::move(methods)).first->second;
+	}
+
 	const MethodInfo* SuperSetAOTHomologousImage::GetFirstSupplementalMethod(
 		Il2CppClass* klass, void** iter)
 	{
-		auto methods = _supplementalMethods.find(klass);
-		if (methods == _supplementalMethods.end() || methods->second.empty())
+		const std::vector<const MethodInfo*>* methods = GetSupplementalMethods(klass);
+		if (!methods || methods->empty())
 		{
 			return nullptr;
 		}
-		*iter = &methods->second[0];
-		return methods->second[0];
+		*iter = const_cast<const MethodInfo**>(methods->data());
+		return (*methods)[0];
 	}
 
 	bool SuperSetAOTHomologousImage::TryGetNextSupplementalMethod(Il2CppClass* klass,
 		void** iter, const MethodInfo** method)
 	{
-		auto methods = _supplementalMethods.find(klass);
-		if (methods == _supplementalMethods.end() || methods->second.empty() || !*iter)
+		const std::vector<const MethodInfo*>* methods = GetSupplementalMethods(klass);
+		if (!methods || methods->empty() || !*iter)
 		{
 			return false;
 		}
 		const uintptr_t current = reinterpret_cast<uintptr_t>(*iter);
-		const uintptr_t begin = reinterpret_cast<uintptr_t>(&methods->second[0]);
+		const uintptr_t begin = reinterpret_cast<uintptr_t>(methods->data());
 		const uintptr_t end = reinterpret_cast<uintptr_t>(
-			&methods->second[0] + methods->second.size());
+			methods->data() + methods->size());
 		if (current < begin || current >= end ||
 			(current - begin) % sizeof(const MethodInfo*) != 0)
 		{
 			return false;
 		}
 		const size_t nextIndex = (current - begin) / sizeof(const MethodInfo*) + 1;
-		if (nextIndex >= methods->second.size())
+		if (nextIndex >= methods->size())
 		{
 			*method = nullptr;
 			return true;
 		}
-		*iter = &methods->second[nextIndex];
-		*method = methods->second[nextIndex];
+		*iter = const_cast<const MethodInfo**>(methods->data() + nextIndex);
+		*method = (*methods)[nextIndex];
 		return true;
 	}
 
@@ -859,8 +885,8 @@ namespace metadata
 
 	size_t SuperSetAOTHomologousImage::GetSupplementalMethodCount(Il2CppClass* klass)
 	{
-		auto methods = _supplementalMethods.find(klass);
-		return methods == _supplementalMethods.end() ? 0 : methods->second.size();
+		const std::vector<const MethodInfo*>* methods = GetSupplementalMethods(klass);
+		return methods ? methods->size() : 0;
 	}
 
 	const std::vector<FieldInfo*>* SuperSetAOTHomologousImage::GetSupplementalFields(Il2CppClass* klass)
