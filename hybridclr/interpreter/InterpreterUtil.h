@@ -7,6 +7,7 @@
 #endif
 
 #include "InterpreterDefs.h"
+#include "../metadata/MetadataModule.h"
 
 namespace hybridclr
 {
@@ -21,6 +22,7 @@ namespace interpreter
 
 	IL2CPP_FORCE_INLINE void RuntimeInitClassCCtor(Il2CppClass* klass)
 	{
+		klass = metadata::MetadataModule::GetDheClassInitializationOwner(klass);
 		il2cpp::vm::ClassInlines::InitFromCodegen(klass);
 		if (!IS_CCTOR_FINISH_OR_NO_CCTOR(klass))
 		{
@@ -35,6 +37,7 @@ namespace interpreter
 
 	IL2CPP_FORCE_INLINE void RuntimeInitClassCCtorWithoutInitClass(Il2CppClass* klass)
 	{
+		klass = metadata::MetadataModule::GetDheClassInitializationOwner(klass);
 		if (!IS_CCTOR_FINISH_OR_NO_CCTOR(klass))
 		{
 			il2cpp_codegen_runtime_class_init(klass);

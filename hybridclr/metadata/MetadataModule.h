@@ -55,6 +55,8 @@ namespace metadata
 		static Image* GetInterpreterResolveImage(const MethodInfo* method);
 
         static const Il2CppImage* GetDheMethodMetadataImage(const MethodInfo* method);
+		static const MethodInfo* GetDheCurrentMethodMetadata(const MethodInfo* method);
+		static Il2CppClass* GetDheClassInitializationOwner(Il2CppClass* klass);
 		static bool TryGetDheVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot,
 			const VirtualInvokeData*& result);
 		static bool TryGetDheVirtualInvokeData(const Il2CppClass* klass, const MethodInfo* method,

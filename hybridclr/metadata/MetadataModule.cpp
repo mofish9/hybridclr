@@ -17,6 +17,8 @@
 #include "vm/MetadataLock.h"
 #include "vm/MetadataCache.h"
 #include "vm/Method.h"
+#include "vm/GenericClass.h"
+#include "metadata/GenericMetadata.h"
 #include "gc/GarbageCollector.h"
 #include "gc/GCHandle.h"
 #include "gc/WriteBarrier.h"
@@ -406,6 +408,35 @@ namespace metadata
         return homologous && homologous->GetTargetAssembly()->image == image ? homologous : nullptr;
     }
 
+	Il2CppClass* MetadataModule::GetDheClassInitializationOwner(Il2CppClass* klass)
+	{
+		// Acquire the completed registration before reading Current metadata.
+		// Never change Base cctor state during preparation or mirror completion bits.
+		if (!klass || !klass->image || !dhe::IsDheAssembly(klass->image->assembly))
+			return klass;
+		if (!IsInterpreterType(klass))
+		{
+			if (klass->has_cctor) return klass;
+			AOTHomologousImage* image = GetDheSupplementalImage(klass->image);
+			const Il2CppType* current = image ? image->GetDheCurrentType(&klass->byval_arg) : nullptr;
+			return current ? il2cpp::vm::Class::FromIl2CppType(current) : klass;
+		}
+		InterpreterImage* currentImage = GetImage(klass);
+		SuperSetAOTHomologousImage* image = currentImage->GetHomologousTypeReferenceImage();
+		if (!image) return klass;
+		const Il2CppClass* definition = klass->generic_class
+			? il2cpp::vm::GenericClass::GetTypeDefinition(klass->generic_class) : klass;
+		uint32_t rawIndex = currentImage->GetTypeRawIndex(
+			reinterpret_cast<const Il2CppTypeDefinition*>(definition->typeMetadataHandle));
+		const Il2CppType* logical = image->GetIl2CppTypeFromRawTypeDefIndex(rawIndex);
+		if (!logical || IsInterpreterType(GetUnderlyingTypeDefinition(logical))) return klass;
+		Il2CppClass* owner = il2cpp::vm::Class::FromIl2CppType(logical);
+		if (klass->generic_class)
+			owner = il2cpp::vm::GenericClass::GetClass(il2cpp::metadata::GenericMetadata::GetGenericClass(
+				logical, klass->generic_class->context.class_inst));
+		return owner->has_cctor ? owner : klass;
+	}
+
 	static bool HasDheVirtualHierarchy(const Il2CppClass* klass)
 	{
 		if (!klass || klass->is_import_or_windows_runtime)
@@ -758,6 +789,12 @@ namespace metadata
 		AOTHomologousImage* homologous = GetDheSupplementalImage(image);
 		return homologous && homologous->TryGetCustomAttributeSource(
 			token, sourceImage, sourceToken);
+	}
+
+	const MethodInfo* MetadataModule::GetDheCurrentMethodMetadata(const MethodInfo* method)
+	{
+		AOTHomologousImage* image = GetDheSupplementalImage(method->klass->image);
+		return image ? image->GetCurrentMethodMetadata(method) : method;
 	}
 
     const Il2CppImage* MetadataModule::GetDheMethodMetadataImage(const MethodInfo* method)

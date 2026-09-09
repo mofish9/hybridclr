@@ -101,6 +101,7 @@ namespace hybridclr
 			bool TryGetNextSupplementalMethod(Il2CppClass* klass, void** iter,
 				const MethodInfo** method) override;
 			Image* GetSupplementalMethodImage(const MethodInfo* method) override;
+			const MethodInfo* GetCurrentMethodMetadata(const MethodInfo* method) override;
 			Image* GetMethodResolveImage(const MethodInfo* method) override;
 			size_t GetSupplementalMethodCount(Il2CppClass* klass) override;
 			const MethodInfo* ResolveLogicalMethod(const MethodInfo* method) override;
@@ -164,6 +165,7 @@ namespace hybridclr
 			std::unordered_map<Il2CppClass*, std::vector<const MethodInfo*>> _genericSupplementalMethods;
 			std::unordered_map<const MethodInfo*, Image*> _supplementalMethodImages;
 			std::unordered_map<const MethodInfo*, const MethodInfo*> _logicalMethods;
+			std::unordered_map<const MethodInfo*, const MethodInfo*> _currentMetadataMethods;
 			std::unordered_map<const Il2CppClass*, std::vector<const MethodInfo*>> _interfaceMethods;
 			std::unordered_map<Il2CppClass*, std::vector<FieldInfo*>> _supplementalFields;
 			std::unordered_map<const FieldInfo*, FieldInfo*> _logicalFields;

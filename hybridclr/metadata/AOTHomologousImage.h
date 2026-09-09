@@ -78,6 +78,11 @@ namespace metadata
 			{
 				return nullptr;
 			}
+
+			virtual const MethodInfo* GetCurrentMethodMetadata(const MethodInfo* method)
+			{
+				return method;
+			}
 			virtual Image* GetMethodResolveImage(const MethodInfo* method)
 			{
 				return nullptr;

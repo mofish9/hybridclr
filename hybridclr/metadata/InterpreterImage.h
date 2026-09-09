@@ -995,6 +995,10 @@ namespace metadata
 		{
 			_homologousTypeReferenceImage = image;
 		}
+		SuperSetAOTHomologousImage* GetHomologousTypeReferenceImage() const
+		{
+			return _homologousTypeReferenceImage;
+		}
 		bool TryApplyClassLayoutLocked(Il2CppClass* klass);
 	protected:
 

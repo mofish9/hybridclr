@@ -412,6 +412,7 @@ namespace metadata
 							const_cast<MethodInfo*>(logicalMethod)->slot = slot;
 					}
 					_logicalMethods[currentMethod] = logicalMethod;
+					_currentMetadataMethods[logicalMethod] = currentMethod;
 					if (currentMethod != logicalMethod && !dhe::RegisterLogicalMethodMapping(_targetAssembly,
 						currentMethod, logicalMethod))
 					{
@@ -1044,6 +1045,17 @@ namespace metadata
 		*iter = const_cast<const MethodInfo**>(methods->data() + nextIndex);
 		*method = (*methods)[nextIndex];
 		return true;
+	}
+
+	const MethodInfo* SuperSetAOTHomologousImage::GetCurrentMethodMetadata(const MethodInfo* method)
+	{
+		const MethodInfo* definition = method->is_inflated && method->genericMethod
+			? method->genericMethod->methodDefinition : method;
+		auto current = _currentMetadataMethods.find(definition);
+		if (current == _currentMetadataMethods.end()) return method;
+		return method->is_inflated && method->genericMethod
+			? il2cpp::metadata::GenericMetadata::Inflate(current->second, &method->genericMethod->context)
+			: current->second;
 	}
 
 	Image* SuperSetAOTHomologousImage::GetSupplementalMethodImage(const MethodInfo* method)
