@@ -7,6 +7,7 @@
 
 #define HYBRIDCLR_DHE_HAS_CURRENT_EXECUTION 1
 #define HYBRIDCLR_DHE_HAS_CURRENT_IMAGE_PLAN 1
+#define HYBRIDCLR_DHE_HAS_FROZEN_AOT_SOURCE 1
 
 struct Il2CppAssembly;
 struct Il2CppClass;
@@ -76,6 +77,30 @@ namespace dhe
         }
     };
 
+    enum class CurrentImageSourceKind : uint8_t
+    {
+        MutableHotfix = 0,
+        FrozenBaseAot = 1,
+    };
+
+    struct CurrentImageSource
+    {
+        CurrentImageSourceKind kind = CurrentImageSourceKind::MutableHotfix;
+        // Supplied from the authenticated Base snapshot, never a Current DLL.
+        Sha256Digest baseSourceHash{};
+        // Sorted Base tokens, including the generated identity type. Its
+        // archived initializer is deliberately normalized by the Base workflow.
+        std::vector<uint32_t> excludedBaseTypeTokens;
+        bool operator==(const CurrentImageSource& other) const
+        {
+            return kind == other.kind && baseSourceHash == other.baseSourceHash &&
+                excludedBaseTypeTokens == other.excludedBaseTypeTokens;
+        }
+    };
+
+    bool ValidateCurrentImageSource(const CurrentImageSource& source,
+        const Sha256Digest& baseHash, const Sha256Digest& currentHash);
+
     // Internal image preparation input. It is bound to one Base/Current pair;
     // it does not change the immutable MV format or authorize a resource load.
     struct CurrentImagePlan
@@ -83,12 +108,14 @@ namespace dhe
         std::string assemblyName;
         Sha256Digest baseAssemblyHash{};
         Sha256Digest currentAssemblyHash{};
+        CurrentImageSource source;
         std::vector<CurrentMetadataTokenBinding> types;
         std::vector<CurrentMetadataTokenBinding> methods;
         bool operator==(const CurrentImagePlan& other) const
         {
             return assemblyName == other.assemblyName && baseAssemblyHash == other.baseAssemblyHash &&
-                currentAssemblyHash == other.currentAssemblyHash && types == other.types && methods == other.methods;
+                currentAssemblyHash == other.currentAssemblyHash && source == other.source &&
+                types == other.types && methods == other.methods;
         }
     };
 
@@ -100,7 +127,8 @@ namespace dhe
     bool BuildCurrentImagePlan(const MetaVersionData& baseMetaVersion,
         const MetaVersionData& currentMetaVersion,
         const std::vector<uint32_t>& currentTypeTokens,
-        const std::vector<uint32_t>& currentMethodTokens, CurrentImagePlan& result);
+        const std::vector<uint32_t>& currentMethodTokens, CurrentImagePlan& result,
+        const CurrentImageSource& source = CurrentImageSource{});
 
     struct MetaVersionRegistration
     {
@@ -117,6 +145,7 @@ namespace dhe
         const Il2CppAssembly* baseAssembly = nullptr;
         const MetaVersionData* baseMetaVersion = nullptr;
         const MetaVersionData* currentMetaVersion = nullptr;
+        CurrentImageSource source;
         // Internal preparation result, not a mutable/payload-owned lookup.
         // Registration copies the bindings into its atomic published state.
         // Current metadata may use a new physical value layout even when the
@@ -144,6 +173,7 @@ namespace dhe
         const std::vector<MetaVersionRegistration>& registrations);
 
     bool IsDheAssembly(const Il2CppAssembly* assembly);
+    bool IsFrozenAotExecutionSource(const Il2CppAssembly* assembly);
     bool TryGetVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot,
         const VirtualInvokeData*& result);
     // Current aliases can reuse a Base slot number for a different declaration.

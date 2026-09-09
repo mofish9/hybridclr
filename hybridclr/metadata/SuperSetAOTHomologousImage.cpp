@@ -160,7 +160,7 @@ namespace metadata
 		}
 		dhe::CurrentImagePlan checked;
 		if (!dhe::BuildCurrentImagePlan(*registration.baseMetaVersion, *registration.currentMetaVersion,
-			typeTokens, methodTokens, checked) || checked.methods.size() != _currentImagePlan.methods.size())
+			typeTokens, methodTokens, checked, _currentImagePlan.source) || checked.methods.size() != _currentImagePlan.methods.size())
 			return false;
 		// Recheck the whole MV identity selection before dispatch publication,
 		// including implicit members of a selected Current storage type.
@@ -180,6 +180,7 @@ namespace metadata
 			executions.emplace_back(binding.baseToken, current);
 		}
 		registration.currentExecutions.swap(executions);
+		registration.source = _currentImagePlan.source;
 		return true;
 	}
 

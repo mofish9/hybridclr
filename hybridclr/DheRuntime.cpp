@@ -38,6 +38,7 @@ namespace
 
     struct DHEAssemblyState
     {
+        CurrentImageSource source;
         std::unordered_set<uint32_t> changedMethodTokens;
 		std::unordered_set<uint32_t> incompatibleBaseAbiTokens;
 		std::unordered_set<uint32_t> removedTypeTokens;
@@ -433,6 +434,14 @@ bool IsDheAssembly(const Il2CppAssembly* assembly)
     }
     const PublishedState* state = s_publishedState.load(std::memory_order_acquire);
     return state->assemblyStates.find(assembly) != state->assemblyStates.end();
+}
+
+bool IsFrozenAotExecutionSource(const Il2CppAssembly* assembly)
+{
+    const PublishedState* state = s_publishedState.load(std::memory_order_acquire);
+    auto entry = state->assemblyStates.find(assembly);
+    return entry != state->assemblyStates.end() &&
+        entry->second.source.kind == CurrentImageSourceKind::FrozenBaseAot;
 }
 
 bool RegisterLogicalMethodMapping(const Il2CppAssembly* assembly,
@@ -918,12 +927,56 @@ static bool MethodCanHaveAotEntry(const MetaVersionMethod& method)
     return (method.flags & kHasBody) != 0 && (method.flags & (kAbstract | kPInvoke)) == 0;
 }
 
+bool ValidateCurrentImageSource(const CurrentImageSource& source,
+    const Sha256Digest& baseHash, const Sha256Digest& currentHash)
+{
+    if (source.kind == CurrentImageSourceKind::MutableHotfix)
+        return source.baseSourceHash == Sha256Digest{} && source.excludedBaseTypeTokens.empty();
+    if (source.kind != CurrentImageSourceKind::FrozenBaseAot ||
+        source.baseSourceHash == Sha256Digest{} || source.baseSourceHash != baseHash || baseHash != currentHash)
+        return false;
+    uint32_t previous = 0;
+    for (uint32_t token : source.excludedBaseTypeTokens)
+    {
+        if ((token >> 24) != 2 || (token & 0xffffffu) <= 1 || token <= previous) return false;
+        previous = token;
+    }
+    return true;
+}
+
+static bool SameFrozenMetaVersion(const MetaVersionData& base, const MetaVersionData& current)
+{
+    // MV bytes are canonical. Require the same ordered records as well as the
+    // same DLL digest; a payload cannot disguise changed code with an old hash.
+    if (base.assemblyName != current.assemblyName || base.flags != current.flags ||
+        base.assemblyHash != current.assemblyHash || base.types.size() != current.types.size() ||
+        base.methods.size() != current.methods.size()) return false;
+    for (size_t index = 0; index < base.types.size(); ++index)
+    {
+        const MetaVersionType& a = base.types[index];
+        const MetaVersionType& b = current.types[index];
+        if (a.stableId != b.stableId || a.version != b.version || a.token != b.token || a.flags != b.flags)
+            return false;
+    }
+    for (size_t index = 0; index < base.methods.size(); ++index)
+    {
+        const MetaVersionMethod& a = base.methods[index];
+        const MetaVersionMethod& b = current.methods[index];
+        if (a.stableId != b.stableId || a.version != b.version || a.token != b.token || a.flags != b.flags ||
+            a.declaringTypeStableId != b.declaringTypeStableId) return false;
+    }
+    return true;
+}
+
 bool BuildCurrentImagePlan(const MetaVersionData& baseMetaVersion,
     const MetaVersionData& currentMetaVersion,
     const std::vector<uint32_t>& currentTypeTokens,
-    const std::vector<uint32_t>& currentMethodTokens, CurrentImagePlan& result)
+    const std::vector<uint32_t>& currentMethodTokens, CurrentImagePlan& result,
+    const CurrentImageSource& source)
 {
-    if (baseMetaVersion.assemblyName.empty() || baseMetaVersion.assemblyName != currentMetaVersion.assemblyName)
+    if (baseMetaVersion.assemblyName.empty() || baseMetaVersion.assemblyName != currentMetaVersion.assemblyName ||
+        !ValidateCurrentImageSource(source, baseMetaVersion.assemblyHash, currentMetaVersion.assemblyHash) ||
+        (source.kind == CurrentImageSourceKind::FrozenBaseAot && !SameFrozenMetaVersion(baseMetaVersion, currentMetaVersion)))
         return false;
     std::unordered_map<std::string, const MetaVersionType*> baseTypes;
     std::unordered_map<std::string, const MetaVersionMethod*> baseMethods;
@@ -957,10 +1010,18 @@ bool BuildCurrentImagePlan(const MetaVersionData& baseMetaVersion,
         }
     }
     CurrentImagePlan plan;
+    plan.source = source;
     plan.assemblyName = baseMetaVersion.assemblyName;
     plan.baseAssemblyHash = baseMetaVersion.assemblyHash;
     plan.currentAssemblyHash = currentMetaVersion.assemblyHash;
     std::unordered_set<std::string> selectedTypes;
+    std::unordered_set<std::string> excludedTypes;
+    for (uint32_t token : source.excludedBaseTypeTokens)
+    {
+        auto entry = currentTypes.find(token); // Frozen MV has identical Base tokens.
+        if (entry == currentTypes.end()) return false;
+        excludedTypes.insert(DigestKey(entry->second->stableId));
+    }
     std::unordered_set<uint32_t> selectedMethods;
     for (uint32_t token : currentTypeTokens)
     {
@@ -969,7 +1030,8 @@ bool BuildCurrentImagePlan(const MetaVersionData& baseMetaVersion,
         const MetaVersionType& type = *entry->second;
         const std::string id = DigestKey(type.stableId);
         auto old = baseTypes.find(id);
-        if (old == baseTypes.end() || old->second->flags != type.flags || !selectedTypes.insert(id).second)
+        if (old == baseTypes.end() || old->second->flags != type.flags ||
+            excludedTypes.count(id) || !selectedTypes.insert(id).second)
             return false;
         plan.types.emplace_back(old->second->token, token);
     }
@@ -985,6 +1047,7 @@ bool BuildCurrentImagePlan(const MetaVersionData& baseMetaVersion,
         const bool explicitSelection = selectedMethods.find(method.token) != selectedMethods.end();
         const bool storageMember = selectedTypes.find(DigestKey(method.declaringTypeStableId)) != selectedTypes.end();
         if (!explicitSelection && (!storageMember || old == baseMethods.end())) continue;
+        if (excludedTypes.count(DigestKey(method.declaringTypeStableId))) return false;
         if (old == baseMethods.end() || old->second->declaringTypeStableId != method.declaringTypeStableId)
             return false;
         // Abstract members do not execute or store a receiver. Native-only
@@ -1077,6 +1140,19 @@ bool PrepareAndRegisterMetaVersions(
         }
         const MetaVersionData& baseMetaVersion = *registration.baseMetaVersion;
         const MetaVersionData& currentMetaVersion = *registration.currentMetaVersion;
+        std::vector<uint32_t> executionTokens;
+        for (const CurrentMethodExecution& execution : registration.currentExecutions)
+        {
+            if (!execution.currentMethod) return false;
+            executionTokens.push_back(execution.currentMethod->token);
+        }
+        // Validate before resolving/preparing any method, including direct
+        // internal registrations which did not pass through image loading.
+        CurrentImagePlan validatedSource;
+        if (!ValidateCurrentImageSource(registration.source, baseMetaVersion.assemblyHash, currentMetaVersion.assemblyHash) ||
+            (registration.source.kind == CurrentImageSourceKind::FrozenBaseAot &&
+             !BuildCurrentImagePlan(baseMetaVersion, currentMetaVersion, {}, executionTokens, validatedSource, registration.source)))
+            return false;
         if (baseMetaVersion.assemblyName != currentMetaVersion.assemblyName ||
             baseMetaVersion.assemblyName != registration.baseAssembly->aname.name ||
             !uniqueAssemblies.insert(registration.baseAssembly).second ||
@@ -1109,6 +1185,7 @@ bool PrepareAndRegisterMetaVersions(
 
         PendingMetaVersionRegistration plan;
         plan.baseAssembly = registration.baseAssembly;
+        plan.state.source = registration.source;
         std::unordered_map<uint32_t, const MethodInfo*> currentExecutions;
         for (const CurrentMethodExecution& execution : registration.currentExecutions)
         {

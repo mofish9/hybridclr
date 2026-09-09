@@ -195,6 +195,8 @@ namespace metadata
             dhe::Sha256Digest currentHash{};
             if (mode != HomologousImageMode::SUPERSET || !expectedAssemblyName ||
                 currentImagePlan->assemblyName != expectedAssemblyName ||
+                !dhe::ValidateCurrentImageSource(currentImagePlan->source,
+                    currentImagePlan->baseAssemblyHash, currentImagePlan->currentAssemblyHash) ||
                 !dhe::ComputeSha256(dllBytes, dllSize, currentHash) ||
                 currentHash != currentImagePlan->currentAssemblyHash)
                 return LoadImageErrorCode::DHE_MV_BAD_FORMAT;
