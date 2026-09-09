@@ -1113,15 +1113,9 @@ bool PrepareAndRegisterMetaVersions(
         for (const CurrentMethodExecution& execution : registration.currentExecutions)
         {
             const MethodInfo* method = execution.currentMethod;
-            metadata::AOTHomologousImage* homologous = registration.baseAssembly
-                ? metadata::AOTHomologousImage::FindImageByAssembly(registration.baseAssembly)
-                : nullptr;
-            const bool baseMethodAlias = method && method->klass && method->klass->image ==
-                (registration.baseAssembly ? registration.baseAssembly->image : nullptr) && homologous &&
-                homologous->GetSupplementalMethodImage(method) != nullptr;
             if (!method || !method->klass || !method->klass->image || method->is_inflated ||
                 method->klass->image->assembly != registration.baseAssembly ||
-                (method->klass->image == registration.baseAssembly->image && !baseMethodAlias) ||
+                method->klass->image == registration.baseAssembly->image ||
                 !currentExecutions.emplace(execution.baseMethodToken, method).second)
                 return false;
         }

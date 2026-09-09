@@ -177,13 +177,7 @@ namespace metadata
 				logical->second->klass->image != _targetAssembly->image ||
 				logical->second->token != binding.baseToken)
 				return false;
-			// For method-only updates the logical Base MethodInfo is the
-			// execution surface; GetSupplementalMethodImage routes its body
-			// lookup to the Current interpreter image. Using the raw Current
-			// MethodInfo here would leak Current type identities to AOT callers.
-			const MethodInfo* execution =
-				_currentStorageTypeTokens.empty() ? logical->second : current;
-			executions.emplace_back(binding.baseToken, execution);
+			executions.emplace_back(binding.baseToken, current);
 		}
 		registration.currentExecutions.swap(executions);
 		return true;
@@ -403,13 +397,6 @@ namespace metadata
 				{
 					_token2MethodDefs[method.aotMethodDef->token] = &method;
 					logicalMethod = FindRuntimeMethod(type.aotIl2CppType, method.aotMethodDef);
-					// When no type storage is selected, keep the method's public
-					// declaring class and ABI on the Base MethodInfo while sourcing
-					// its body from the Current interpreter image. This prevents a
-					// method-only update from exposing a duplicate Current value type
-					// to unchanged AOT callers.
-					if (!currentStorage && logicalMethod && _interpreterFallbackImage)
-						_supplementalMethodImages[logicalMethod] = _interpreterFallbackImage;
 					_customAttributeTokens[method.aotMethodDef->token] =
 						currentMethod ? currentMethod->token : EncodeToken(TableType::METHOD, i);
 				}
