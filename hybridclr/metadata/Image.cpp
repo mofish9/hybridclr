@@ -269,14 +269,20 @@ namespace metadata
         // enclosing method is inflated. If one argument is a DHE Current
         // value type, remap the complete instantiation now so field offsets
         // and by-value ABI use the Current generic class consistently.
-        const Il2CppType* instantiatedType = &il2cpp::vm::GenericClass::GetClass(genericClass)->byval_arg;
-        Il2CppClass* owner = il2cpp::vm::Class::FromIl2CppType(instantiatedType);
+        // Signature decoding also runs before InterpreterImage::InitClass.
+        // Never materialize the instantiation (or its Current definition) here.
+        Il2CppType instantiatedType = {};
+        instantiatedType.type = IL2CPP_TYPE_GENERICINST;
+        instantiatedType.data.generic_class = genericClass;
+        COPY_IL2CPPTYPE_VALUE_TYPE_FLAG(instantiatedType, *genericBase);
+        Il2CppClass* owner = IsInterpreterType(GetUnderlyingTypeDefinition(genericBase))
+            ? nullptr : il2cpp::vm::Class::FromIl2CppType(genericBase);
         if (owner && owner->image && owner->image->assembly)
         {
             AOTHomologousImage* homologous = AOTHomologousImage::FindImageByAssembly(owner->image->assembly);
             if (homologous)
             {
-                if (const Il2CppType* current = homologous->GetDheExecutionType(instantiatedType))
+                if (const Il2CppType* current = homologous->GetDheExecutionType(&instantiatedType))
                     return current->data.generic_class;
             }
         }

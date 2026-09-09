@@ -641,8 +641,10 @@ namespace metadata
 			const Il2CppType* definition = GetDheCurrentType(type->data.generic_class->type);
 			if (!definition)
 				return nullptr;
-			return &il2cpp::vm::GenericClass::GetClass(il2cpp::metadata::GenericMetadata::GetGenericClass(
-				definition, type->data.generic_class->context.class_inst))->byval_arg;
+			Il2CppType current = *type;
+			current.data.generic_class = il2cpp::metadata::GenericMetadata::GetGenericClass(
+				definition, type->data.generic_class->context.class_inst);
+			return MetadataPool::GetPooledIl2CppType(current);
 		}
 		if (type->type != IL2CPP_TYPE_CLASS && type->type != IL2CPP_TYPE_VALUETYPE)
 			return nullptr;
@@ -788,10 +790,9 @@ namespace metadata
 				currentElement = GetDheCurrentType(type->data.array->etype);
 			if (!currentElement)
 				return nullptr;
-			Il2CppClass* elementClass = il2cpp::vm::Class::FromIl2CppType(currentElement);
-			return elementClass
-				? &il2cpp::vm::Class::GetArrayClass(elementClass, type->data.array->rank)->byval_arg
-				: nullptr;
+			Il2CppType current = *type;
+			current.data.array = MetadataPool::GetPooledIl2CppArrayType(currentElement, type->data.array->rank);
+			return MetadataPool::GetPooledIl2CppType(current);
 		}
 		// Generic instances carry a Base generic definition plus a class
 		// instantiation. Preserve the arguments and replace only the selected
@@ -822,7 +823,11 @@ namespace metadata
 				return nullptr;
 			Il2CppGenericClass* currentGeneric = il2cpp::metadata::GenericMetadata::GetGenericClass(
 				currentDefinition, currentInst);
-			return &il2cpp::vm::GenericClass::GetClass(currentGeneric)->byval_arg;
+			// Mapping is also used while signatures are being decoded. Keep it
+			// independent of class/layout initialization and preserve type flags.
+			Il2CppType current = *type;
+			current.data.generic_class = currentGeneric;
+			return MetadataPool::GetPooledIl2CppType(current);
 		}
 		// TypeRef decoding supplies a definition; byref/array wrappers are built
 		// by the signature reader afterwards.
