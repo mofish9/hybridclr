@@ -652,7 +652,7 @@ static Il2CppGenericContext RemapDheGenericContext(const Il2CppGenericContext& b
     const Il2CppAssembly* preferredAssembly, bool& changed)
 {
     Il2CppGenericContext currentContext = baseContext;
-    auto remapInst = [&changed](const Il2CppGenericInst* baseInst) -> const Il2CppGenericInst*
+    auto remapInst = [&changed, preferredAssembly](const Il2CppGenericInst* baseInst) -> const Il2CppGenericInst*
     {
         if (!baseInst || baseInst->type_argc == 0)
         {
