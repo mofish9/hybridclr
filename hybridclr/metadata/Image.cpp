@@ -263,30 +263,12 @@ namespace metadata
             types[i] = ReadType(reader, klassGenericContainer, methodGenericContainer);
         }
         const Il2CppGenericInst* genericInst = il2cpp::vm::MetadataCache::GetGenericInst(types, argc);
-        Il2CppGenericClass* genericClass = il2cpp::metadata::GenericMetadata::GetGenericClass(genericBase, genericInst);
-
-        // Generic signatures can be decoded from an AOT image before the
-        // enclosing method is inflated. If one argument is a DHE Current
-        // value type, remap the complete instantiation now so field offsets
-        // and by-value ABI use the Current generic class consistently.
-        // Signature decoding also runs before InterpreterImage::InitClass.
-        // Never materialize the instantiation (or its Current definition) here.
-        Il2CppType instantiatedType = {};
-        instantiatedType.type = IL2CPP_TYPE_GENERICINST;
-        instantiatedType.data.generic_class = genericClass;
-        COPY_IL2CPPTYPE_VALUE_TYPE_FLAG(instantiatedType, *genericBase);
-        Il2CppClass* owner = IsInterpreterType(GetUnderlyingTypeDefinition(genericBase))
-            ? nullptr : il2cpp::vm::Class::FromIl2CppType(genericBase);
-        if (owner && owner->image && owner->image->assembly)
-        {
-            AOTHomologousImage* homologous = AOTHomologousImage::FindImageByAssembly(owner->image->assembly);
-            if (homologous)
-            {
-                if (const Il2CppType* current = homologous->GetDheExecutionType(&instantiatedType))
-                    return current->data.generic_class;
-            }
-        }
-        return genericClass;
+        // Preserve the reader's TypeDef/TypeRef domain. InterpreterImage has
+        // already selected execution definitions; homologous signature matching
+        // must retain Base definitions, including unchanged Nullable<long>.
+        // Runtime tokens and field owners are remapped at their use sites.
+        // Neither domain may materialize a class during signature decoding.
+        return il2cpp::metadata::GenericMetadata::GetGenericClass(genericBase, genericInst);
     }
 
     const Il2CppType* Image::ReadType(BlobReader& reader, const Il2CppGenericContainer* klassGenericContainer, const Il2CppGenericContainer* methodGenericContainer)
