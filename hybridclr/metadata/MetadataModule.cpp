@@ -430,13 +430,18 @@ namespace metadata
         const Il2CppGenericInst* oldArgs = before->generic_class->context.class_inst;
         const Il2CppGenericInst* newArgs = current->generic_class->context.class_inst;
         if (!oldArgs || !newArgs || oldArgs->type_argc != newArgs->type_argc) return false;
+        bool argumentChanged = false;
         for (uint32_t index = 0; index < oldArgs->type_argc; ++index)
         {
             AOTHomologousImage* unused;
-            if (!IsDheValueCopyPair(il2cpp::vm::Class::FromIl2CppType(oldArgs->type_argv[index]),
-                il2cpp::vm::Class::FromIl2CppType(newArgs->type_argv[index]), unused)) return false;
+            Il2CppClass* oldArgument = il2cpp::vm::Class::FromIl2CppType(oldArgs->type_argv[index]);
+            Il2CppClass* newArgument = il2cpp::vm::Class::FromIl2CppType(newArgs->type_argv[index]);
+            if (!IsDheValueCopyPair(oldArgument, newArgument, unused)) return false;
+            argumentChanged |= oldArgument != newArgument;
         }
-        return true; // Shared definition: field tokens themselves are stable.
+        // A different class with no DHE argument transition is an ordinary
+        // invalid cast, not an opportunity to widen the unbox contract.
+        return argumentChanged; // Shared definition: field tokens are stable.
     }
 
     static bool CopyDheValueData(Il2CppClass* before, const uint8_t* source,

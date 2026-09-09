@@ -520,7 +520,8 @@ namespace metadata
 						ReadFieldRefSig(reader, nullptr, signature);
 						const Il2CppFieldDefinition* baseField = FindMatchField(type.aotTypeDef, field,
 							_rawImage->GetStringFromRawIndex(data.name), signature.type);
-						if (baseField) _currentStorageBaseFieldTokens.emplace(EncodeToken(TableType::FIELD, i), baseField->token);
+						if (baseField && !(il2cpp::vm::GlobalMetadata::GetIl2CppTypeFromIndex(baseField->typeIndex)->attrs & FIELD_ATTRIBUTE_STATIC))
+							_currentStorageBaseFieldTokens.emplace(EncodeToken(TableType::FIELD, i), baseField->token);
 					}
 					// Inline values and selected containing objects own real Current
 					// fields. A Base offset or a reference sidecar cannot represent a
