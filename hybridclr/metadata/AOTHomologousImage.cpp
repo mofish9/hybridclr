@@ -14,6 +14,27 @@ namespace hybridclr
 namespace metadata
 {
 	std::vector<AOTHomologousImage*> s_images;
+	static thread_local const std::vector<AOTHomologousImage*>* s_preparingImages = nullptr;
+
+	AOTHomologousImage::PreparationScope::PreparationScope(
+		const std::vector<AOTHomologousImage*>& images, il2cpp::os::FastAutoLock&)
+		: _previous(s_preparingImages)
+	{
+		s_preparingImages = &images;
+	}
+
+	AOTHomologousImage::PreparationScope::~PreparationScope()
+	{
+		s_preparingImages = _previous;
+	}
+
+	AOTHomologousImage* AOTHomologousImage::FindPreparingImageByAssembly(const Il2CppAssembly* ass)
+	{
+		if (s_preparingImages)
+			for (AOTHomologousImage* image : *s_preparingImages)
+				if (image->_targetAssembly == ass) return image;
+		return nullptr;
+	}
 
 
 	AOTHomologousImage* AOTHomologousImage::FindImageByAssembly(const Il2CppAssembly* ass)
@@ -41,6 +62,7 @@ namespace metadata
 
 	AOTHomologousImage* AOTHomologousImage::FindImageByAssemblyLocked(const Il2CppAssembly* ass, il2cpp::os::FastAutoLock& lock)
 	{
+		if (AOTHomologousImage* preparing = FindPreparingImageByAssembly(ass)) return preparing;
 		for (AOTHomologousImage* image : s_images)
 		{
 			if (image->_targetAssembly == ass)
@@ -107,4 +129,3 @@ namespace metadata
 	}
 }
 }
-

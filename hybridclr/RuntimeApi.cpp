@@ -59,6 +59,8 @@ namespace hybridclr
 			metadata::AOTHomologousImage* image;
 			dhe::Sha256Digest currentAssemblyHash;
 			std::shared_ptr<const dhe::CurrentImagePlan> executionPlan;
+			std::vector<const Il2CppAssembly*> batchAssemblies;
+			bool metadataReady = false;
 		};
 
 		// DHE images are one-shot process metadata. If MV registration fails
@@ -146,8 +148,22 @@ namespace hybridclr
 				}
 			}
 
-			std::vector<DheLoadPayload*> loaded;
-			loaded.reserve(payloads.size());
+			std::vector<const Il2CppAssembly*> batchAssemblies;
+			for (const DheLoadPayload& payload : payloads) batchAssemblies.push_back(payload.baseAssembly);
+			for (const DheLoadPayload& payload : payloads)
+			{
+				auto pending = s_pendingDheImages.find(payload.baseAssembly);
+				if (pending == s_pendingDheImages.end()) continue;
+				if (!pending->second.metadataReady)
+					return (int32_t)metadata::LoadImageErrorCode::DHE_MV_REGISTRATION_FAILED;
+				if (pending->second.batchAssemblies.size() != batchAssemblies.size())
+					return (int32_t)metadata::LoadImageErrorCode::HOMOLOGOUS_ASSEMBLY_HAS_BEEN_LOADED;
+				for (const Il2CppAssembly* peer : pending->second.batchAssemblies)
+					if (!uniqueAssemblies.count(peer))
+						return (int32_t)metadata::LoadImageErrorCode::HOMOLOGOUS_ASSEMBLY_HAS_BEEN_LOADED;
+			}
+			std::vector<metadata::AOTHomologousImage*> newImages;
+			newImages.reserve(payloads.size());
 			for (DheLoadPayload& payload : payloads)
 			{
 				auto pending = s_pendingDheImages.find(payload.baseAssembly);
@@ -163,22 +179,26 @@ namespace hybridclr
 							payload.dllData, payload.dllSize,
 							metadata::HomologousImageMode::SUPERSET,
 							&loadedAssembly, &payload.currentImage,
-							payload.baseMetaVersion.assemblyName.c_str(), payload.executionPlan.get());
+							payload.baseMetaVersion.assemblyName.c_str(), payload.executionPlan.get(), true);
 					if (loadError != metadata::LoadImageErrorCode::OK ||
 						loadedAssembly != payload.baseAssembly || !payload.currentImage)
 					{
-						for (DheLoadPayload* previous : loaded)
-						{
-							s_pendingDheImages[previous->baseAssembly] = {
-								previous->currentImage, previous->currentAssemblyHash, previous->executionPlan };
-						}
 						return (int32_t)(loadError == metadata::LoadImageErrorCode::OK
 							? metadata::LoadImageErrorCode::DHE_MV_REGISTRATION_FAILED
 							: loadError);
 					}
+					// Retain allocations before any signature can enter a shared cache.
+					// A metadata initialization exception leaves this batch non-retryable;
+					// an MV rejection after initialization can reuse the exact graph.
+					s_pendingDheImages.emplace(payload.baseAssembly, PendingDheImage{
+						payload.currentImage, payload.currentAssemblyHash, payload.executionPlan,
+						batchAssemblies, false });
+					newImages.push_back(payload.currentImage);
 				}
-				loaded.push_back(&payload);
 			}
+			metadata::Assembly::InitializeDheMetadataBatch(newImages);
+			for (const DheLoadPayload& payload : payloads)
+				s_pendingDheImages.at(payload.baseAssembly).metadataReady = true;
 
 			std::vector<dhe::MetaVersionRegistration> registrations;
 			registrations.reserve(payloads.size());
@@ -191,11 +211,6 @@ namespace hybridclr
 			}
 			if (!executionPlansReady || !dhe::PrepareAndRegisterMetaVersions(registrations))
 			{
-				for (DheLoadPayload& payload : payloads)
-				{
-					s_pendingDheImages[payload.baseAssembly] = {
-						payload.currentImage, payload.currentAssemblyHash, payload.executionPlan };
-				}
 				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_REGISTRATION_FAILED;
 			}
 			for (DheLoadPayload& payload : payloads)

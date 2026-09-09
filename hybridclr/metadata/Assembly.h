@@ -18,7 +18,9 @@ namespace metadata
         static LoadImageErrorCode LoadMetadataForAOTAssembly(const void* dllBytes, uint32_t dllSize,
             HomologousImageMode mode, const Il2CppAssembly** targetAssembly = nullptr,
             AOTHomologousImage** targetImage = nullptr, const char* expectedAssemblyName = nullptr,
-            const dhe::CurrentImagePlan* currentImagePlan = nullptr);
+            const dhe::CurrentImagePlan* currentImagePlan = nullptr,
+            bool deferRuntimeInitialization = false);
+        static void InitializeDheMetadataBatch(const std::vector<AOTHomologousImage*>& images);
     private:
         static Il2CppAssembly* Create(const byte* assemblyData, uint64_t length, const byte* rawSymbolStoreBytes, uint64_t rawSymbolStoreLength);
     };

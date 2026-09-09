@@ -78,6 +78,8 @@ namespace hybridclr
 
 			void InitRuntimeMetadatas() override;
 			void InitTypeReferences();
+			InterpreterImage* GetInterpreterFallbackImage() const { return _interpreterFallbackImage; }
+			const Il2CppType* FindTypeReference(const char* namespaze, const char* name) override;
 			bool SetCurrentImagePlan(const dhe::CurrentImagePlan& plan);
 			bool HasCurrentImagePlan() const { return !_currentImagePlan.assemblyName.empty(); }
 			const Il2CppType* GetExecutionTypeFromRawTypeDefIndex(uint32_t index);
@@ -157,6 +159,7 @@ namespace hybridclr
 			std::vector<SuperSetMethodDefDetail> _methodDefs;
 
 			std::vector<SuperSetFieldDefDetail> _fields;
+			std::unordered_map<std::string, const Il2CppType*> _typeReferencesByName;
 			InterpreterImage* _interpreterFallbackImage = nullptr;
 			bool _isDheImage = false;
 			dhe::CurrentImagePlan _currentImagePlan;

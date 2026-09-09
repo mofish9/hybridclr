@@ -827,6 +827,13 @@ namespace metadata
         Il2CppClass* klass = nullptr;
         if (refAss)
         {
+            // Type references may name a peer whose signatures/layouts have not
+            // been initialized yet. Resolve its prepared definition without
+            // asking IL2CPP to materialize a class or publishing the image.
+            AOTHomologousImage* preparing = AOTHomologousImage::FindPreparingImageByAssembly(refAss);
+            if (preparing)
+                if (const Il2CppType* type = preparing->FindTypeReference(typeNamespaceStr, typeNameStr))
+                    return type;
             const Il2CppImage* image2 = il2cpp::vm::Assembly::GetImage(refAss);
             klass = il2cpp::vm::Class::FromName(image2, typeNamespaceStr, typeNameStr);
         }

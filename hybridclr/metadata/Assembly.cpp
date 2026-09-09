@@ -180,8 +180,11 @@ namespace metadata
     LoadImageErrorCode Assembly::LoadMetadataForAOTAssembly(const void* dllBytes, uint32_t dllSize,
         HomologousImageMode mode, const Il2CppAssembly** targetAssembly,
         AOTHomologousImage** targetImage, const char* expectedAssemblyName,
-        const dhe::CurrentImagePlan* currentImagePlan)
+        const dhe::CurrentImagePlan* currentImagePlan, bool deferRuntimeInitialization)
     {
+        if (deferRuntimeInitialization &&
+            (mode != HomologousImageMode::SUPERSET || !expectedAssemblyName || !targetImage))
+            return LoadImageErrorCode::DHE_MV_BAD_FORMAT;
         if (targetAssembly)
         {
             *targetAssembly = nullptr;
@@ -292,10 +295,14 @@ namespace metadata
 				interpreterFallbackImage->SetHomologousTypeReferenceImage(
 					static_cast<SuperSetAOTHomologousImage*>(image));
 			}
-			interpreterFallbackImage->InitRuntimeMetadatas();
+			if (!deferRuntimeInitialization)
+				interpreterFallbackImage->InitRuntimeMetadatas();
 		}
-        image->InitRuntimeMetadatas();
-        AOTHomologousImage::RegisterLocked(image, lock);
+        if (!deferRuntimeInitialization)
+        {
+            image->InitRuntimeMetadatas();
+            AOTHomologousImage::RegisterLocked(image, lock);
+        }
 		if (targetAssembly)
 		{
 			*targetAssembly = aotAss;
@@ -304,8 +311,33 @@ namespace metadata
 		{
 			*targetImage = image;
 		}
-		NotifyAOTMetadataLoaded();
+		if (!deferRuntimeInitialization) NotifyAOTMetadataLoaded();
         return LoadImageErrorCode::OK;
+    }
+
+    void Assembly::InitializeDheMetadataBatch(const std::vector<AOTHomologousImage*>& images)
+    {
+        if (images.empty()) return;
+        il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
+        // Each definition phase also establishes its Current-to-Base map.
+        // None of these phases decodes a peer's signatures or layouts.
+        for (AOTHomologousImage* image : images)
+            static_cast<SuperSetAOTHomologousImage*>(image)->GetInterpreterFallbackImage()
+                ->PrepareRuntimeMetadataDefinitions();
+        {
+            AOTHomologousImage::PreparationScope preparation(images, lock);
+            for (AOTHomologousImage* image : images)
+                static_cast<SuperSetAOTHomologousImage*>(image)->GetInterpreterFallbackImage()
+                    ->InitRuntimeMetadataDetails();
+            for (AOTHomologousImage* image : images)
+                static_cast<SuperSetAOTHomologousImage*>(image)->GetInterpreterFallbackImage()
+                    ->FinishRuntimeMetadatas();
+            // No physical class is requested before every image's definitions,
+            // signatures and lazy layout/vtable state are ready.
+            for (AOTHomologousImage* image : images) image->InitRuntimeMetadatas();
+        }
+        for (AOTHomologousImage* image : images) AOTHomologousImage::RegisterLocked(image, lock);
+        NotifyAOTMetadataLoaded();
     }
 
 

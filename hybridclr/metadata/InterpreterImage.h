@@ -991,6 +991,10 @@ namespace metadata
 		void BuildIl2CppAssembly(Il2CppAssembly* assembly);
 
 		void InitRuntimeMetadatas() override;
+		// DHE batches complete each phase for every image before advancing.
+		void PrepareRuntimeMetadataDefinitions();
+		void InitRuntimeMetadataDetails();
+		void FinishRuntimeMetadatas();
 		void SetHomologousTypeReferenceImage(SuperSetAOTHomologousImage* image)
 		{
 			_homologousTypeReferenceImage = image;
@@ -1044,7 +1048,8 @@ namespace metadata
 		void InitInterfaces();
 		void InitVTables();
 
-		void ComputeHasFinalizer(Il2CppTypeDefinition *def, std::vector<bool> &computFlags);
+		void ComputeHasFinalizer(Il2CppTypeDefinition* def,
+			std::unordered_map<const Il2CppTypeDefinition*, uint8_t>& states);
 		void InitHasFinalizers();
 		void ComputeVTable(TypeDefinitionDetail* tdd);
 
@@ -1071,6 +1076,7 @@ namespace metadata
 		bool _inited;
 		Il2CppImage* _il2cppImage;
 		SuperSetAOTHomologousImage* _homologousTypeReferenceImage = nullptr;
+		uint8_t _runtimeMetadataStage = 0; // guarded by g_MetadataLock
 		const uint32_t _index;
 		static bool IsMetadataPublished(const int32_t* initialized)
 		{

@@ -23,6 +23,18 @@ namespace metadata
 	public:
 
 		static AOTHomologousImage* FindImageByAssembly(const Il2CppAssembly* ass);
+		// Only the metadata-locked batch loader's thread can see these images.
+		static AOTHomologousImage* FindPreparingImageByAssembly(const Il2CppAssembly* ass);
+		class PreparationScope
+		{
+		public:
+			PreparationScope(const std::vector<AOTHomologousImage*>& images, il2cpp::os::FastAutoLock& lock);
+			~PreparationScope();
+			PreparationScope(const PreparationScope&) = delete;
+			PreparationScope& operator=(const PreparationScope&) = delete;
+		private:
+			const std::vector<AOTHomologousImage*>* _previous;
+		};
 		static AOTHomologousImage* FindImageByAssemblyLocked(const Il2CppAssembly* ass, il2cpp::os::FastAutoLock& lock);
 		static void RegisterLocked(AOTHomologousImage* image, il2cpp::os::FastAutoLock& lock);
 		// Remove a failed registration while retaining the image allocation.
@@ -42,6 +54,10 @@ namespace metadata
 		}
 
 		LoadImageErrorCode Load(const byte* imageData, size_t length);
+		virtual const Il2CppType* FindTypeReference(const char* namespaze, const char* name)
+		{
+			return nullptr;
+		}
 
 		virtual Il2CppClass* FindSupplementalType(const char* namespaze, const char* name)
 		{

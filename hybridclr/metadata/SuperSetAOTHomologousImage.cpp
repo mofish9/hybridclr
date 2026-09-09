@@ -105,6 +105,12 @@ namespace metadata
 		InitTypes1(_typeIntermediateInfos);
 	}
 
+	const Il2CppType* SuperSetAOTHomologousImage::FindTypeReference(const char* namespaze, const char* name)
+	{
+		auto entry = _typeReferencesByName.find(std::string(namespaze).append(1, '\0').append(name));
+		return entry == _typeReferencesByName.end() ? nullptr : entry->second;
+	}
+
 	bool SuperSetAOTHomologousImage::SetCurrentImagePlan(const dhe::CurrentImagePlan& plan)
 	{
 		if (!_isDheImage || !_interpreterFallbackImage || !_targetAssembly ||
@@ -293,6 +299,14 @@ namespace metadata
 			const uint32_t rawTypeIndex = index;
 			SuperSetTypeDefDetail& type = _typeDefs[index++];
 			type.aotIl2CppType = td.aotIl2CppType;
+			if (_isDheImage && rawTypeIndex != 0 && td.homoParentRowIndex == 0)
+			{
+				TbTypeDef data = _rawImage->ReadTypeDef(rawTypeIndex + 1);
+				std::string key = std::string(_rawImage->GetStringFromRawIndex(data.typeNamespace))
+					.append(1, '\0').append(_rawImage->GetStringFromRawIndex(data.typeName));
+				if (!_typeReferencesByName.emplace(std::move(key), td.aotIl2CppType).second)
+					RaiseBadImageException("duplicate top-level type definition");
+			}
 			if (td.aotTypeDef)
 			{
 				_aotTypeIndex2TypeDefs[il2cpp::vm::GlobalMetadata::GetIndexForTypeDefinition(td.aotTypeDef)] = &type;

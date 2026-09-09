@@ -314,6 +314,14 @@ namespace metadata
 
 	void InterpreterImage::InitRuntimeMetadatas()
 	{
+		PrepareRuntimeMetadataDefinitions();
+		InitRuntimeMetadataDetails();
+		FinishRuntimeMetadatas();
+	}
+
+	void InterpreterImage::PrepareRuntimeMetadataDefinitions()
+	{
+		IL2CPP_ASSERT(_runtimeMetadataStage == 0);
 		IL2CPP_ASSERT(_rawImage->GetTable(TableType::EXPORTEDTYPE).rowNum == 0);
 
 		HC_METADATA_STAGE(_index, "InitGenericParamDefs0", InitGenericParamDefs0());
@@ -327,6 +335,12 @@ namespace metadata
 		HC_METADATA_STAGE(_index, "InitMethodDefs0", InitMethodDefs0());
 		HC_METADATA_STAGE(_index, "InitGenericParamDefs", InitGenericParamDefs());
 		HC_METADATA_STAGE(_index, "InitNestedClass", InitNestedClass()); // must before typedefs1, because parent may be nested class
+		_runtimeMetadataStage = 1;
+	}
+
+	void InterpreterImage::InitRuntimeMetadataDetails()
+	{
+		IL2CPP_ASSERT(_runtimeMetadataStage == 1);
 		HC_METADATA_STAGE(_index, "InitTypeDefs_1", InitTypeDefs_1());
 
 		HC_METADATA_STAGE(_index, "InitGenericParamConstraintDefs", InitGenericParamConstraintDefs());
@@ -344,15 +358,22 @@ namespace metadata
 		HC_METADATA_STAGE(_index, "InitModuleRefs", InitModuleRefs());
 		HC_METADATA_STAGE(_index, "InitImplMaps", InitImplMaps());
 		HC_METADATA_STAGE(_index, "InitClassLayouts0", InitClassLayouts0());
-		HC_METADATA_STAGE(_index, "InitHasFinalizers", InitHasFinalizers());
 		HC_METADATA_STAGE(_index, "InitTypeDefs_2", InitTypeDefs_2());
 		HC_METADATA_STAGE(_index, "InitClassLayouts", InitClassLayoutsLazy());
 		HC_METADATA_STAGE(_index, "InitInterfaces", InitInterfaces());
 		HC_METADATA_STAGE(_index, "InitClass", InitClass());
 		HC_METADATA_STAGE(_index, "InitVTables", InitVTables());
+		_runtimeMetadataStage = 2;
+	}
 
+	void InterpreterImage::FinishRuntimeMetadatas()
+	{
+		IL2CPP_ASSERT(_runtimeMetadataStage == 2);
+		// All batch parents now have method and parent metadata. Finalizer
+		// inheritance may cross image boundaries without depending on load order.
+		HC_METADATA_STAGE(_index, "InitHasFinalizers", InitHasFinalizers());
 		FreezeIl2CppTypeCache();
-
+		_runtimeMetadataStage = 3;
 	}
 
 #undef HC_METADATA_STAGE
@@ -372,6 +393,9 @@ namespace metadata
 			TbTypeDef data = _rawImage->ReadTypeDef(rowIndex);
 
 			cur = {};
+			cur.flags = data.flags;
+			cur.nameIndex = EncodeWithIndex(data.typeName);
+			cur.namespaceIndex = EncodeWithIndex(data.typeNamespace);
 
 			cur.genericContainerIndex = kGenericContainerIndexInvalid;
 			cur.declaringTypeIndex = kTypeDefinitionIndexInvalid;
@@ -543,42 +567,41 @@ namespace metadata
 		}
 	}
 
-	void InterpreterImage::ComputeHasFinalizer(Il2CppTypeDefinition* def, std::vector<bool>& computFlags)
+	void InterpreterImage::ComputeHasFinalizer(Il2CppTypeDefinition* def,
+		std::unordered_map<const Il2CppTypeDefinition*, uint8_t>& states)
 	{
-		if (DecodeImageIndex(def->byvalTypeIndex) != GetIndex())
+		if (!IsInterpreterType(def))
 		{
 			return;
 		}
-		uint32_t typeIndex = GetTypeRawIndex(def);
-		if (computFlags[typeIndex])
+		uint8_t& state = states[def];
+		if (state == 2)
 		{
 			return;
 		}
-		computFlags[typeIndex] = true;
-		if (def->bitfield & (1 << (il2cpp::vm::kBitHasFinalizer - 1)))
-		{
-			return;
-		}
+		if (state == 1) RaiseBadImageException("type parent hierarchy contains a cycle");
+		state = 1;
 		if (def->parentIndex != kInvalidIndex)
 		{
-			const Il2CppType* parentType = GetIl2CppTypeFromRawIndex(DecodeMetadataIndex(def->parentIndex));
+			const Il2CppType* parentType = il2cpp::vm::GlobalMetadata::GetIl2CppTypeFromIndex(def->parentIndex);
 			const Il2CppTypeDefinition* parentDef = metadata::GetUnderlyingTypeDefinition(parentType);
-			ComputeHasFinalizer(const_cast<Il2CppTypeDefinition*>(parentDef), computFlags);
+			ComputeHasFinalizer(const_cast<Il2CppTypeDefinition*>(parentDef), states);
 			if (parentDef->bitfield & (1 << (il2cpp::vm::kBitHasFinalizer - 1)))
 			{
 				def->bitfield |= (1 << (il2cpp::vm::kBitHasFinalizer - 1));
 			}
 		}
+		state = 2;
 	}
 
 	void InterpreterImage::InitHasFinalizers()
 	{
 		const Table& typeDefTb = _rawImage->GetTable(TableType::TYPEDEF);
-		std::vector<bool> computFlags(typeDefTb.rowNum, false);
+		std::unordered_map<const Il2CppTypeDefinition*, uint8_t> states;
 		for (uint32_t i = 0, n = typeDefTb.rowNum; i < n; i++)
 		{
 			Il2CppTypeDefinition& cur = _typesDefines[i];
-			ComputeHasFinalizer(&cur, computFlags);
+			ComputeHasFinalizer(&cur, states);
 		}
 	}
 
@@ -2881,6 +2904,8 @@ namespace metadata
 
 	Il2CppClass* InterpreterImage::GetTypeInfoFromTypeDefinitionRawIndex(uint32_t index)
 	{
+		if (_runtimeMetadataStage != 3)
+			RaiseExecutionEngineException("Class requested before image metadata initialization completed.");
 		IL2CPP_ASSERT(index < _classList.size());
 		Il2CppClass* klass = il2cpp::os::Atomic::LoadPointerAcquire(&_classList[index]);
 		if (klass)
