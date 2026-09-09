@@ -766,7 +766,11 @@ namespace metadata
 		if (type->type == IL2CPP_TYPE_GENERICINST)
 		{
 			const Il2CppType* currentDefinition = GetDheExecutionType(type->data.generic_class->type);
-			if (!currentDefinition) return nullptr;
+			// The generic definition may be unchanged while one of its value-type
+			// arguments moved to Current storage (for example GenericValue<Payload>).
+			// Keep the Base definition in that case and rebuild the instantiation
+			// with the remapped arguments so its field layout is recomputed.
+			if (!currentDefinition) currentDefinition = type->data.generic_class->type;
 			const Il2CppGenericInst* baseInst = type->data.generic_class->context.class_inst;
 			std::vector<const Il2CppType*> mappedArgs(baseInst->type_argc);
 			bool argumentsChanged = false;
@@ -780,6 +784,8 @@ namespace metadata
 			const Il2CppGenericInst* currentInst = argumentsChanged
 				? il2cpp::vm::MetadataCache::GetGenericInst(mappedArgs.data(), baseInst->type_argc)
 				: baseInst;
+			if (!argumentsChanged && currentDefinition == type->data.generic_class->type)
+				return nullptr;
 			Il2CppGenericClass* currentGeneric = il2cpp::metadata::GenericMetadata::GetGenericClass(
 				currentDefinition, currentInst);
 			return &il2cpp::vm::GenericClass::GetClass(currentGeneric)->byval_arg;
