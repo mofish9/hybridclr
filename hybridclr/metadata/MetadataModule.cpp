@@ -19,7 +19,7 @@
 #include "vm/Method.h"
 #include "vm/GenericClass.h"
 #include "metadata/GenericMetadata.h"
-#include "metadata/Il2CppTypeEqualityComparer.h"
+#include "metadata/Il2CppTypeCompare.h"
 #include "gc/GarbageCollector.h"
 #include "gc/GCHandle.h"
 #include "gc/WriteBarrier.h"
@@ -419,7 +419,8 @@ namespace metadata
         const Il2CppType* mapped = image ? image->GetDheExecutionType(&before->byval_arg) : nullptr;
         if (mapped && il2cpp::vm::Class::FromIl2CppType(mapped) == current)
         {
-            fields = image;
+            fields = before->generic_class && current->generic_class &&
+                before->generic_class->type == current->generic_class->type ? nullptr : image;
             return true;
         }
         // A frozen generic definition (e.g. Nullable<T>) can keep its identity
