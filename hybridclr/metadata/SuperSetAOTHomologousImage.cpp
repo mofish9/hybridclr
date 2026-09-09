@@ -650,6 +650,11 @@ namespace metadata
 	{
 		if (!_isDheImage || !_interpreterFallbackImage || !type)
 			return nullptr;
+		// Frozen sources preserve their declarations. During batch preparation
+		// they are already resolvable, but an unrelated interface or Object must
+		// not acquire a Current metadata view merely because Nullable is adapted.
+		if (_currentImagePlan.source.kind == dhe::CurrentImageSourceKind::FrozenBaseAot)
+			return GetDheExecutionType(type);
 		if (type->type == IL2CPP_TYPE_GENERICINST)
 		{
 			const Il2CppType* definition = GetDheCurrentType(type->data.generic_class->type);
