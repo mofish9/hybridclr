@@ -8,6 +8,7 @@
 #define HYBRIDCLR_DHE_HAS_CURRENT_EXECUTION 1
 #define HYBRIDCLR_DHE_HAS_CURRENT_IMAGE_PLAN 1
 #define HYBRIDCLR_DHE_HAS_FROZEN_AOT_SOURCE 1
+#define HYBRIDCLR_DHE_HAS_FROZEN_GENERIC_CONTEXT 1
 
 struct Il2CppAssembly;
 struct Il2CppClass;
@@ -91,10 +92,14 @@ namespace dhe
         // Sorted Base tokens, including the generated identity type. Its
         // archived initializer is deliberately normalized by the Base workflow.
         std::vector<uint32_t> excludedBaseTypeTokens;
+        // Frozen methods selected solely for their concrete generic arguments.
+        // An unaffected closed context must keep its Base AOT entry.
+        std::vector<uint32_t> genericContextMethodTokens;
         bool operator==(const CurrentImageSource& other) const
         {
             return kind == other.kind && baseSourceHash == other.baseSourceHash &&
-                excludedBaseTypeTokens == other.excludedBaseTypeTokens;
+                excludedBaseTypeTokens == other.excludedBaseTypeTokens &&
+                genericContextMethodTokens == other.genericContextMethodTokens;
         }
     };
 

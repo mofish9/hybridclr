@@ -225,7 +225,7 @@ namespace hybridclr
 		// coverage; the native side checks token, identity and member bindings.
 		int32_t LoadDhePayloadsWithExecutionPlanAndSources(Il2CppArray* dllBytes, Il2CppArray* baseMvBytes,
 			Il2CppArray* currentMvBytes, Il2CppArray* typeSelections, Il2CppArray* methodSelections,
-			Il2CppArray* sourceKinds, Il2CppArray* excludedTypeSelections)
+			Il2CppArray* sourceKinds, Il2CppArray* excludedTypeSelections, Il2CppArray* genericContextSelections = nullptr)
 		{
 			if (!dllBytes || !baseMvBytes || !currentMvBytes || !typeSelections || !methodSelections)
 				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
@@ -237,7 +237,8 @@ namespace hybridclr
 				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
 			if ((sourceKinds == nullptr) != (excludedTypeSelections == nullptr) ||
 				(sourceKinds && il2cpp::vm::Array::GetLength(sourceKinds) != count) ||
-				(excludedTypeSelections && il2cpp::vm::Array::GetLength(excludedTypeSelections) != count))
+				(excludedTypeSelections && il2cpp::vm::Array::GetLength(excludedTypeSelections) != count) ||
+				(genericContextSelections && (!sourceKinds || il2cpp::vm::Array::GetLength(genericContextSelections) != count)))
 				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
 			auto elements = [](Il2CppArray* array) {
 				return reinterpret_cast<Il2CppArray**>(il2cpp::vm::Array::GetFirstElementAddress(array));
@@ -256,6 +257,13 @@ namespace hybridclr
 				const uint32_t* methodTokens = reinterpret_cast<const uint32_t*>(il2cpp::vm::Array::GetFirstElementAddress(methods));
 				auto plan = std::make_shared<dhe::CurrentImagePlan>();
 				dhe::CurrentImageSource source;
+				if (genericContextSelections)
+				{
+					Il2CppArray* conditional = elements(genericContextSelections)[index];
+					if (!conditional) return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
+					const uint32_t* values = reinterpret_cast<const uint32_t*>(il2cpp::vm::Array::GetFirstElementAddress(conditional));
+					source.genericContextMethodTokens.assign(values, values + il2cpp::vm::Array::GetLength(conditional));
+				}
 				if (sourceKinds)
 				{
 					const int32_t* kinds = reinterpret_cast<const int32_t*>(il2cpp::vm::Array::GetFirstElementAddress(sourceKinds));
@@ -599,6 +607,7 @@ namespace hybridclr
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssembliesWithMetaVersion(System.Byte[][],System.Byte[][],System.Byte[][])", (Il2CppMethodPointer)LoadDifferentialHybridAssembliesWithMetaVersion);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlan(System.Byte[][],System.Byte[][],System.Byte[][],System.UInt32[][],System.UInt32[][])", (Il2CppMethodPointer)LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlan);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlanAndSources(System.Byte[][],System.Byte[][],System.Byte[][],System.UInt32[][],System.UInt32[][],System.Int32[],System.UInt32[][])", (Il2CppMethodPointer)LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlanAndSources);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssemblySources(System.Byte[][],System.Byte[][],System.Byte[][],System.UInt32[][],System.UInt32[][],System.Int32[],System.UInt32[][],System.UInt32[][])", (Il2CppMethodPointer)LoadDifferentialHybridAssemblySources);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::IsDifferentialMethodChanged(System.Reflection.MethodInfo)", (Il2CppMethodPointer)IsDifferentialMethodChanged);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetDifferentialInterpreterEntryCount()", (Il2CppMethodPointer)GetDifferentialInterpreterEntryCount);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetDifferentialAotBridgeCallCount()", (Il2CppMethodPointer)GetDifferentialAotBridgeCallCount);
@@ -714,6 +723,17 @@ namespace hybridclr
 	{
 		return LoadDhePayloadsWithExecutionPlanAndSources(dllBytes, baseMvBytes, currentMvBytes,
 			typeSelections, methodSelections, sourceKinds, excludedTypeSelections);
+	}
+
+	int32_t RuntimeApi::LoadDifferentialHybridAssemblySources(
+		Il2CppArray* dllBytes, Il2CppArray* baseMvBytes, Il2CppArray* currentMvBytes,
+		Il2CppArray* typeSelections, Il2CppArray* methodSelections, Il2CppArray* sourceKinds,
+		Il2CppArray* excludedTypeSelections, Il2CppArray* genericContextSelections)
+	{
+		if (!sourceKinds || !excludedTypeSelections || !genericContextSelections)
+			return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
+		return LoadDhePayloadsWithExecutionPlanAndSources(dllBytes, baseMvBytes, currentMvBytes,
+			typeSelections, methodSelections, sourceKinds, excludedTypeSelections, genericContextSelections);
 	}
 
 	int32_t RuntimeApi::IsDifferentialMethodChanged(Il2CppReflectionMethod* method)

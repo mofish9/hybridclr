@@ -470,6 +470,9 @@ bool RegisterLogicalMethodMapping(const Il2CppAssembly* assembly,
     return true;
 }
 
+static bool IsUnaffectedFrozenGenericInstance(const MethodInfo* method,
+    const DHEAssemblyState& state, uint32_t token);
+
 bool IsChangedMethod(const MethodInfo* method)
 {
     if (!method || !method->klass || !method->klass->image || !method->klass->image->assembly)
@@ -492,6 +495,7 @@ bool IsChangedMethod(const MethodInfo* method)
         return false;
     }
     const uint32_t token = identity->second;
+    if (IsUnaffectedFrozenGenericInstance(method, state->second, token)) return false;
     return state->second.baseMethods.find(token) != state->second.baseMethods.end() &&
         state->second.changedMethodTokens.find(token) !=
             state->second.changedMethodTokens.end();
@@ -555,6 +559,7 @@ bool CanEnterWithBaseAbi(const MethodInfo* method)
     auto identity = state->second.methodBaseTokens.find(definition);
     if (identity == state->second.methodBaseTokens.end())
         return true;
+    if (IsUnaffectedFrozenGenericInstance(method, state->second, identity->second)) return true;
     auto native = state->second.baseMethods.find(identity->second);
     // Current execution metadata already describes a Current frame.
     return native == state->second.baseMethods.end() || native->second != definition ||
@@ -643,7 +648,7 @@ static const Il2CppType* RemapDheGenericArgument(const Il2CppType* type,
         return nullptr;
     }
 
-    if (preferredAssembly)
+    if (preferredAssembly && IsDheAssembly(preferredAssembly))
     {
         metadata::AOTHomologousImage* preferred =
             metadata::AOTHomologousImage::FindImageByAssembly(preferredAssembly);
@@ -660,6 +665,7 @@ static const Il2CppType* RemapDheGenericArgument(const Il2CppType* type,
         return nullptr;
     }
 
+    if (!IsDheAssembly(klass->image->assembly)) return nullptr;
     metadata::AOTHomologousImage* image =
         metadata::AOTHomologousImage::FindImageByAssembly(klass->image->assembly);
     return image ? image->GetDheExecutionType(type) : nullptr;
@@ -699,6 +705,66 @@ static Il2CppGenericContext RemapDheGenericContext(const Il2CppGenericContext& b
     return currentContext;
 }
 
+static bool GenericArgumentNeedsCurrent(const Il2CppType* type, const Il2CppAssembly* assembly)
+{
+    if (!type) return true; // Unknown contexts cannot opt into the native path.
+    switch (type->type)
+    {
+    case IL2CPP_TYPE_BOOLEAN: case IL2CPP_TYPE_CHAR:
+    case IL2CPP_TYPE_I1: case IL2CPP_TYPE_U1: case IL2CPP_TYPE_I2: case IL2CPP_TYPE_U2:
+    case IL2CPP_TYPE_I4: case IL2CPP_TYPE_U4: case IL2CPP_TYPE_I8: case IL2CPP_TYPE_U8:
+    case IL2CPP_TYPE_R4: case IL2CPP_TYPE_R8: case IL2CPP_TYPE_I: case IL2CPP_TYPE_U:
+    case IL2CPP_TYPE_STRING: case IL2CPP_TYPE_OBJECT:
+        return false;
+    case IL2CPP_TYPE_SZARRAY: case IL2CPP_TYPE_PTR:
+        return GenericArgumentNeedsCurrent(type->data.type, assembly);
+    case IL2CPP_TYPE_ARRAY:
+        return GenericArgumentNeedsCurrent(type->data.array->etype, assembly);
+    case IL2CPP_TYPE_GENERICINST:
+    {
+        const Il2CppGenericClass* generic = type->data.generic_class;
+        if (GenericArgumentNeedsCurrent(generic->type, assembly)) return true;
+        const Il2CppGenericInst* inst = generic->context.class_inst;
+        if (!inst) return true;
+        for (uint32_t index = 0; index < inst->type_argc; ++index)
+            if (GenericArgumentNeedsCurrent(inst->type_argv[index], assembly)) return true;
+        return false;
+    }
+    case IL2CPP_TYPE_CLASS: case IL2CPP_TYPE_VALUETYPE:
+    {
+        Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(type);
+        // An interpreter argument already has its Current identity; remapping
+        // alone would return the same pointer and miss this dependency.
+        if (!klass || metadata::IsInterpreterImage(klass->image)) return true;
+        const Il2CppType* current = RemapDheGenericArgument(type, assembly);
+        return current && current != type;
+    }
+    default:
+        return true;
+    }
+}
+
+static bool IsUnaffectedFrozenGenericInstance(const MethodInfo* method,
+    const DHEAssemblyState& state, uint32_t token)
+{
+    if (state.source.kind != CurrentImageSourceKind::FrozenBaseAot ||
+        !std::binary_search(state.source.genericContextMethodTokens.begin(),
+            state.source.genericContextMethodTokens.end(), token) ||
+        !method->is_inflated || !method->genericMethod)
+        return false;
+    auto base = state.baseMethods.find(token);
+    if (base == state.baseMethods.end() || base->second != method->genericMethod->methodDefinition)
+        return false; // Physical Current methods remain Current.
+    const Il2CppGenericContext& context = method->genericMethod->context;
+    if (!context.class_inst && !context.method_inst) return false;
+    for (const Il2CppGenericInst* inst : { context.class_inst, context.method_inst })
+        if (inst)
+            for (uint32_t index = 0; index < inst->type_argc; ++index)
+                if (GenericArgumentNeedsCurrent(inst->type_argv[index], method->klass->image->assembly))
+                    return false;
+    return true;
+}
+
 const MethodInfo* ResolveInterpreterMethod(const MethodInfo* baseMethod)
 {
     if (!baseMethod || !baseMethod->klass || !baseMethod->klass->image ||
@@ -722,6 +788,7 @@ const MethodInfo* ResolveInterpreterMethod(const MethodInfo* baseMethod)
 		return baseMethod;
 	}
 	const uint32_t token = identity->second;
+	if (IsUnaffectedFrozenGenericInstance(baseMethod, state->second, token)) return baseMethod;
 	if (state->second.changedMethodTokens.find(token) == state->second.changedMethodTokens.end())
 	{
 		return baseMethod;
@@ -800,6 +867,7 @@ const MethodInfo* ResolveCurrentExecutionMethod(const MethodInfo* method)
         ? method->genericMethod->methodDefinition : method;
     auto identity = state->second.methodBaseTokens.find(definition);
     if (identity == state->second.methodBaseTokens.end()) return method;
+    if (IsUnaffectedFrozenGenericInstance(method, state->second, identity->second)) return method;
     auto base = state->second.baseMethods.find(identity->second);
     auto current = state->second.resolvedMethods.find(identity->second);
     if (base == state->second.baseMethods.end() || base->second != definition ||
@@ -939,7 +1007,8 @@ bool ValidateCurrentImageSource(const CurrentImageSource& source,
     const Sha256Digest& baseHash, const Sha256Digest& currentHash)
 {
     if (source.kind == CurrentImageSourceKind::MutableHotfix)
-        return source.baseSourceHash == Sha256Digest{} && source.excludedBaseTypeTokens.empty();
+        return source.baseSourceHash == Sha256Digest{} && source.excludedBaseTypeTokens.empty() &&
+            source.genericContextMethodTokens.empty();
     if (source.kind != CurrentImageSourceKind::FrozenBaseAot ||
         source.baseSourceHash == Sha256Digest{} || source.baseSourceHash != baseHash || baseHash != currentHash)
         return false;
@@ -947,6 +1016,12 @@ bool ValidateCurrentImageSource(const CurrentImageSource& source,
     for (uint32_t token : source.excludedBaseTypeTokens)
     {
         if ((token >> 24) != 2 || (token & 0xffffffu) <= 1 || token <= previous) return false;
+        previous = token;
+    }
+    previous = 0;
+    for (uint32_t token : source.genericContextMethodTokens)
+    {
+        if ((token >> 24) != 6 || (token & 0xffffffu) == 0 || token <= previous) return false;
         previous = token;
     }
     return true;
@@ -1048,6 +1123,12 @@ bool BuildCurrentImagePlan(const MetaVersionData& baseMetaVersion,
         auto entry = currentMethods.find(token);
         if (entry == currentMethods.end() || !selectedMethods.insert(token).second)
             return false;
+    }
+    for (uint32_t token : source.genericContextMethodTokens)
+    {
+        auto method = currentMethods.find(token);
+        if (!selectedMethods.count(token) || method == currentMethods.end() ||
+            selectedTypes.count(DigestKey(method->second->declaringTypeStableId))) return false;
     }
     for (const MetaVersionMethod& method : currentMetaVersion.methods)
     {
@@ -1248,6 +1329,11 @@ bool PrepareAndRegisterMetaVersions(
             const MethodInfo* currentExecution = execution == currentExecutions.end() ? nullptr : execution->second;
             if (currentExecution && (!currentMethodVersion || !MethodCanHaveAotEntry(baseMethodVersion) ||
                 !MethodCanHaveAotEntry(*currentMethodVersion) || currentExecution->token != currentMethodVersion->token))
+                return false;
+            const bool conditional = std::binary_search(registration.source.genericContextMethodTokens.begin(),
+                registration.source.genericContextMethodTokens.end(), baseMethodVersion.token);
+            if (conditional && (!currentExecution ||
+                (!currentExecution->is_generic && !currentExecution->klass->genericContainerHandle)))
                 return false;
             const bool changed = !currentMethodVersion ||
                 baseMethodVersion.version != currentMethodVersion->version || currentExecution;
