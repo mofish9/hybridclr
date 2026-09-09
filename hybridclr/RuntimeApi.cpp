@@ -241,19 +241,6 @@ namespace hybridclr
 					return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
 				payload.executionPlan = plan;
 			}
-			// A byte-identical Base/Current pair with an empty selection is a
-			// genuine no-op update. Do not register a supplemental image for it:
-			// loading a duplicate metadata image would make reflection handles from
-			// the embedded Base assembly incompatible with Base value instances.
-			bool noOp = true;
-			for (const DheLoadPayload& payload : payloads)
-			{
-				noOp = noOp && payload.baseMetaVersion.assemblyHash == payload.currentMetaVersion.assemblyHash &&
-					payload.executionPlan && payload.executionPlan->types.empty() &&
-					payload.executionPlan->methods.empty();
-			}
-			if (noOp)
-				return (int32_t)metadata::LoadImageErrorCode::OK;
 			return LoadDhePayloads(payloads);
 		}
 
