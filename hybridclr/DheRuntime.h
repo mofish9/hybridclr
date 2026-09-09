@@ -173,6 +173,7 @@ namespace dhe
         const std::vector<MetaVersionRegistration>& registrations);
 
     bool IsDheAssembly(const Il2CppAssembly* assembly);
+    bool IsMutableDheAssembly(const Il2CppAssembly* assembly);
     bool IsFrozenAotExecutionSource(const Il2CppAssembly* assembly);
     bool TryGetVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot,
         const VirtualInvokeData*& result);

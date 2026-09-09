@@ -436,6 +436,14 @@ bool IsDheAssembly(const Il2CppAssembly* assembly)
     return state->assemblyStates.find(assembly) != state->assemblyStates.end();
 }
 
+bool IsMutableDheAssembly(const Il2CppAssembly* assembly)
+{
+    const PublishedState* state = s_publishedState.load(std::memory_order_acquire);
+    auto entry = state->assemblyStates.find(assembly);
+    return entry != state->assemblyStates.end() &&
+        entry->second.source.kind == CurrentImageSourceKind::MutableHotfix;
+}
+
 bool IsFrozenAotExecutionSource(const Il2CppAssembly* assembly)
 {
     const PublishedState* state = s_publishedState.load(std::memory_order_acquire);

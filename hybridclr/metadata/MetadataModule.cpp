@@ -442,7 +442,9 @@ namespace metadata
 		if (!klass || klass->is_import_or_windows_runtime)
 			return false;
 		for (const Il2CppClass* owner = klass; owner; owner = owner->parent)
-			if (owner->image && dhe::IsDheAssembly(owner->image->assembly))
+			// Frozen source registration does not change virtual declarations.
+			// In particular, adapting Nullable must not redirect every Object slot.
+			if (owner->image && dhe::IsMutableDheAssembly(owner->image->assembly))
 				return true; // acquire the completed registration before accessing Current metadata
 		return false;
 	}
@@ -460,7 +462,10 @@ namespace metadata
 		if (!klass)
 			return nullptr;
 		AOTHomologousImage* image = GetDheSupplementalImage(klass->image);
-		const Il2CppType* type = image ? image->GetDheCurrentType(&klass->byval_arg) : nullptr;
+		const Il2CppType* type = image
+			? (dhe::IsFrozenAotExecutionSource(klass->image->assembly)
+				? image->GetDheExecutionType(&klass->byval_arg)
+				: image->GetDheCurrentType(&klass->byval_arg)) : nullptr;
 		return type ? il2cpp::vm::Class::FromIl2CppType(type) : klass;
 	}
 
@@ -569,7 +574,7 @@ namespace metadata
 				logical->slot < receiver->vtable_count)
 			{
 				const MethodInfo* nativeTarget = receiver->vtable[logical->slot].method;
-				if (nativeTarget && !dhe::IsDheAssembly(nativeTarget->klass->image->assembly))
+				if (nativeTarget && !dhe::IsMutableDheAssembly(nativeTarget->klass->image->assembly))
 					return GetDheVirtualEntry(nativeTarget);
 			}
 			if (!receiver->parent)
@@ -690,7 +695,7 @@ namespace metadata
 		const Il2CppClass* interfaceType, uint16_t logicalSlot, const VirtualInvokeData*& result)
 	{
 		if (!klass || !interfaceType || !interfaceType->image || klass->is_import_or_windows_runtime ||
-			!dhe::IsDheAssembly(interfaceType->image->assembly))
+			!dhe::IsMutableDheAssembly(interfaceType->image->assembly))
 			return false;
 		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
 		AOTHomologousImage* interfaceImage = GetDheSupplementalImage(interfaceType->image);
