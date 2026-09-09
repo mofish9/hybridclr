@@ -13,6 +13,7 @@ namespace hybridclr
 		static int32_t LoadMetadataForAOTAssembly(Il2CppArray* dllData, int32_t mode);
 		static int32_t LoadDifferentialHybridAssemblyWithMetaVersion(Il2CppArray* dllData, Il2CppArray* baseMvData, Il2CppArray* currentMvData);
 		static int32_t LoadDifferentialHybridAssembliesWithMetaVersion(Il2CppArray* dllData, Il2CppArray* baseMvData, Il2CppArray* currentMvData);
+		static int32_t LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlan(Il2CppArray* dllData, Il2CppArray* baseMvData, Il2CppArray* currentMvData, Il2CppArray* typeSelections, Il2CppArray* methodSelections);
 		static int32_t IsDifferentialMethodChanged(Il2CppReflectionMethod* method);
 		static int32_t GetDifferentialInterpreterEntryCount();
 		static int32_t GetDifferentialAotBridgeCallCount();

@@ -205,10 +205,10 @@ namespace hybridclr
 			return (int32_t)metadata::LoadImageErrorCode::OK;
 		}
 
-		// Research-only managed entry, owned by the lab fixture rather than the
-		// Unity package. Its explicit selections do not bypass the public build
-		// workflow's layout/ABI rejection or advertise a supported capability.
-		int32_t LoadDheCurrentStorageProbe(Il2CppArray* dllBytes, Il2CppArray* baseMvBytes,
+		// Parse every MV and selection before starting the image transaction.
+		// The resource compiler remains responsible for complete layout/ABI
+		// coverage; the native side checks token, identity and member bindings.
+		int32_t LoadDhePayloadsWithExecutionPlan(Il2CppArray* dllBytes, Il2CppArray* baseMvBytes,
 			Il2CppArray* currentMvBytes, Il2CppArray* typeSelections, Il2CppArray* methodSelections)
 		{
 			if (!dllBytes || !baseMvBytes || !currentMvBytes || !typeSelections || !methodSelections)
@@ -549,11 +549,12 @@ namespace hybridclr
 
 	void RuntimeApi::RegisterInternalCalls()
 	{
-		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.CurrentStorageRuntime::Load(System.Byte[][],System.Byte[][],System.Byte[][],System.UInt32[][],System.UInt32[][])", (Il2CppMethodPointer)LoadDheCurrentStorageProbe);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.CurrentStorageRuntime::Load(System.Byte[][],System.Byte[][],System.Byte[][],System.UInt32[][],System.UInt32[][])", (Il2CppMethodPointer)LoadDhePayloadsWithExecutionPlan);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.CurrentStorageRuntime::Resolve(System.Reflection.MethodInfo)", (Il2CppMethodPointer)ResolveDheCurrentStorageProbe);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadMetadataForAOTAssembly(System.Byte[],HybridCLR.HomologousImageMode)", (Il2CppMethodPointer)LoadMetadataForAOTAssembly);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssemblyWithMetaVersion(System.Byte[],System.Byte[],System.Byte[])", (Il2CppMethodPointer)LoadDifferentialHybridAssemblyWithMetaVersion);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssembliesWithMetaVersion(System.Byte[][],System.Byte[][],System.Byte[][])", (Il2CppMethodPointer)LoadDifferentialHybridAssembliesWithMetaVersion);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlan(System.Byte[][],System.Byte[][],System.Byte[][],System.UInt32[][],System.UInt32[][])", (Il2CppMethodPointer)LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlan);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::IsDifferentialMethodChanged(System.Reflection.MethodInfo)", (Il2CppMethodPointer)IsDifferentialMethodChanged);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetDifferentialInterpreterEntryCount()", (Il2CppMethodPointer)GetDifferentialInterpreterEntryCount);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetDifferentialAotBridgeCallCount()", (Il2CppMethodPointer)GetDifferentialAotBridgeCallCount);
@@ -652,6 +653,14 @@ namespace hybridclr
 			}
 		}
 		return LoadDhePayloads(payloads);
+	}
+
+	int32_t RuntimeApi::LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlan(
+		Il2CppArray* dllBytes, Il2CppArray* baseMvBytes, Il2CppArray* currentMvBytes,
+		Il2CppArray* typeSelections, Il2CppArray* methodSelections)
+	{
+		return LoadDhePayloadsWithExecutionPlan(dllBytes, baseMvBytes, currentMvBytes,
+			typeSelections, methodSelections);
 	}
 
 	int32_t RuntimeApi::IsDifferentialMethodChanged(Il2CppReflectionMethod* method)
