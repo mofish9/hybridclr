@@ -263,8 +263,24 @@ namespace metadata
             types[i] = ReadType(reader, klassGenericContainer, methodGenericContainer);
         }
         const Il2CppGenericInst* genericInst = il2cpp::vm::MetadataCache::GetGenericInst(types, argc);
+        Il2CppGenericClass* genericClass = il2cpp::metadata::GenericMetadata::GetGenericClass(genericBase, genericInst);
 
-        return il2cpp::metadata::GenericMetadata::GetGenericClass(genericBase, genericInst);
+        // Generic signatures can be decoded from an AOT image before the
+        // enclosing method is inflated. If one argument is a DHE Current
+        // value type, remap the complete instantiation now so field offsets
+        // and by-value ABI use the Current generic class consistently.
+        const Il2CppType* instantiatedType = &il2cpp::vm::GenericClass::GetClass(genericClass)->byval_arg;
+        Il2CppClass* owner = il2cpp::vm::Class::FromIl2CppType(instantiatedType);
+        if (owner && owner->image && owner->image->assembly)
+        {
+            AOTHomologousImage* homologous = AOTHomologousImage::FindImageByAssembly(owner->image->assembly);
+            if (homologous)
+            {
+                if (const Il2CppType* current = homologous->GetDheExecutionType(instantiatedType))
+                    return current->data.generic_class;
+            }
+        }
+        return genericClass;
     }
 
     const Il2CppType* Image::ReadType(BlobReader& reader, const Il2CppGenericContainer* klassGenericContainer, const Il2CppGenericContainer* methodGenericContainer)
