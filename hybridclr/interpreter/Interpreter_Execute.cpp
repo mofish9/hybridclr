@@ -777,6 +777,7 @@ namespace interpreter
 
 	inline void HiUnboxAny2StackObject(Il2CppObject* obj, Il2CppClass* klass, void* data)
 	{
+		if (MetadataModule::TryCopyDheBoxedValueToCurrent(obj, klass, data)) return;
 		if (il2cpp::vm::Class::IsNullable(klass))
 		{
 #if HYBRIDCLR_UNITY_2021_OR_NEW

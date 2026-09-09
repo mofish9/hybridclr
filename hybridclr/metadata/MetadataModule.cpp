@@ -19,6 +19,7 @@
 #include "vm/Method.h"
 #include "vm/GenericClass.h"
 #include "metadata/GenericMetadata.h"
+#include "metadata/Il2CppTypeEqualityComparer.h"
 #include "gc/GarbageCollector.h"
 #include "gc/GCHandle.h"
 #include "gc/WriteBarrier.h"
@@ -406,6 +407,101 @@ namespace metadata
         }
         AOTHomologousImage* homologous = AOTHomologousImage::FindImageByAssembly(image->assembly);
         return homologous && homologous->GetTargetAssembly()->image == image ? homologous : nullptr;
+    }
+
+    static bool IsDheValueCopyPair(Il2CppClass* before, Il2CppClass* current,
+        AOTHomologousImage*& fields)
+    {
+        fields = nullptr;
+        if (before == current) return true;
+        if (!before || !current || IsInterpreterImage(before->image)) return false;
+        AOTHomologousImage* image = GetDheSupplementalImage(before->image);
+        const Il2CppType* mapped = image ? image->GetDheExecutionType(&before->byval_arg) : nullptr;
+        if (mapped && il2cpp::vm::Class::FromIl2CppType(mapped) == current)
+        {
+            fields = image;
+            return true;
+        }
+        // A frozen generic definition (e.g. Nullable<T>) can keep its identity
+        // while a selected value argument produces a different closed layout.
+        if (!before->generic_class || !current->generic_class ||
+            before->generic_class->type != current->generic_class->type) return false;
+        const Il2CppGenericInst* oldArgs = before->generic_class->context.class_inst;
+        const Il2CppGenericInst* newArgs = current->generic_class->context.class_inst;
+        if (!oldArgs || !newArgs || oldArgs->type_argc != newArgs->type_argc) return false;
+        for (uint32_t index = 0; index < oldArgs->type_argc; ++index)
+        {
+            AOTHomologousImage* unused;
+            if (!IsDheValueCopyPair(il2cpp::vm::Class::FromIl2CppType(oldArgs->type_argv[index]),
+                il2cpp::vm::Class::FromIl2CppType(newArgs->type_argv[index]), unused)) return false;
+        }
+        return true; // Shared definition: field tokens themselves are stable.
+    }
+
+    static bool CopyDheValueData(Il2CppClass* before, const uint8_t* source,
+        Il2CppClass* current, uint8_t* destination)
+    {
+        if (!before->byval_arg.valuetype || !current->byval_arg.valuetype) return false;
+        AOTHomologousImage* fields;
+        if (!IsDheValueCopyPair(before, current, fields)) return false;
+        il2cpp::vm::Class::Init(before);
+        il2cpp::vm::Class::Init(current);
+        const uint32_t oldSize = il2cpp::vm::Class::GetValueSize(before, nullptr);
+        const uint32_t newSize = il2cpp::vm::Class::GetValueSize(current, nullptr);
+        if (before == current)
+        {
+            std::memmove(destination, source, newSize);
+            return true;
+        }
+        std::memset(destination, 0, newSize);
+        for (uint16_t index = 0; index < current->field_count; ++index)
+        {
+            const FieldInfo& field = current->fields[index];
+            if (field.type->attrs & FIELD_ATTRIBUTE_STATIC) continue;
+            uint32_t oldToken = fields ? fields->GetBaseFieldTokenForCurrentStorage(field.token) : field.token;
+            if (!oldToken) continue; // Added or retyped fields have default values.
+            const FieldInfo* oldField = nullptr;
+            for (uint16_t oldIndex = 0; oldIndex < before->field_count; ++oldIndex)
+                if (before->fields[oldIndex].token == oldToken) { oldField = before->fields + oldIndex; break; }
+            if (!oldField || (oldField->type->attrs & FIELD_ATTRIBUTE_STATIC))
+                RaiseExecutionEngineException("DHE retained value field binding is missing.");
+            Il2CppClass* oldType = il2cpp::vm::Class::FromIl2CppType(oldField->type);
+            Il2CppClass* newType = il2cpp::vm::Class::FromIl2CppType(field.type);
+            il2cpp::vm::Class::Init(oldType);
+            il2cpp::vm::Class::Init(newType);
+            uint32_t oldWidth = oldType->byval_arg.valuetype ? il2cpp::vm::Class::GetValueSize(oldType, nullptr) : sizeof(void*);
+            uint32_t newWidth = newType->byval_arg.valuetype ? il2cpp::vm::Class::GetValueSize(newType, nullptr) : sizeof(void*);
+            if (oldField->offset < sizeof(Il2CppObject) || field.offset < sizeof(Il2CppObject) ||
+                static_cast<uint64_t>(oldField->offset) + oldWidth > sizeof(Il2CppObject) + oldSize ||
+                static_cast<uint64_t>(field.offset) + newWidth > sizeof(Il2CppObject) + newSize)
+                RaiseExecutionEngineException("DHE retained value field exceeds its physical storage.");
+            const uint8_t* oldData = source + oldField->offset - sizeof(Il2CppObject);
+            uint8_t* newData = destination + field.offset - sizeof(Il2CppObject);
+            if (il2cpp::metadata::Il2CppTypeEqualityComparer::AreEqual(oldField->type, field.type))
+            {
+                if (oldWidth != newWidth) RaiseExecutionEngineException("DHE retained field ABI identity changed size.");
+                std::memcpy(newData, oldData, newWidth);
+            }
+            else if (oldType->byval_arg.valuetype && newType->byval_arg.valuetype &&
+                CopyDheValueData(oldType, oldData, newType, newData))
+                continue;
+            else if (!oldType->byval_arg.valuetype && !newType->byval_arg.valuetype)
+            {
+                Il2CppObject* retained;
+                std::memcpy(&retained, oldData, sizeof(retained));
+                if (retained) RaiseExecutionEngineException("DHE retained value field requires object migration.");
+            }
+            else
+                RaiseExecutionEngineException("DHE retained value field requires object migration.");
+        }
+        return true;
+    }
+
+    bool MetadataModule::TryCopyDheBoxedValueToCurrent(Il2CppObject* value, Il2CppClass* currentClass, void* destination)
+    {
+        if (!value || !currentClass || value->klass == currentClass) return false;
+        return CopyDheValueData(value->klass, static_cast<const uint8_t*>(il2cpp::vm::Object::Unbox(value)),
+            currentClass, static_cast<uint8_t*>(destination));
     }
 
 	Il2CppClass* MetadataModule::GetDheClassInitializationOwner(Il2CppClass* klass)

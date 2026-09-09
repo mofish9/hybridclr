@@ -121,6 +121,8 @@ namespace metadata
 
 		// Execution storage is selective; GetDheCurrentType also serves virtual
 		// metadata views and must not be used to choose a physical representation.
+		virtual uint32_t GetBaseFieldTokenForCurrentStorage(uint32_t currentFieldToken) { return 0; }
+
 		virtual const Il2CppType* GetDheExecutionType(const Il2CppType* type)
 		{
 			return nullptr;

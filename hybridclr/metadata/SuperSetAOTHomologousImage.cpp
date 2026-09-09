@@ -513,6 +513,15 @@ namespace metadata
 				TbField data = _rawImage->ReadField(i);
 				if (_currentStorageTypeTokens.count(EncodeToken(TableType::TYPEDEF, nextTypeIndex)))
 				{
+					if ((data.flags & FIELD_ATTRIBUTE_STATIC) == 0 && type.aotTypeDef)
+					{
+						BlobReader reader = _rawImage->GetBlobReaderByRawIndex(data.signature);
+						FieldRefSig signature;
+						ReadFieldRefSig(reader, nullptr, signature);
+						const Il2CppFieldDefinition* baseField = FindMatchField(type.aotTypeDef, field,
+							_rawImage->GetStringFromRawIndex(data.name), signature.type);
+						if (baseField) _currentStorageBaseFieldTokens.emplace(EncodeToken(TableType::FIELD, i), baseField->token);
+					}
 					// Inline values and selected containing objects own real Current
 					// fields. A Base offset or a reference sidecar cannot represent a
 					// larger value, independent value copies or array element stride.

@@ -108,6 +108,11 @@ namespace hybridclr
 			size_t GetSupplementalMethodCount(Il2CppClass* klass) override;
 			const MethodInfo* ResolveLogicalMethod(const MethodInfo* method) override;
 			const Il2CppType* GetDheCurrentType(const Il2CppType* type) override;
+			uint32_t GetBaseFieldTokenForCurrentStorage(uint32_t currentFieldToken) override
+			{
+				auto field = _currentStorageBaseFieldTokens.find(currentFieldToken);
+				return field == _currentStorageBaseFieldTokens.end() ? 0 : field->second;
+			}
 			bool TryGetDheCurrentInterfaceMethod(const Il2CppClass* klass,
 				uint16_t logicalSlot, const MethodInfo*& method) override;
 			FieldInfo* GetFirstSupplementalField(Il2CppClass* klass, void** iter) override;
@@ -164,6 +169,7 @@ namespace hybridclr
 			bool _isDheImage = false;
 			dhe::CurrentImagePlan _currentImagePlan;
 			std::unordered_map<uint32_t, uint32_t> _currentStorageTypeTokens;
+			std::unordered_map<uint32_t, uint32_t> _currentStorageBaseFieldTokens;
 			std::vector<Il2CppClass*> _supplementalTypes;
 			std::unordered_map<Il2CppClass*, std::vector<Il2CppClass*>> _supplementalNestedTypes;
 			std::unordered_map<Il2CppClass*, std::vector<const MethodInfo*>> _supplementalMethods;

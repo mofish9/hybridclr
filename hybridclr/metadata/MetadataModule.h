@@ -15,6 +15,9 @@ namespace metadata
 	public:
 
 		static void Initialize();
+		// Copies a retained Base box into independent Current value storage.
+		// This never returns an alias into a differently sized Base allocation.
+		static bool TryCopyDheBoxedValueToCurrent(Il2CppObject* value, Il2CppClass* currentClass, void* destination);
 
 		static InterpreterImage* GetImage(uint32_t imageIndex)
 		{
