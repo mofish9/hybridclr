@@ -730,7 +730,7 @@ const MethodInfo* ResolveInterpreterMethod(const MethodInfo* baseMethod)
             baseMethod->genericMethod->context, baseMethod->klass->image->assembly, contextChanged);
         currentMethod = il2cpp::metadata::GenericMetadata::Inflate(currentMethod,
             contextChanged ? &currentContext : &baseMethod->genericMethod->context);
-        if (currentMethod && currentMethod->is_inflated)
+        if (currentMethod)
         {
             // Full generic sharing normally keeps the generated AOT entry even
             // when the definition is selected. A value-type layout change
@@ -795,7 +795,7 @@ const MethodInfo* ResolveCurrentExecutionMethod(const MethodInfo* method)
             method->genericMethod->context, method->klass->image->assembly, contextChanged);
         const MethodInfo* execution = il2cpp::metadata::GenericMetadata::Inflate(current->second,
             contextChanged ? &currentContext : &method->genericMethod->context);
-        if (execution && execution->is_inflated)
+        if (execution)
         {
             hybridclr::InitAndGetInterpreterDirectlyCallMethodPointer(execution);
             const_cast<MethodInfo*>(execution)->isInterpterImpl = true;
