@@ -791,7 +791,8 @@ namespace metadata
 			if (!currentElement)
 				return nullptr;
 			Il2CppType current = *type;
-			current.data.array = MetadataPool::GetPooledIl2CppArrayType(currentElement, type->data.array->rank);
+			current.data.array = const_cast<Il2CppArrayType*>(MetadataPool::GetPooledIl2CppArrayType(
+				currentElement, type->data.array->rank));
 			return MetadataPool::GetPooledIl2CppType(current);
 		}
 		// Generic instances carry a Base generic definition plus a class
