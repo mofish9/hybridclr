@@ -208,8 +208,9 @@ namespace hybridclr
 		// Parse every MV and selection before starting the image transaction.
 		// The resource compiler remains responsible for complete layout/ABI
 		// coverage; the native side checks token, identity and member bindings.
-		int32_t LoadDhePayloadsWithExecutionPlan(Il2CppArray* dllBytes, Il2CppArray* baseMvBytes,
-			Il2CppArray* currentMvBytes, Il2CppArray* typeSelections, Il2CppArray* methodSelections)
+		int32_t LoadDhePayloadsWithExecutionPlanAndSources(Il2CppArray* dllBytes, Il2CppArray* baseMvBytes,
+			Il2CppArray* currentMvBytes, Il2CppArray* typeSelections, Il2CppArray* methodSelections,
+			Il2CppArray* sourceKinds, Il2CppArray* excludedTypeSelections)
 		{
 			if (!dllBytes || !baseMvBytes || !currentMvBytes || !typeSelections || !methodSelections)
 				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
@@ -218,6 +219,10 @@ namespace hybridclr
 				il2cpp::vm::Array::GetLength(currentMvBytes) != count ||
 				il2cpp::vm::Array::GetLength(typeSelections) != count ||
 				il2cpp::vm::Array::GetLength(methodSelections) != count)
+				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
+			if ((sourceKinds == nullptr) != (excludedTypeSelections == nullptr) ||
+				(sourceKinds && il2cpp::vm::Array::GetLength(sourceKinds) != count) ||
+				(excludedTypeSelections && il2cpp::vm::Array::GetLength(excludedTypeSelections) != count))
 				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
 			auto elements = [](Il2CppArray* array) {
 				return reinterpret_cast<Il2CppArray**>(il2cpp::vm::Array::GetFirstElementAddress(array));
@@ -235,13 +240,36 @@ namespace hybridclr
 				const uint32_t* typeTokens = reinterpret_cast<const uint32_t*>(il2cpp::vm::Array::GetFirstElementAddress(types));
 				const uint32_t* methodTokens = reinterpret_cast<const uint32_t*>(il2cpp::vm::Array::GetFirstElementAddress(methods));
 				auto plan = std::make_shared<dhe::CurrentImagePlan>();
+				dhe::CurrentImageSource source;
+				if (sourceKinds)
+				{
+					const int32_t* kinds = reinterpret_cast<const int32_t*>(il2cpp::vm::Array::GetFirstElementAddress(sourceKinds));
+					if (kinds[index] != 0 && kinds[index] != 1)
+						return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
+					source.kind = static_cast<dhe::CurrentImageSourceKind>(kinds[index]);
+					if (source.kind == dhe::CurrentImageSourceKind::FrozenBaseAot)
+					{
+						source.baseSourceHash = payload.baseMetaVersion.assemblyHash;
+						Il2CppArray* excluded = reinterpret_cast<Il2CppArray**>(il2cpp::vm::Array::GetFirstElementAddress(excludedTypeSelections))[index];
+						if (!excluded) return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
+						const uint32_t* values = reinterpret_cast<const uint32_t*>(il2cpp::vm::Array::GetFirstElementAddress(excluded));
+						source.excludedBaseTypeTokens.assign(values, values + il2cpp::vm::Array::GetLength(excluded));
+					}
+				}
 				if (!dhe::BuildCurrentImagePlan(payload.baseMetaVersion, payload.currentMetaVersion,
 					std::vector<uint32_t>(typeTokens, typeTokens + il2cpp::vm::Array::GetLength(types)),
-					std::vector<uint32_t>(methodTokens, methodTokens + il2cpp::vm::Array::GetLength(methods)), *plan))
+					std::vector<uint32_t>(methodTokens, methodTokens + il2cpp::vm::Array::GetLength(methods)), *plan, source))
 					return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
 				payload.executionPlan = plan;
 			}
 			return LoadDhePayloads(payloads);
+		}
+
+		int32_t LoadDhePayloadsWithExecutionPlan(Il2CppArray* dllBytes, Il2CppArray* baseMvBytes,
+			Il2CppArray* currentMvBytes, Il2CppArray* typeSelections, Il2CppArray* methodSelections)
+		{
+			return LoadDhePayloadsWithExecutionPlanAndSources(dllBytes, baseMvBytes, currentMvBytes,
+				typeSelections, methodSelections, nullptr, nullptr);
 		}
 
 		Il2CppReflectionMethod* ResolveDheCurrentStorageProbe(Il2CppReflectionMethod* method)
@@ -555,6 +583,7 @@ namespace hybridclr
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssemblyWithMetaVersion(System.Byte[],System.Byte[],System.Byte[])", (Il2CppMethodPointer)LoadDifferentialHybridAssemblyWithMetaVersion);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssembliesWithMetaVersion(System.Byte[][],System.Byte[][],System.Byte[][])", (Il2CppMethodPointer)LoadDifferentialHybridAssembliesWithMetaVersion);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlan(System.Byte[][],System.Byte[][],System.Byte[][],System.UInt32[][],System.UInt32[][])", (Il2CppMethodPointer)LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlan);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlanAndSources(System.Byte[][],System.Byte[][],System.Byte[][],System.UInt32[][],System.UInt32[][],System.Int32[],System.UInt32[][])", (Il2CppMethodPointer)LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlanAndSources);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::IsDifferentialMethodChanged(System.Reflection.MethodInfo)", (Il2CppMethodPointer)IsDifferentialMethodChanged);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetDifferentialInterpreterEntryCount()", (Il2CppMethodPointer)GetDifferentialInterpreterEntryCount);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetDifferentialAotBridgeCallCount()", (Il2CppMethodPointer)GetDifferentialAotBridgeCallCount);
@@ -661,6 +690,15 @@ namespace hybridclr
 	{
 		return LoadDhePayloadsWithExecutionPlan(dllBytes, baseMvBytes, currentMvBytes,
 			typeSelections, methodSelections);
+	}
+
+	int32_t RuntimeApi::LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlanAndSources(
+		Il2CppArray* dllBytes, Il2CppArray* baseMvBytes, Il2CppArray* currentMvBytes,
+		Il2CppArray* typeSelections, Il2CppArray* methodSelections,
+		Il2CppArray* sourceKinds, Il2CppArray* excludedTypeSelections)
+	{
+		return LoadDhePayloadsWithExecutionPlanAndSources(dllBytes, baseMvBytes, currentMvBytes,
+			typeSelections, methodSelections, sourceKinds, excludedTypeSelections);
 	}
 
 	int32_t RuntimeApi::IsDifferentialMethodChanged(Il2CppReflectionMethod* method)
