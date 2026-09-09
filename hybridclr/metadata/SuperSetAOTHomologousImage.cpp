@@ -449,6 +449,37 @@ namespace metadata
 		IL2CPP_ASSERT(readParamNum == (int)paramCount);
 	}
 
+	void SuperSetAOTHomologousImage::SelectCurrentStaticValueField(SuperSetFieldDefDetail& field,
+		const SuperSetTypeIntermediateInfo& type, uint32_t rawTypeIndex, uint32_t rawFieldIndex)
+	{
+		if (!_isDheImage || !_interpreterFallbackImage || !HasCurrentImagePlan() || !field.aotFieldDef)
+			return;
+		const Il2CppType* logicalType = il2cpp::vm::GlobalMetadata::GetIl2CppTypeFromIndex(field.aotFieldDef->typeIndex);
+		if (!(logicalType->attrs & FIELD_ATTRIBUTE_STATIC) || (logicalType->attrs & FIELD_ATTRIBUTE_LITERAL))
+			return;
+		const Il2CppType* physicalOwner = _interpreterFallbackImage->GetRawTypeDefinitionType(rawTypeIndex);
+		const Il2CppFieldDefinition* physicalDefinition = _interpreterFallbackImage->GetFieldDefinitionFromRawIndex(rawFieldIndex);
+		FieldInfo* physical = const_cast<FieldInfo*>(GetFieldInfoFromFieldRef(*physicalOwner, physicalDefinition));
+		if (!physical->type->valuetype || physical->type->byref ||
+			IsMatchSigType(logicalType, physical->type, GetGenericContainerFromIl2CppType(type.aotIl2CppType), nullptr))
+			return;
+
+		// The Current allocation and GC descriptor own the entire evolved value.
+		// Other static fields continue to use their original Base addresses.
+		Il2CppClass* baseClass = il2cpp::vm::Class::FromIl2CppType(type.aotIl2CppType);
+		il2cpp::vm::Class::SetupFields(baseClass);
+		for (uint16_t index = 0; index < baseClass->field_count; ++index)
+			if (baseClass->fields[index].token == field.aotFieldDef->token)
+				_logicalFields[baseClass->fields + index] = physical;
+		_matchedAotFieldTokens.erase(field.aotFieldDef->token);
+		_supplementalFields[baseClass].push_back(physical);
+		_supplementalFieldLogicalParents[physical] = baseClass;
+		_logicalFields[physical] = physical;
+		field.declaringIl2CppType = physicalOwner;
+		field.aotFieldDef = physicalDefinition;
+		field.interpreterFallback = true;
+	}
+
 	void SuperSetAOTHomologousImage::InitFields(std::vector<SuperSetTypeIntermediateInfo>& typeIntermediateInfos)
 	{
 		const Table& fieldTb = _rawImage->GetTable(TableType::FIELD);
@@ -519,6 +550,7 @@ namespace metadata
 						_matchedAotFieldTokens.insert(field.aotFieldDef->token);
 						_customAttributeTokens[field.aotFieldDef->token] =
 							EncodeToken(TableType::FIELD, i);
+						SelectCurrentStaticValueField(field, type, nextTypeIndex - 1, i - 1);
 					}
 				}
 				if (!field.aotFieldDef && _interpreterFallbackImage)

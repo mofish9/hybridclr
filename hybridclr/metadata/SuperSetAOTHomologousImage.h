@@ -139,6 +139,8 @@ namespace hybridclr
 			void ReadMethodDefSig(BlobReader& reader, MethodRefSig& method);
 			void InitMethods(std::vector<SuperSetTypeIntermediateInfo>& typeIntermediateInfos);
 			void InitFields(std::vector<SuperSetTypeIntermediateInfo>& typeIntermediateInfos);
+			void SelectCurrentStaticValueField(SuperSetFieldDefDetail& field,
+				const SuperSetTypeIntermediateInfo& type, uint32_t rawTypeIndex, uint32_t rawFieldIndex);
 			void InitPropertiesAndEvents(
 				std::vector<SuperSetTypeIntermediateInfo>& typeIntermediateInfos);
 			const MethodInfo* GetLogicalMethod(const MethodInfo* currentMethod);
