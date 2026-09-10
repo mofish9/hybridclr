@@ -1275,7 +1275,15 @@ static bool HasCompatibleScalarBaseFrame(const MethodInfo* baseMethod, const Met
             if (owner->generic_class || owner->genericContainerHandle)
                 return false;
             metadata::AOTHomologousImage* image = metadata::AOTHomologousImage::FindImageByAssembly(owner->image->assembly);
-            if (owner == baseMethod->klass && !image) return false;
+            if (owner == baseMethod->klass)
+            {
+                const Il2CppType* declaration = image ? image->GetDheCurrentType(&owner->byval_arg) : nullptr;
+                // Require the staged declaration that actually owns this body.
+                // An absent mapping cannot establish an unchanged receiver ABI.
+                if (!declaration || declaration->type != currentMethod->klass->byval_arg.type ||
+                    declaration->data.typeHandle != currentMethod->klass->byval_arg.data.typeHandle)
+                    return false;
+            }
             const Il2CppType* selected = image ? image->GetDheExecutionType(&owner->byval_arg) : nullptr;
             if (selected && selected != &owner->byval_arg) return false;
         }
