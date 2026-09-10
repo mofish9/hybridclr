@@ -1384,7 +1384,7 @@ const MethodInfo* ResolveInterpreterVirtualMethod(const MethodInfo* method, void
         compatible = SameClosedPhysicalAbiType(expected, actual);
     }
     if (!compatible)
-        metadata::RaiseExecutionEngineException("DHE interpreter virtual call frame does not match the Current implementation.");
+        RaiseExecutionEngineException("DHE interpreter virtual call frame does not match the Current implementation.");
     return current;
 }
 
