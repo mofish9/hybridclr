@@ -1178,12 +1178,24 @@ namespace metadata
 		fields.reserve(declared->second.size());
 		for (FieldInfo* definitionField : declared->second)
 		{
+			const bool currentStorage = IsInterpreterType(definitionField->parent) &&
+				_currentStorageTypeTokens.count(definitionField->parent->token) != 0;
 			Il2CppClass* physicalOwner = il2cpp::vm::GenericClass::GetClass(
 				il2cpp::metadata::GenericMetadata::GetGenericClass(definitionField->parent, context->class_inst));
+			if (currentStorage)
+				physicalOwner = il2cpp::vm::Class::FromIl2CppType(ResolveExecutionType(&physicalOwner->byval_arg));
 			il2cpp::vm::Class::SetupFields(physicalOwner);
 			FieldInfo* physical = FindDhePhysicalField(physicalOwner, definitionField);
 			if (!physical)
 				RaiseMissingFieldException(&physicalOwner->byval_arg, definitionField->name);
+			// Selected generic definitions own actual Current storage. Registering
+			// their fields as sidecars splits reflected writes from interpreter
+			// offsets, and a Base context can restore obsolete argument layouts.
+			if (currentStorage)
+			{
+				fields.push_back(physical);
+				continue;
+			}
 			FieldInfo* logical = static_cast<FieldInfo*>(HYBRIDCLR_METADATA_MALLOC(sizeof(FieldInfo)));
 			*logical = *physical;
 			logical->type = il2cpp::metadata::GenericMetadata::InflateIfNeeded(
