@@ -45,6 +45,11 @@ namespace hybridclr
 {
 	namespace dhe
 	{
+		Il2CppClass* ResolveReferenceAllocationClass(Il2CppClass* klass)
+		{
+			return metadata::MetadataModule::GetDheReferenceAllocationClass(klass);
+		}
+
 		bool TryGetVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot,
 			const VirtualInvokeData*& result)
 		{

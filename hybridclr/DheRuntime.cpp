@@ -553,11 +553,6 @@ bool IsRemovedType(const Il2CppClass* klass)
 		state->second.removedTypeTokens.end();
 }
 
-Il2CppClass* ResolveReferenceAllocationClass(Il2CppClass* klass)
-{
-    return metadata::MetadataModule::GetDheReferenceAllocationClass(klass);
-}
-
 bool CanEnterWithBaseAbi(const MethodInfo* method)
 {
     if (!method || !method->klass || !method->klass->image)
