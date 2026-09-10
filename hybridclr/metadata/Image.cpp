@@ -970,6 +970,58 @@ namespace metadata
         }
     }
 
+    const Il2CppType* Image::ResolveExecutionType(const Il2CppType* type)
+    {
+        if (!type) return nullptr;
+        Il2CppType mapped = *type;
+        switch (type->type)
+        {
+        case IL2CPP_TYPE_GENERICINST:
+        {
+            const Il2CppGenericClass* generic = type->data.generic_class;
+            const Il2CppType* definition = ResolveExecutionType(generic->type);
+            const Il2CppGenericInst* args = generic->context.class_inst;
+            std::vector<const Il2CppType*> current(args->type_argc);
+            bool changed = definition != generic->type;
+            for (uint32_t index = 0; index < args->type_argc; ++index)
+            {
+                current[index] = ResolveExecutionType(args->type_argv[index]);
+                changed |= current[index] != args->type_argv[index];
+            }
+            if (!changed) return type;
+            mapped.data.generic_class = il2cpp::metadata::GenericMetadata::GetGenericClass(definition,
+                il2cpp::vm::MetadataCache::GetGenericInst(current.data(), args->type_argc));
+            return MetadataPool::GetPooledIl2CppType(mapped);
+        }
+        case IL2CPP_TYPE_SZARRAY:
+        case IL2CPP_TYPE_PTR:
+        {
+            const Il2CppType* element = ResolveExecutionType(type->data.type);
+            if (element == type->data.type) return type;
+            mapped.data.type = element;
+            return MetadataPool::GetPooledIl2CppType(mapped);
+        }
+        case IL2CPP_TYPE_ARRAY:
+        {
+            const Il2CppType* element = ResolveExecutionType(type->data.array->etype);
+            if (element == type->data.array->etype) return type;
+            mapped.data.array = const_cast<Il2CppArrayType*>(MetadataPool::GetPooledIl2CppArrayType(element, type->data.array->rank));
+            return MetadataPool::GetPooledIl2CppType(mapped);
+        }
+        case IL2CPP_TYPE_CLASS:
+        case IL2CPP_TYPE_VALUETYPE:
+        {
+            Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(type);
+            AOTHomologousImage* image = klass && klass->image && klass->image->assembly
+                ? AOTHomologousImage::FindImageByAssembly(klass->image->assembly) : nullptr;
+            const Il2CppType* current = image ? image->GetDheExecutionType(type) : nullptr;
+            return current ? current : type;
+        }
+        default:
+            return type;
+        }
+    }
+
     Il2CppClass* Image::GetClassFromToken(Token2RuntimeHandleMap& tokenCache, uint32_t token, const Il2CppGenericContainer* klassGenericContainer, const Il2CppGenericContainer* methodGenericContainer, const Il2CppGenericContext* genericContext)
     {
         TokenGenericContextType key(token, genericContext);
@@ -981,19 +1033,10 @@ namespace metadata
 
         const Il2CppType* originType = ReadTypeFromToken(klassGenericContainer, methodGenericContainer, DecodeTokenTableType(token), DecodeTokenRowIndex(token));
         const Il2CppType* resultType = genericContext != nullptr ? il2cpp::metadata::GenericMetadata::InflateIfNeeded(originType, genericContext, true) : originType;
-		// TypeSpec tokens such as SZARRAY are resolved as a complete type. Let
-		// the DHE owner remap the complete result so arrays use the Current
-		// element stride, including when the element was already decoded from
-		// the Current interpreter image.
-		Il2CppClass* logicalClass = il2cpp::vm::Class::FromIl2CppType(resultType);
-		if (logicalClass && logicalClass->image && logicalClass->image->assembly)
-		{
-			AOTHomologousImage* homologous = AOTHomologousImage::FindImageByAssembly(
-				logicalClass->image->assembly);
-			if (homologous)
-				if (const Il2CppType* current = homologous->GetDheExecutionType(resultType))
-					resultType = current;
-		}
+		// Each generic argument has its own owner. Nullable<Payload> belongs
+		// to corlib, but Payload's selected storage belongs to the hotfix image.
+		// Mapping only the outer owner can silently box/copy the old value size.
+		resultType = ResolveExecutionType(resultType);
         Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(resultType);
         if (!klass)
         {
@@ -1006,17 +1049,12 @@ namespace metadata
 
     const FieldInfo* Image::GetFieldInfoFromFieldRef(const Il2CppType& type, const Il2CppFieldDefinition* fieldDef)
     {
-		const Il2CppType* executionType = &type;
+        const Il2CppType* executionType = ResolveExecutionType(&type);
 		Il2CppClass* logicalClass = il2cpp::vm::Class::FromIl2CppType(&type);
 		AOTHomologousImage* homologous = nullptr;
 		if (logicalClass && logicalClass->image && logicalClass->image->assembly)
 		{
 			homologous = AOTHomologousImage::FindImageByAssembly(logicalClass->image->assembly);
-			if (homologous)
-			{
-				if (const Il2CppType* current = homologous->GetDheExecutionType(&type))
-					executionType = current;
-			}
 		}
 		Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(executionType);
         const char* name = il2cpp::vm::GlobalMetadata::GetStringFromIndex(fieldDef->nameIndex);

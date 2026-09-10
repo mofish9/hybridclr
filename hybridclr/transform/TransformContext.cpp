@@ -3214,7 +3214,7 @@ else \
 		for (size_t i = 0; i < body.localVars.size(); i++)
 		{
 			LocVarInfo& local = locals[i];
-			local.type = InflateIfNeeded(body.localVars[i], genericContext, true);
+			local.type = Image::ResolveExecutionType(InflateIfNeeded(body.localVars[i], genericContext, true));
 			local.klass = il2cpp::vm::Class::FromIl2CppType(local.type);
 			local.exactClass = nullptr;
 			local.exactMethod = nullptr;
