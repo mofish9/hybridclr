@@ -1242,9 +1242,9 @@ static bool SameStableBaseAbiType(const Il2CppType* baseType, const Il2CppType* 
     }
 }
 
-static bool HasCompatibleStaticBaseFrame(const MethodInfo* baseMethod, const MethodInfo* currentMethod)
+static bool HasCompatibleScalarBaseFrame(const MethodInfo* baseMethod, const MethodInfo* currentMethod)
 {
-    if (!(baseMethod->flags & METHOD_ATTRIBUTE_STATIC) || !(currentMethod->flags & METHOD_ATTRIBUTE_STATIC) ||
+    if ((baseMethod->flags & METHOD_ATTRIBUTE_STATIC) != (currentMethod->flags & METHOD_ATTRIBUTE_STATIC) ||
         baseMethod->is_generic || currentMethod->is_generic || baseMethod->is_inflated || currentMethod->is_inflated ||
         baseMethod->klass->genericContainerHandle || currentMethod->klass->genericContainerHandle ||
         baseMethod->parameters_count != currentMethod->parameters_count ||
@@ -1261,6 +1261,18 @@ static bool HasCompatibleStaticBaseFrame(const MethodInfo* baseMethod, const Met
 #endif
         if (!SameStableBaseAbiType(baseType, currentType))
             return false;
+    }
+    if (!(baseMethod->flags & METHOD_ATTRIBUTE_STATIC))
+    {
+        if (baseMethod->klass->byval_arg.valuetype || currentMethod->klass->byval_arg.valuetype)
+            return false;
+        // A native callback can keep its Base receiver when that physical
+        // storage (including its parents) is still selected. Changed locals
+        // belong to the interpreter's frame and do not change this scalar ABI.
+        // Receiver/layout evolution must still enter through a Current frame.
+        for (Il2CppClass* owner = baseMethod->klass; owner; owner = owner->parent)
+            if (metadata::Image::ResolveExecutionType(&owner->byval_arg) != &owner->byval_arg)
+                return false;
     }
     return true;
 }
@@ -1573,7 +1585,7 @@ bool PrepareAndRegisterMetaVersions(
                     auto currentIdentity = plan.state.methodBaseTokens.emplace(currentExecution, baseMethodVersion.token);
                     if (!currentIdentity.second && currentIdentity.first->second != baseMethodVersion.token)
                         return false;
-                    if (!HasCompatibleStaticBaseFrame(baseMethod, currentExecution))
+                    if (!HasCompatibleScalarBaseFrame(baseMethod, currentExecution))
                         plan.state.incompatibleBaseAbiTokens.insert(baseMethodVersion.token);
                     currentExecutions.erase(execution);
                 }
