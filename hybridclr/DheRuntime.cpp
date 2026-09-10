@@ -788,9 +788,12 @@ static bool IsUnaffectedConditionalGenericInstance(const MethodInfo* method,
     if (!context.class_inst && !context.method_inst) return false;
     for (const Il2CppGenericInst* inst : { context.class_inst, context.method_inst })
         if (inst)
+        {
+            if (inst->type_argc == 0 || !inst->type_argv) return false;
             for (uint32_t index = 0; index < inst->type_argc; ++index)
                 if (GenericArgumentNeedsCurrent(inst->type_argv[index], method->klass->image->assembly))
                     return false;
+        }
     return true;
 }
 
@@ -1277,9 +1280,12 @@ static bool HasCompatibleClosedBaseFrame(const MethodInfo* method)
     if (!context.class_inst && !context.method_inst) return false;
     for (const Il2CppGenericInst* inst : { context.class_inst, context.method_inst })
         if (inst)
+        {
+            if (inst->type_argc == 0 || !inst->type_argv) return false;
             for (uint32_t index = 0; index < inst->type_argc; ++index)
                 if (GenericArgumentNeedsCurrent(inst->type_argv[index], method->klass->image->assembly))
                     return false;
+        }
     const MethodInfo* current = ResolveCurrentExecutionMethod(method);
     if (!current || current == method || current->is_generic ||
         !(current->flags & METHOD_ATTRIBUTE_STATIC) ||
