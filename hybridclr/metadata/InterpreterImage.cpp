@@ -803,9 +803,7 @@ namespace metadata
 		}
 		case IL2CPP_TYPE_STRING:
 		{
-			std::string str = il2cpp::utils::StringUtils::Utf16ToUtf8((const Il2CppChar*)reader.GetData(), reader.GetLength() / 2);
-			writer.WriteCompressedInt32((int32_t)str.length());
-			writer.WriteBytes((const uint8_t*)str.c_str(), (int32_t)str.length());
+            writer.WriteUtf16ConstantString(reinterpret_cast<const Il2CppChar*>(reader.GetData()), reader.GetLength() / 2);
 			break;
 		}
 		default:

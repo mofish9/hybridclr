@@ -5,6 +5,7 @@
 #include "../CommonDef.h"
 
 #include "utils/MemoryRead.h"
+#include "utils/utf8-cpp/source/utf8/unchecked.h"
 
 namespace hybridclr
 {
@@ -136,6 +137,17 @@ namespace metadata
 			std::memcpy(_data + _size, data, len);
 			_size += len;
 		}
+
+        void WriteUtf16ConstantString(const Il2CppChar* data, uint32_t length)
+        {
+            // StringUtils::Utf16ToUtf8's length is an upper bound: it still
+            // stops at NUL. A metadata constant is an exact UTF-16 span.
+            std::string value;
+            if (length != 0)
+                utf8::unchecked::utf16to8(data, data + length, std::back_inserter(value));
+            WriteCompressedInt32(static_cast<int32_t>(value.size()));
+            WriteBytes(reinterpret_cast<const uint8_t*>(value.data()), static_cast<uint32_t>(value.size()));
+        }
 
 		void Write(const CustomAttributeDataWriter& writer)
 		{
