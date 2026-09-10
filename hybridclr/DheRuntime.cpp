@@ -478,6 +478,7 @@ bool RegisterLogicalMethodMapping(const Il2CppAssembly* assembly,
 
 static bool IsUnaffectedConditionalGenericInstance(const MethodInfo* method,
     const DHEAssemblyState& state, uint32_t token);
+static bool HasCompatibleClosedBaseFrame(const MethodInfo* method);
 
 bool IsChangedMethod(const MethodInfo* method)
 {
@@ -568,9 +569,11 @@ bool CanEnterWithBaseAbi(const MethodInfo* method)
     if (IsUnaffectedConditionalGenericInstance(method, state->second, identity->second)) return true;
     auto native = state->second.baseMethods.find(identity->second);
     // Current execution metadata already describes a Current frame.
-    return native == state->second.baseMethods.end() || native->second != definition ||
+    if (native == state->second.baseMethods.end() || native->second != definition ||
         state->second.incompatibleBaseAbiTokens.find(identity->second) ==
-            state->second.incompatibleBaseAbiTokens.end();
+            state->second.incompatibleBaseAbiTokens.end())
+        return true;
+    return HasCompatibleClosedBaseFrame(method);
 }
 
 bool ShouldDispatchToInterpreter(const MethodInfo* method)
@@ -1239,6 +1242,60 @@ static bool HasCompatibleStaticBaseFrame(const MethodInfo* baseMethod, const Met
 #endif
         if (!SameStableBaseAbiType(baseType, currentType))
             return false;
+    }
+    return true;
+}
+
+static bool SameClosedPhysicalAbiType(const Il2CppType* before, const Il2CppType* after)
+{
+    if (!before || !after || before->byref != after->byref || before->type != after->type)
+        return false;
+    Il2CppType baseValue = *before, currentValue = *after;
+    baseValue.byref = currentValue.byref = 0;
+    if (SameStableBaseAbiType(&baseValue, &currentValue)) return true;
+    switch (before->type)
+    {
+    case IL2CPP_TYPE_CLASS: case IL2CPP_TYPE_VALUETYPE: case IL2CPP_TYPE_GENERICINST:
+    case IL2CPP_TYPE_SZARRAY: case IL2CPP_TYPE_ARRAY:
+    {
+        // Logical/public equality does not prove a value buffer's layout.
+        Il2CppClass* baseClass = il2cpp::vm::Class::FromIl2CppType(before);
+        Il2CppClass* currentClass = il2cpp::vm::Class::FromIl2CppType(after);
+        return baseClass && baseClass == currentClass;
+    }
+    default:
+        return false; // Open variables, unmanaged pointers and typed references.
+    }
+}
+
+static bool HasCompatibleClosedBaseFrame(const MethodInfo* method)
+{
+    if (!method || !method->is_inflated || !method->genericMethod || method->is_generic ||
+        !(method->flags & METHOD_ATTRIBUTE_STATIC))
+        return false;
+    const Il2CppGenericContext& context = method->genericMethod->context;
+    if (!context.class_inst && !context.method_inst) return false;
+    for (const Il2CppGenericInst* inst : { context.class_inst, context.method_inst })
+        if (inst)
+            for (uint32_t index = 0; index < inst->type_argc; ++index)
+                if (GenericArgumentNeedsCurrent(inst->type_argv[index], method->klass->image->assembly))
+                    return false;
+    const MethodInfo* current = ResolveCurrentExecutionMethod(method);
+    if (!current || current == method || current->is_generic ||
+        !(current->flags & METHOD_ATTRIBUTE_STATIC) ||
+        method->parameters_count != current->parameters_count ||
+        !SameClosedPhysicalAbiType(method->return_type, current->return_type))
+        return false;
+    for (uint8_t index = 0; index < method->parameters_count; ++index)
+    {
+#if HYBRIDCLR_UNITY_2021
+        const Il2CppType* before = method->parameters[index].parameter_type;
+        const Il2CppType* after = current->parameters[index].parameter_type;
+#else
+        const Il2CppType* before = method->parameters[index];
+        const Il2CppType* after = current->parameters[index];
+#endif
+        if (!SameClosedPhysicalAbiType(before, after)) return false;
     }
     return true;
 }
