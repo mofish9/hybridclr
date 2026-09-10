@@ -1353,7 +1353,32 @@ namespace metadata
     {
         const MethodInfo* logical = GetMethodInfoFromToken(tokenCache, token,
             klassGenericContainer, methodGenericContainer, genericContext);
-        const MethodInfo* execution = dhe::ResolveCurrentExecutionMethod(logical);
+        const MethodInfo* execution = logical;
+        if (logical->is_inflated && logical->genericMethod)
+        {
+            // Current-only and unchanged generic methods have no replacement
+            // entry in the DHE dispatch table. Their argument/return layouts
+            // must still use the caller's Current storage (Identity<Payload>,
+            // List<Payload>, etc.). Do not publish these execution handles into
+            // the logical token cache used by reflection and signature lookup.
+            auto mapInst = [](const Il2CppGenericInst* inst) -> const Il2CppGenericInst*
+            {
+                if (!inst) return nullptr;
+                std::vector<const Il2CppType*> args(inst->type_argc);
+                bool changed = false;
+                for (uint32_t index = 0; index < inst->type_argc; ++index)
+                {
+                    args[index] = ResolveExecutionType(inst->type_argv[index]);
+                    changed |= args[index] != inst->type_argv[index];
+                }
+                return changed ? il2cpp::vm::MetadataCache::GetGenericInst(args.data(), inst->type_argc) : inst;
+            };
+            const Il2CppGenericContext& original = logical->genericMethod->context;
+            Il2CppGenericContext current = { mapInst(original.class_inst), mapInst(original.method_inst) };
+            if (current.class_inst != original.class_inst || current.method_inst != original.method_inst)
+                execution = il2cpp::metadata::GenericMetadata::Inflate(logical->genericMethod->methodDefinition, &current);
+        }
+        execution = dhe::ResolveCurrentExecutionMethod(execution);
         if (execution != logical) il2cpp::vm::Class::Init(execution->klass);
         return execution;
     }
