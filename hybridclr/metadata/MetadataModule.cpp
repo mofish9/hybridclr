@@ -524,9 +524,107 @@ namespace metadata
 		if (!klass || !klass->image || klass->byval_arg.valuetype || IsInterpreterType(klass) ||
 			!dhe::IsDheAssembly(klass->image->assembly))
 			return klass;
+		// Execution mapping interns types and generic contexts in metadata pools.
+		il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
 		AOTHomologousImage* image = GetDheSupplementalImage(klass->image);
 		const Il2CppType* current = image ? image->GetDheExecutionType(&klass->byval_arg) : nullptr;
 		return current ? il2cpp::vm::Class::FromIl2CppType(current) : klass;
+	}
+
+	static const Il2CppType* GetDhePublicReferenceTypeLocked(const Il2CppType* type)
+	{
+		if (!type || type->valuetype) return type;
+		Il2CppType result = *type;
+		switch (type->type)
+		{
+		case IL2CPP_TYPE_CLASS:
+		{
+			const Il2CppTypeDefinition* definition = GetUnderlyingTypeDefinition(type);
+			if (!definition || !IsInterpreterType(definition)) return type;
+			InterpreterImage* currentImage = MetadataModule::GetImage(definition);
+			SuperSetAOTHomologousImage* image = currentImage->GetHomologousTypeReferenceImage();
+			if (!image || !dhe::IsDheAssembly(image->GetTargetAssembly())) return type;
+			const Il2CppType* logical = image->GetIl2CppTypeFromRawTypeDefIndex(currentImage->GetTypeRawIndex(definition));
+			if (!logical || IsInterpreterType(GetUnderlyingTypeDefinition(logical))) return type;
+			const Il2CppType* execution = image->GetDheExecutionType(logical);
+			if (!execution || GetUnderlyingTypeDefinition(execution) != definition) return type;
+			result.data = logical->data;
+			break;
+		}
+		case IL2CPP_TYPE_GENERICINST:
+		{
+			const Il2CppGenericClass* generic = type->data.generic_class;
+			const Il2CppType* definition = GetDhePublicReferenceTypeLocked(generic->type);
+			const Il2CppGenericInst* arguments = generic->context.class_inst;
+			std::vector<const Il2CppType*> mapped(arguments->type_argc);
+			bool changed = definition != generic->type;
+			for (uint32_t index = 0; index < arguments->type_argc; ++index)
+			{
+				mapped[index] = GetDhePublicReferenceTypeLocked(arguments->type_argv[index]);
+				changed |= mapped[index] != arguments->type_argv[index];
+			}
+			if (!changed) return type;
+			result.data.generic_class = il2cpp::metadata::GenericMetadata::GetGenericClass(definition,
+				il2cpp::vm::MetadataCache::GetGenericInst(mapped.data(), arguments->type_argc));
+			break;
+		}
+		case IL2CPP_TYPE_SZARRAY:
+		case IL2CPP_TYPE_PTR:
+			result.data.type = GetDhePublicReferenceTypeLocked(type->data.type);
+			if (result.data.type == type->data.type) return type;
+			break;
+		case IL2CPP_TYPE_ARRAY:
+		{
+			const Il2CppType* element = GetDhePublicReferenceTypeLocked(type->data.array->etype);
+			if (element == type->data.array->etype) return type;
+			result.data.array = const_cast<Il2CppArrayType*>(MetadataPool::GetPooledIl2CppArrayType(element, type->data.array->rank));
+			break;
+		}
+		default:
+			return type;
+		}
+		return MetadataPool::GetPooledIl2CppType(result);
+	}
+
+	const Il2CppType* MetadataModule::GetDhePublicReferenceType(const Il2CppType* type)
+	{
+		if (!type || type->valuetype) return type;
+		if (type->type == IL2CPP_TYPE_CLASS && !IsInterpreterType(GetUnderlyingTypeDefinition(type))) return type;
+		if (type->type != IL2CPP_TYPE_CLASS && type->type != IL2CPP_TYPE_GENERICINST &&
+			type->type != IL2CPP_TYPE_SZARRAY && type->type != IL2CPP_TYPE_ARRAY && type->type != IL2CPP_TYPE_PTR) return type;
+		il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
+		return GetDhePublicReferenceTypeLocked(type);
+	}
+
+	FieldInfo* MetadataModule::ResolveDheReferenceInstanceField(Il2CppObject* obj, const FieldInfo* field)
+	{
+		if (!field || !obj || !field->parent || field->parent->byval_arg.valuetype ||
+			(field->type->attrs & FIELD_ATTRIBUTE_STATIC) || !field->parent->image ||
+			!dhe::IsDheAssembly(field->parent->image->assembly) || IsDheSupplementalInstanceField(field))
+			return const_cast<FieldInfo*>(field);
+		il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
+		// Public Type equivalence never proves that an offset fits an object.
+		if (il2cpp::vm::Object::IsInst(obj, field->parent)) return const_cast<FieldInfo*>(field);
+		Il2CppClass* current = GetDheReferenceAllocationClass(field->parent);
+		if (current != field->parent && il2cpp::vm::Object::IsInst(obj, current))
+		{
+			AOTHomologousImage* image = GetDheSupplementalImage(field->parent->image);
+			il2cpp::vm::Class::SetupFields(current);
+			for (uint16_t index = 0; image && index < current->field_count; ++index)
+			{
+				FieldInfo* candidate = current->fields + index;
+				if ((candidate->type->attrs & FIELD_ATTRIBUTE_STATIC) ||
+					image->GetBaseFieldTokenForCurrentStorage(candidate->token) != field->token) continue;
+				// Native callers can own a buffer sized from the cached field type.
+				// A changed value ABI needs explicit copying, not offset remapping.
+				if (!il2cpp::metadata::Il2CppTypeEqualityComparer::AreEqual(
+					GetDhePublicReferenceTypeLocked(field->type), GetDhePublicReferenceTypeLocked(candidate->type))) break;
+				return candidate;
+			}
+		}
+		il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetArgumentException("obj",
+			"DHE reference field requires a compatible physical receiver and field layout."));
+		return nullptr;
 	}
 
 	Il2CppClass* MetadataModule::GetDheClassInitializationOwner(Il2CppClass* klass)
