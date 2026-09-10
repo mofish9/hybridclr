@@ -572,7 +572,8 @@ namespace metadata
 		// Native callers may still hold the public Base type (for example Unity
 		// AddComponent(Type)). A new object must own the selected physical fields.
 		// Existing objects and value-type ABI checks are not changed here.
-		if (!klass || !klass->image || klass->byval_arg.valuetype || IsInterpreterType(klass))
+		if (!klass || !klass->image || klass->byval_arg.valuetype ||
+			(IsInterpreterType(klass) && !klass->generic_class))
 			return klass;
 		// A generic container need not belong to the assembly owning its selected
 		// argument. Each definition/argument acquires its own publication below.
@@ -658,7 +659,7 @@ namespace metadata
 	{
 		if (!field || !obj || !field->parent || field->parent->byval_arg.valuetype ||
 			(field->type->attrs & FIELD_ATTRIBUTE_STATIC) || !field->parent->image ||
-			!dhe::IsDheAssembly(field->parent->image->assembly) || IsDheSupplementalInstanceField(field))
+			(!field->parent->generic_class && !dhe::IsDheAssembly(field->parent->image->assembly)) || IsDheSupplementalInstanceField(field))
 			return const_cast<FieldInfo*>(field);
 		il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
 		// Public Type equivalence never proves that an offset fits an object.
@@ -675,7 +676,7 @@ namespace metadata
 			const bool sharedDefinition = field->parent->generic_class && current->generic_class &&
 				field->parent->generic_class->type == current->generic_class->type;
 			il2cpp::vm::Class::SetupFields(current);
-			for (uint16_t index = 0; image && index < current->field_count; ++index)
+			for (uint16_t index = 0; (image || sharedDefinition) && index < current->field_count; ++index)
 			{
 				FieldInfo* candidate = current->fields + index;
 				uint32_t baseToken = sharedDefinition ? candidate->token : image->GetBaseFieldTokenForCurrentStorage(candidate->token);
