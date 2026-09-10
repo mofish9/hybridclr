@@ -369,7 +369,9 @@ namespace hybridclr
 					input.bytes = il2cpp::vm::Array::GetFirstElementAddress(dll);
 					input.size = il2cpp::vm::Array::GetByteLength(dll);
 					metadata::RawImage raw;
-					auto error = raw.Load((byte*)input.bytes, input.size);
+					// RawImage owns and frees its input. The managed byte[] remains
+					// borrowed by the batch and must never be released by this parser.
+					auto error = raw.Load(CopyBytes(input.bytes, input.size), input.size);
 					if (error != metadata::LoadImageErrorCode::OK || raw.GetTable(metadata::TableType::ASSEMBLY).rowNum != 1)
 						return (int32_t)metadata::LoadImageErrorCode::BAD_IMAGE;
 					input.name = raw.GetStringFromRawIndex(raw.ReadAssembly(1).name);
