@@ -510,6 +510,20 @@ namespace metadata
             currentClass, static_cast<uint8_t*>(destination));
     }
 
+	Il2CppClass* MetadataModule::GetDheReferenceAllocationClass(Il2CppClass* klass)
+	{
+		// Acquire completed publication before looking up an execution layout.
+		// Native callers may still hold the public Base type (for example Unity
+		// AddComponent(Type)). A new object must own the selected physical fields.
+		// Existing objects and value-type ABI checks are not changed here.
+		if (!klass || !klass->image || klass->byval_arg.valuetype || IsInterpreterType(klass) ||
+			!dhe::IsDheAssembly(klass->image->assembly))
+			return klass;
+		AOTHomologousImage* image = GetDheSupplementalImage(klass->image);
+		const Il2CppType* current = image ? image->GetDheExecutionType(&klass->byval_arg) : nullptr;
+		return current ? il2cpp::vm::Class::FromIl2CppType(current) : klass;
+	}
+
 	Il2CppClass* MetadataModule::GetDheClassInitializationOwner(Il2CppClass* klass)
 	{
 		// Acquire the completed registration before reading Current metadata.
