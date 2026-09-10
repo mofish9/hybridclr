@@ -228,6 +228,9 @@ namespace dhe
     // sizing. This only substitutes explicit physical Current bindings; it
     // does not raise tombstones while transforming an untaken call branch.
     const MethodInfo* ResolveCurrentExecutionMethod(const MethodInfo* method);
+    // Raw native invocation may retain Base metadata. Only select Current
+    // when the concrete argument ABI and actual reference receiver are valid.
+    const MethodInfo* ResolveNativeReferenceInvokeMethod(const MethodInfo* method, void* receiver);
     // Direct bridge for supported generated native ABI shapes. It executes
     // current IL through Interpreter::Execute instead of calling
     // methodPointerCallByInterp, whose generated entry may be the AOT guard.

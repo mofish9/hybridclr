@@ -1232,6 +1232,35 @@ static bool HasCompatibleStaticBaseFrame(const MethodInfo* baseMethod, const Met
     return true;
 }
 
+const MethodInfo* ResolveNativeReferenceInvokeMethod(const MethodInfo* method, void* receiver)
+{
+    if (!receiver || !method || !method->klass || method->klass->byval_arg.valuetype ||
+        (method->flags & METHOD_ATTRIBUTE_STATIC) || method->is_generic || CanEnterWithBaseAbi(method))
+        return method;
+    const MethodInfo* current = ResolveCurrentExecutionMethod(method);
+    if (!current || current == method || !current->klass || current->klass->byval_arg.valuetype ||
+        (current->flags & METHOD_ATTRIBUTE_STATIC) || current->is_generic ||
+        method->parameters_count != current->parameters_count ||
+        !SameStableBaseAbiType(method->return_type, current->return_type))
+        return method;
+    for (uint8_t index = 0; index < method->parameters_count; ++index)
+    {
+#if HYBRIDCLR_UNITY_2021
+        const Il2CppType* before = method->parameters[index].parameter_type;
+        const Il2CppType* after = current->parameters[index].parameter_type;
+#else
+        const Il2CppType* before = method->parameters[index];
+        const Il2CppType* after = current->parameters[index];
+#endif
+        if (!SameStableBaseAbiType(before, after)) return method;
+    }
+    // Public type equivalence and the native descriptor cache do not establish
+    // object storage. Walk actual physical parents without logical remapping.
+    for (Il2CppClass* owner = static_cast<Il2CppObject*>(receiver)->klass; owner; owner = owner->parent)
+        if (owner == current->klass) return current;
+    return method;
+}
+
 struct PendingMetaVersionRegistration
 {
     const Il2CppAssembly* baseAssembly = nullptr;
