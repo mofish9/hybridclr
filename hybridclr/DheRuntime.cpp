@@ -1271,8 +1271,14 @@ static bool HasCompatibleScalarBaseFrame(const MethodInfo* baseMethod, const Met
         // belong to the interpreter's frame and do not change this scalar ABI.
         // Receiver/layout evolution must still enter through a Current frame.
         for (Il2CppClass* owner = baseMethod->klass; owner; owner = owner->parent)
-            if (metadata::Image::ResolveExecutionType(&owner->byval_arg) != &owner->byval_arg)
+        {
+            if (owner->generic_class || owner->genericContainerHandle)
                 return false;
+            metadata::AOTHomologousImage* image = metadata::AOTHomologousImage::FindImageByAssembly(owner->image->assembly);
+            if (owner == baseMethod->klass && !image) return false;
+            const Il2CppType* selected = image ? image->GetDheExecutionType(&owner->byval_arg) : nullptr;
+            if (selected && selected != &owner->byval_arg) return false;
+        }
     }
     return true;
 }
