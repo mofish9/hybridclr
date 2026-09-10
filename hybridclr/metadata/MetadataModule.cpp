@@ -525,7 +525,21 @@ namespace metadata
 		case IL2CPP_TYPE_VALUETYPE:
 		{
 			const Il2CppTypeDefinition* definition = GetUnderlyingTypeDefinition(type);
-			if (!definition || IsInterpreterType(definition)) return type;
+			if (!definition) return type;
+			if (IsInterpreterType(definition))
+			{
+				// A selected constructor has Current method metadata even when
+				// its owner retains Base storage. Allocate the same definition
+				// used by type operands, with generic arguments mapped below.
+				InterpreterImage* currentImage = MetadataModule::GetImage(definition);
+				SuperSetAOTHomologousImage* image = currentImage->GetHomologousTypeReferenceImage();
+				if (!image || !dhe::IsDheAssembly(image->GetTargetAssembly())) return type;
+				const Il2CppType* selected = image->GetExecutionTypeFromRawTypeDefIndex(
+					currentImage->GetTypeRawIndex(definition));
+				if (!selected || GetUnderlyingTypeDefinition(selected) == definition) return type;
+				result.data = selected->data;
+				return MetadataPool::GetPooledIl2CppType(result);
+			}
 			Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(type);
 			AOTHomologousImage* image = klass ? GetDheSupplementalImage(klass->image) : nullptr;
 			const Il2CppType* current = image ? image->GetDheExecutionType(type) : nullptr;
@@ -572,12 +586,19 @@ namespace metadata
 		// Native callers may still hold the public Base type (for example Unity
 		// AddComponent(Type)). A new object must own the selected physical fields.
 		// Existing objects and value-type ABI checks are not changed here.
-		if (!klass || !klass->image || klass->byval_arg.valuetype ||
-			(IsInterpreterType(klass) && !klass->generic_class))
+		if (!klass || !klass->image || klass->byval_arg.valuetype)
 			return klass;
 		// A generic container need not belong to the assembly owning its selected
 		// argument. Each definition/argument acquires its own publication below.
-		if (!klass->generic_class && !klass->rank && !dhe::IsDheAssembly(klass->image->assembly)) return klass;
+		if (!klass->generic_class && !klass->rank)
+		{
+			if (IsInterpreterType(klass))
+			{
+				InterpreterImage* image = MetadataModule::GetImage(GetUnderlyingTypeDefinition(&klass->byval_arg));
+				if (!image->GetHomologousTypeReferenceImage()) return klass;
+			}
+			else if (!dhe::IsDheAssembly(klass->image->assembly)) return klass;
+		}
 		// Execution mapping interns types and generic contexts in metadata pools.
 		il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
 		const Il2CppType* current = GetDheExecutionTypeAcrossImagesLocked(&klass->byval_arg);
