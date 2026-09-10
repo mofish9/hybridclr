@@ -1359,7 +1359,7 @@ const MethodInfo* ResolveNativeReferenceInvokeMethod(const MethodInfo* method, v
     if (!current || current == method || !current->klass || current->klass->byval_arg.valuetype ||
         (current->flags & METHOD_ATTRIBUTE_STATIC) || current->is_generic ||
         method->parameters_count != current->parameters_count ||
-        !SameStableBaseAbiType(method->return_type, current->return_type))
+        !SameClosedPhysicalAbiType(method->return_type, current->return_type))
         return method;
     for (uint8_t index = 0; index < method->parameters_count; ++index)
     {
@@ -1370,7 +1370,7 @@ const MethodInfo* ResolveNativeReferenceInvokeMethod(const MethodInfo* method, v
         const Il2CppType* before = method->parameters[index];
         const Il2CppType* after = current->parameters[index];
 #endif
-        if (!SameStableBaseAbiType(before, after)) return method;
+        if (!SameClosedPhysicalAbiType(before, after)) return method;
     }
     // Public type equivalence and the native descriptor cache do not establish
     // object storage. Walk actual physical parents without logical remapping.
