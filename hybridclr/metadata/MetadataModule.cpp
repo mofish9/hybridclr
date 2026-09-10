@@ -545,7 +545,8 @@ namespace metadata
 			SuperSetAOTHomologousImage* image = currentImage->GetHomologousTypeReferenceImage();
 			if (!image || !dhe::IsDheAssembly(image->GetTargetAssembly())) return type;
 			const Il2CppType* logical = image->GetIl2CppTypeFromRawTypeDefIndex(currentImage->GetTypeRawIndex(definition));
-			if (!logical || IsInterpreterType(GetUnderlyingTypeDefinition(logical))) return type;
+			const Il2CppTypeDefinition* logicalDefinition = logical ? GetUnderlyingTypeDefinition(logical) : nullptr;
+			if (!logicalDefinition || IsInterpreterType(logicalDefinition)) return type;
 			const Il2CppType* execution = image->GetDheExecutionType(logical);
 			if (!execution || GetUnderlyingTypeDefinition(execution) != definition) return type;
 			result.data = logical->data;
@@ -554,6 +555,7 @@ namespace metadata
 		case IL2CPP_TYPE_GENERICINST:
 		{
 			const Il2CppGenericClass* generic = type->data.generic_class;
+			if (generic->type->valuetype) return type;
 			const Il2CppType* definition = GetDhePublicReferenceTypeLocked(generic->type);
 			const Il2CppGenericInst* arguments = generic->context.class_inst;
 			std::vector<const Il2CppType*> mapped(arguments->type_argc);
@@ -589,7 +591,11 @@ namespace metadata
 	const Il2CppType* MetadataModule::GetDhePublicReferenceType(const Il2CppType* type)
 	{
 		if (!type || type->valuetype) return type;
-		if (type->type == IL2CPP_TYPE_CLASS && !IsInterpreterType(GetUnderlyingTypeDefinition(type))) return type;
+		if (type->type == IL2CPP_TYPE_CLASS)
+		{
+			const Il2CppTypeDefinition* definition = GetUnderlyingTypeDefinition(type);
+			if (!definition || !IsInterpreterType(definition)) return type;
+		}
 		if (type->type != IL2CPP_TYPE_CLASS && type->type != IL2CPP_TYPE_GENERICINST &&
 			type->type != IL2CPP_TYPE_SZARRAY && type->type != IL2CPP_TYPE_ARRAY && type->type != IL2CPP_TYPE_PTR) return type;
 		il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
