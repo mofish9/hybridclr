@@ -679,6 +679,9 @@ namespace interpreter
 		MachineState::VirtualMethodCacheEntry& cache = machine.GetVirtualMethodCacheEntry(cacheIndex);
 		if (cacheable && cache.klass == klass && cache.method == method)
 		{
+			// The cache may have been warmed before DHE publication. A stable
+			// logical method can now require the receiver's Current storage.
+			cache.actualMethod = const_cast<MethodInfo*>(hybridclr::dhe::ResolveNativeReferenceInvokeMethod(cache.actualMethod, obj));
 			return cache.actualMethod;
 		}
 
@@ -698,6 +701,10 @@ namespace interpreter
 		{
 			result = GetGenericVirtualMethod(result, method);
 		}
+		// Logical interface dispatch can return a Base method even for a
+		// Current object. Keep the scalar/reference ABI and physical receiver
+		// checks used by native reflection before selecting its Current body.
+		result = hybridclr::dhe::ResolveNativeReferenceInvokeMethod(result, obj);
 		if (cacheable)
 		{
 			cache.klass = klass;
