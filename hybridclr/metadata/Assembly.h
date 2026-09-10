@@ -25,6 +25,7 @@ namespace metadata
         static LoadImageErrorCode PrepareDheInterpreterAssembly(const void* bytes, uint32_t size,
             InterpreterImage*& image, Il2CppAssembly*& assembly);
         static void RunDheModuleInitializer(Il2CppAssembly* assembly);
+        static void RunDheMutableModuleInitializer(AOTHomologousImage* image);
     private:
         static Il2CppAssembly* Create(const byte* assemblyData, uint64_t length, const byte* rawSymbolStoreBytes, uint64_t rawSymbolStoreLength);
     };

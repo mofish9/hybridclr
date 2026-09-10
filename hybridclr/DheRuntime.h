@@ -10,6 +10,7 @@
 #define HYBRIDCLR_DHE_HAS_FROZEN_AOT_SOURCE 1
 #define HYBRIDCLR_DHE_HAS_FROZEN_GENERIC_CONTEXT 1
 #define HYBRIDCLR_DHE_HAS_INTERPRETER_BATCH 1
+#define HYBRIDCLR_DHE_HAS_MODULE_INITIALIZATION 1
 
 struct Il2CppAssembly;
 struct Il2CppClass;
@@ -181,6 +182,9 @@ namespace dhe
 
     bool IsDheAssembly(const Il2CppAssembly* assembly);
     bool IsMutableDheAssembly(const Il2CppAssembly* assembly);
+    // Only generated guards for configured hotfix module cctors call this.
+    // Unity's eager startup call returns until Current metadata is committed.
+    bool IsDheModuleInitializationReady(const char* assemblyName);
     bool IsFrozenAotExecutionSource(const Il2CppAssembly* assembly);
     bool TryGetVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot,
         const VirtualInvokeData*& result);

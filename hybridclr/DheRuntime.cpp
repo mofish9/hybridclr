@@ -445,6 +445,12 @@ bool IsMutableDheAssembly(const Il2CppAssembly* assembly)
         entry->second.source.kind == CurrentImageSourceKind::MutableHotfix;
 }
 
+bool IsDheModuleInitializationReady(const char* assemblyName)
+{
+    return assemblyName && assemblyName[0] && IsMutableDheAssembly(
+        il2cpp::vm::MetadataCache::GetAssemblyByName(assemblyName));
+}
+
 bool IsFrozenAotExecutionSource(const Il2CppAssembly* assembly)
 {
     const PublishedState* state = s_publishedState.load(std::memory_order_acquire);
@@ -1084,6 +1090,12 @@ bool BuildCurrentImagePlan(const MetaVersionData& baseMetaVersion,
     std::unordered_map<std::string, const MetaVersionMethod*> baseMethods;
     std::unordered_map<uint32_t, const MetaVersionType*> currentTypes;
     std::unordered_map<uint32_t, const MetaVersionMethod*> currentMethods;
+    static const Sha256Digest moduleIdentity = []() {
+        Sha256Digest value{};
+        const char name[] = "dhe-type-id\n<Module>";
+        ComputeSha256(name, sizeof(name) - 1, value);
+        return value;
+    }();
     for (uint32_t side = 0; side < 2; ++side)
     {
         const MetaVersionData* mv = side == 0 ? &baseMetaVersion : &currentMetaVersion;
@@ -1092,7 +1104,8 @@ bool BuildCurrentImagePlan(const MetaVersionData& baseMetaVersion,
         for (const MetaVersionType& type : mv->types)
         {
             const std::string id = DigestKey(type.stableId);
-            if ((type.token >> 24) != 2 || (type.token & 0xffffffu) <= 1 ||
+            if ((type.token >> 24) != 2 || (type.token & 0xffffffu) == 0 ||
+                (type.token == 0x02000001 && (type.flags != 0 || type.stableId != moduleIdentity)) ||
                 (type.flags & ~kMetaVersionKnownTypeFlags) ||
                 !typeIds.insert(id).second || !typeTokens.insert(type.token).second)
                 return false;
@@ -1127,6 +1140,7 @@ bool BuildCurrentImagePlan(const MetaVersionData& baseMetaVersion,
     std::unordered_set<uint32_t> selectedMethods;
     for (uint32_t token : currentTypeTokens)
     {
+        if (token == 0x02000001) return false; // Global methods have no instance storage.
         auto entry = currentTypes.find(token);
         if (entry == currentTypes.end()) return false;
         const MetaVersionType& type = *entry->second;

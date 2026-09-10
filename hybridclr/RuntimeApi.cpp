@@ -282,6 +282,9 @@ namespace hybridclr
 			loadLock.unlock();
 			// Module code may recursively load assemblies or start other threads.
 			// It runs only after the entire graph is committed and load locks exit.
+			for (const DheLoadPayload& payload : payloads)
+				if (dhe::IsMutableDheAssembly(payload.baseAssembly))
+					metadata::Assembly::RunDheMutableModuleInitializer(payload.currentImage);
 			for (Il2CppAssembly* assembly : interpreterAssemblies) metadata::Assembly::RunDheModuleInitializer(assembly);
 			return (int32_t)metadata::LoadImageErrorCode::OK;
 		}

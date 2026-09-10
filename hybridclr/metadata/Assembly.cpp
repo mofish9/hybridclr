@@ -342,6 +342,16 @@ namespace metadata
         RunModuleInitializer(assembly->image);
     }
 
+    void Assembly::RunDheMutableModuleInitializer(AOTHomologousImage* image)
+    {
+        InterpreterImage* current = static_cast<SuperSetAOTHomologousImage*>(image)->GetInterpreterFallbackImage();
+        // Inspect Current first: a removed module cctor must not initialize
+        // the old Base global class. Added cctors use Current's own owner;
+        // existing cctors share the canonical initialization/exception state.
+        Il2CppClass* module = il2cpp::vm::Class::FromIl2CppType(current->GetRawTypeDefinitionType(0));
+        if (module->has_cctor) il2cpp::vm::Runtime::ClassInit(module);
+    }
+
     void Assembly::InitializeDheMetadataBatch(const std::vector<AOTHomologousImage*>& images,
         const std::vector<InterpreterImage*>& interpreterImages)
     {
