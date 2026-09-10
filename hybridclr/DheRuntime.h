@@ -204,9 +204,11 @@ namespace dhe
     // Such calls must enter through a prepared Current frame instead.
     bool CanEnterWithBaseAbi(const MethodInfo* method);
 
-    // Unity's generated direct static calls may pass a null RuntimeMethod
-    // context. Resolve the method from the loaded image so a token-only guard
-    // can still select the interpreter implementation.
+    // Generated static calls may omit RuntimeMethod. Guards need only published
+    // changed/tombstoned entries; they must never enumerate metadata during an
+    // unchanged AOT call or before DHE loading (e.g. a SHA-256 bit operation).
+    const MethodInfo* ResolveAotGuardMethodByToken(const char* assemblyName, uint32_t token);
+    // Metadata preparation can still resolve an unpublished Base method.
     const MethodInfo* ResolveMethodByToken(const char* assemblyName, uint32_t token);
     const MethodInfo* ResolveMethodByNameAndToken(const char* assemblyName,
         const char* declaringType, const char* methodName, uint32_t parameterCount, uint32_t token);

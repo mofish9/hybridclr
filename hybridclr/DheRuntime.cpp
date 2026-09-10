@@ -611,6 +611,24 @@ static const MethodInfo* ResolveMethodInAssembly(const Il2CppAssembly* assembly,
     return nullptr;
 }
 
+const MethodInfo* ResolveAotGuardMethodByToken(const char* assemblyName, uint32_t token)
+{
+    if (!assemblyName || !assemblyName[0] || (token >> 24) != 6 || (token & 0xffffffu) == 0)
+        return nullptr;
+    const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
+    for (const auto& entry : published->assemblyStates)
+    {
+        const Il2CppAssembly* assembly = entry.first;
+        if (!assembly || !assembly->aname.name || std::strcmp(assembly->aname.name, assemblyName) != 0)
+            continue;
+        if (entry.second.changedMethodTokens.find(token) == entry.second.changedMethodTokens.end())
+            return nullptr;
+        auto method = entry.second.baseMethods.find(token);
+        return method == entry.second.baseMethods.end() ? nullptr : method->second;
+    }
+    return nullptr;
+}
+
 const MethodInfo* ResolveMethodByToken(const char* assemblyName, uint32_t token)
 {
     if (!assemblyName || assemblyName[0] == '\0' || token == 0)
