@@ -192,6 +192,22 @@ namespace
     }
 }
 
+Il2CppClass* SelectReferenceInterfaceIterationClass(Il2CppClass* requested,
+    Il2CppClass* selected, const void* iterator)
+{
+    if (!iterator || !requested || requested == selected || !requested->implementedInterfaces)
+        return selected;
+    // A non-null cursor comes from a completed SetupInterfaces call. Base
+    // tables live for the process lifetime and are not rewritten on selection.
+    // Use integer addresses: relational comparisons of unrelated arrays are UB.
+    const uintptr_t first = reinterpret_cast<uintptr_t>(requested->implementedInterfaces);
+    const uintptr_t cursor = reinterpret_cast<uintptr_t>(iterator);
+    const size_t bytes = static_cast<size_t>(requested->interfaces_count) * sizeof(Il2CppClass*);
+    if (cursor >= first && cursor - first < bytes && (cursor - first) % sizeof(Il2CppClass*) == 0)
+        return requested;
+    return selected;
+}
+
 bool ComputeSha256(const void* data, uint32_t size, Sha256Digest& result)
 {
     if (!data && size != 0)

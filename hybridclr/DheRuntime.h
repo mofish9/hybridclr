@@ -14,6 +14,7 @@
 #define HYBRIDCLR_DHE_HAS_MODULE_TOKEN_RESOLUTION 1
 #define HYBRIDCLR_DHE_HAS_LENGTH_PRESERVED_CONSTANT_STRINGS 1
 #define HYBRIDCLR_DHE_HAS_TRACKED_LOAD_PHASE 1
+#define HYBRIDCLR_DHE_HAS_REFERENCE_INTERFACE_QUERY 1
 
 struct Il2CppAssembly;
 struct Il2CppClass;
@@ -25,6 +26,11 @@ namespace hybridclr
 namespace dhe
 {
     Il2CppClass* ResolveReferenceAllocationClass(Il2CppClass* klass);
+
+    // Keep an in-progress native interface cursor on the table it started in.
+    // requested is the caller's descriptor; selected is its published mapping.
+    Il2CppClass* SelectReferenceInterfaceIterationClass(Il2CppClass* requested,
+        Il2CppClass* selected, const void* iterator);
 
     // The Base Player embeds one immutable MetaVersion per DHE assembly. At
     // runtime it is compared with the current MetaVersion shipped beside the

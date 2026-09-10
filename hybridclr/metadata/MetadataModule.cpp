@@ -588,6 +588,12 @@ namespace metadata
 		// Existing objects and value-type ABI checks are not changed here.
 		if (!klass || !klass->image || klass->byval_arg.valuetype)
 			return klass;
+		// Public type queries also accept generic parameters and pointers. Their
+		// metadata payload is not a TypeDef and must not enter the image lookup.
+		const Il2CppTypeEnum type = static_cast<Il2CppTypeEnum>(klass->byval_arg.type);
+		if (type != IL2CPP_TYPE_CLASS && type != IL2CPP_TYPE_GENERICINST &&
+			type != IL2CPP_TYPE_ARRAY && type != IL2CPP_TYPE_SZARRAY)
+			return klass;
 		// A generic container need not belong to the assembly owning its selected
 		// argument. Each definition/argument acquires its own publication below.
 		if (!klass->generic_class && !klass->rank)
