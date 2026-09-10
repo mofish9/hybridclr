@@ -315,23 +315,64 @@ namespace metadata
         return LoadImageErrorCode::OK;
     }
 
-    void Assembly::InitializeDheMetadataBatch(const std::vector<AOTHomologousImage*>& images)
+    LoadImageErrorCode Assembly::PrepareDheInterpreterAssembly(const void* bytes, uint32_t size,
+        InterpreterImage*& image, Il2CppAssembly*& assembly)
     {
-        if (images.empty()) return;
+        il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
+        uint32_t index = InterpreterImage::AllocImageIndex(size);
+        if (index == kInvalidImageIndex) return LoadImageErrorCode::BAD_IMAGE;
+        image = new InterpreterImage(index);
+        LoadImageErrorCode error = image->Load(CopyBytes(bytes, size), size);
+        if (error != LoadImageErrorCode::OK) return error;
+        image->SetDheInterpreterAssembly();
+        assembly = new (HYBRIDCLR_MALLOC_ZERO(sizeof(Il2CppAssembly))) Il2CppAssembly;
+        Il2CppImage* target = new (HYBRIDCLR_MALLOC_ZERO(sizeof(Il2CppImage))) Il2CppImage;
+        image->InitBasic(target);
+        image->BuildIl2CppAssembly(assembly);
+        assembly->image = target;
+        image->BuildIl2CppImage(target);
+        target->name = ConcatNewString(assembly->aname.name, ".dll");
+        target->nameNoExt = assembly->aname.name;
+        target->assembly = assembly;
+        return LoadImageErrorCode::OK;
+    }
+
+    void Assembly::RunDheModuleInitializer(Il2CppAssembly* assembly)
+    {
+        RunModuleInitializer(assembly->image);
+    }
+
+    void Assembly::InitializeDheMetadataBatch(const std::vector<AOTHomologousImage*>& images,
+        const std::vector<InterpreterImage*>& interpreterImages)
+    {
+        if (images.empty() && interpreterImages.empty()) return;
         il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
         // Each definition phase also establishes its Current-to-Base map.
         // None of these phases decodes a peer's signatures or layouts.
         for (AOTHomologousImage* image : images)
             static_cast<SuperSetAOTHomologousImage*>(image)->GetInterpreterFallbackImage()
                 ->PrepareRuntimeMetadataDefinitions();
+        for (InterpreterImage* image : interpreterImages) image->PrepareRuntimeMetadataDefinitions();
+        for (InterpreterImage* peer : interpreterImages)
         {
-            AOTHomologousImage::PreparationScope preparation(images, lock);
+            const Il2CppAssembly* assembly = peer->GetIl2CppImage()->assembly;
+            for (AOTHomologousImage* image : images)
+            {
+                image->AddPreparedAssemblyReference(assembly);
+                static_cast<SuperSetAOTHomologousImage*>(image)->GetInterpreterFallbackImage()->AddPreparedAssemblyReference(assembly);
+            }
+            for (InterpreterImage* image : interpreterImages) image->AddPreparedAssemblyReference(assembly);
+        }
+        {
+            AOTHomologousImage::PreparationScope preparation(images, lock, &interpreterImages);
             for (AOTHomologousImage* image : images)
                 static_cast<SuperSetAOTHomologousImage*>(image)->GetInterpreterFallbackImage()
                     ->InitRuntimeMetadataDetails();
+            for (InterpreterImage* image : interpreterImages) image->InitRuntimeMetadataDetails();
             for (AOTHomologousImage* image : images)
                 static_cast<SuperSetAOTHomologousImage*>(image)->GetInterpreterFallbackImage()
                     ->FinishRuntimeMetadatas();
+            for (InterpreterImage* image : interpreterImages) image->FinishRuntimeMetadatas();
             // No physical class is requested before every image's definitions,
             // signatures and lazy layout/vtable state are ready.
             for (AOTHomologousImage* image : images) image->InitRuntimeMetadatas();

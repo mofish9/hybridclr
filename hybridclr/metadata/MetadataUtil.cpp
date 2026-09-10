@@ -530,6 +530,17 @@ namespace metadata
 		return false;
 	}
 
+	// Member resolution uses the same logical type across its Base/Current
+	// representations. Keep IsMatchSigType itself strict: storage/ABI decisions
+	// also call it and must continue to detect a changed physical layout.
+	template<typename TClassContext, typename TMethodContext>
+	static bool IsMatchResolutionType(const Il2CppType* dst, const Il2CppType* sig,
+		TClassContext klassContext, TMethodContext methodContext)
+	{
+		return IsMatchSigType(dst, sig, klassContext, methodContext) ||
+			IsMatchSigType(Image::ResolveExecutionType(dst), Image::ResolveExecutionType(sig), klassContext, methodContext);
+	}
+
 	bool IsMatchMethodSig(const Il2CppMethodDefinition* methodDef, const MethodRefSig& resolveSig, const Il2CppGenericContainer* klassGenericContainer)
 	{
 		if (methodDef->parameterCount != (uint16_t)resolveSig.params.size())
@@ -556,7 +567,7 @@ namespace metadata
 
 		const Il2CppType* returnType1 = resolveSig.returnType;
 		const Il2CppType* returnType2 = il2cpp::vm::GlobalMetadata::GetIl2CppTypeFromIndex(methodDef->returnType);
-		if (!IsMatchSigType(returnType2, returnType1, klassGenericContainer, methodGenericContainer))
+		if (!IsMatchResolutionType(returnType2, returnType1, klassGenericContainer, methodGenericContainer))
 		{
 			return false;
 		}
@@ -566,7 +577,7 @@ namespace metadata
 			const Il2CppParameterDefinition* dstParam = (const Il2CppParameterDefinition*)il2cpp::vm::GlobalMetadata::GetParameterDefinitionFromIndex(methodDef, methodDef->parameterStart + i);
 			IL2CPP_ASSERT(dstParam);
 			const Il2CppType* paramType2 = il2cpp::vm::GlobalMetadata::GetIl2CppTypeFromIndex(dstParam->typeIndex);
-			if (!IsMatchSigType(paramType2, paramType1, klassGenericContainer, methodGenericContainer))
+			if (!IsMatchResolutionType(paramType2, paramType1, klassGenericContainer, methodGenericContainer))
 			{
 				return false;
 			}
@@ -598,7 +609,7 @@ namespace metadata
 		}
 		const Il2CppType* returnType1 = resolveSig.returnType;
 		const Il2CppType* returnType2 = methodDef->return_type;
-		if (!IsMatchSigType(returnType2, returnType1, klassGenericContainer, methodGenericContainer))
+		if (!IsMatchResolutionType(returnType2, returnType1, klassGenericContainer, methodGenericContainer))
 		{
 			return false;
 		}
@@ -606,7 +617,7 @@ namespace metadata
 		{
 			const Il2CppType* paramType1 = resolveSig.params[i];
 			const Il2CppType* paramType2 = GET_METHOD_PARAMETER_TYPE(methodDef->parameters[i]);
-			if (!IsMatchSigType(paramType2, paramType1, klassGenericContainer, methodGenericContainer))
+			if (!IsMatchResolutionType(paramType2, paramType1, klassGenericContainer, methodGenericContainer))
 			{
 				return false;
 			}
@@ -637,7 +648,7 @@ namespace metadata
 		}
 		const Il2CppType* returnType1 = resolveSig.returnType;
 		const Il2CppType* returnType2 = methodDef->return_type;
-		if (!IsMatchSigType(returnType2, returnType1, klassInstArgv, methodInstArgv))
+		if (!IsMatchResolutionType(returnType2, returnType1, klassInstArgv, methodInstArgv))
 		{
 			return false;
 		}
@@ -645,7 +656,7 @@ namespace metadata
 		{
 			const Il2CppType* paramType1 = resolveSig.params[i];
 			const Il2CppType* paramType2 = GET_METHOD_PARAMETER_TYPE(methodDef->parameters[i]);
-			if (!IsMatchSigType(paramType2, paramType1, klassInstArgv, methodInstArgv))
+			if (!IsMatchResolutionType(paramType2, paramType1, klassInstArgv, methodInstArgv))
 			{
 				return false;
 			}
@@ -723,7 +734,7 @@ namespace metadata
 			const Il2CppFieldDefinition* fieldDef = il2cpp::vm::GlobalMetadata::GetFieldDefinitionFromTypeDefAndFieldIndex(typeDef, i);
 			const char* fieldName = il2cpp::vm::GlobalMetadata::GetStringFromIndex(fieldDef->nameIndex);
 			const Il2CppType* fieldType = il2cpp::vm::GlobalMetadata::GetIl2CppTypeFromIndex(fieldDef->typeIndex);
-			if (std::strcmp(resolveFieldName, fieldName) == 0 && IsMatchSigType(fieldType, resolveFieldType, klassGenericContainer, nullptr))
+			if (std::strcmp(resolveFieldName, fieldName) == 0 && IsMatchResolutionType(fieldType, resolveFieldType, klassGenericContainer, (const Il2CppGenericContainer*)nullptr))
 			{
 				retFieldDef = fieldDef;
 				return true;

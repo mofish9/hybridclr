@@ -3892,6 +3892,7 @@ namespace metadata
 		uint32_t typeNamespace, uint32_t typeName)
 	{
 		const Il2CppType* type = Image::ReadTypeFromResolutionScope(scope, typeNamespace, typeName);
+		if (_isDheInterpreterAssembly) return Image::ResolveExecutionType(type);
 		if (!_homologousTypeReferenceImage || !_homologousTypeReferenceImage->HasCurrentImagePlan() || !type ||
 			(type->type != IL2CPP_TYPE_CLASS && type->type != IL2CPP_TYPE_VALUETYPE)) return type;
 		const Il2CppTypeDefinition* definition = GetUnderlyingTypeDefinition(type);

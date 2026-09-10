@@ -805,6 +805,8 @@ namespace metadata
         const char* assName = _rawImage->GetStringFromRawIndex(data.name);
         const char* typeNameStr = _rawImage->GetStringFromRawIndex(typeName);
         const char* typeNamespaceStr = _rawImage->GetStringFromRawIndex(typeNamespace);
+        if (const Il2CppType* preparing = AOTHomologousImage::FindPreparingInterpreterType(assName, typeNamespaceStr, typeNameStr))
+            return preparing;
         const Il2CppAssembly* refAss = GetLoadedAssembly(assName);
         Il2CppClass* klass = nullptr;
         if (refAss)
@@ -1011,6 +1013,10 @@ namespace metadata
         case IL2CPP_TYPE_CLASS:
         case IL2CPP_TYPE_VALUETYPE:
         {
+            // Prepared Current definitions may not have signatures/layouts yet.
+            // They already have their execution identity; do not materialize a
+            // class merely to rediscover it during mixed-image preparation.
+            if (IsInterpreterType(GetUnderlyingTypeDefinition(type))) return type;
             Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(type);
             AOTHomologousImage* image = klass && klass->image && klass->image->assembly
                 ? AOTHomologousImage::FindImageByAssembly(klass->image->assembly) : nullptr;

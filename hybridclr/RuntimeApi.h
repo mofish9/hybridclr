@@ -16,6 +16,7 @@ namespace hybridclr
 		static int32_t LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlan(Il2CppArray* dllData, Il2CppArray* baseMvData, Il2CppArray* currentMvData, Il2CppArray* typeSelections, Il2CppArray* methodSelections);
 		static int32_t LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlanAndSources(Il2CppArray* dllData, Il2CppArray* baseMvData, Il2CppArray* currentMvData, Il2CppArray* typeSelections, Il2CppArray* methodSelections, Il2CppArray* sourceKinds, Il2CppArray* excludedTypeSelections);
 		static int32_t LoadDifferentialHybridAssemblySources(Il2CppArray* dllData, Il2CppArray* baseMvData, Il2CppArray* currentMvData, Il2CppArray* typeSelections, Il2CppArray* methodSelections, Il2CppArray* sourceKinds, Il2CppArray* excludedTypeSelections, Il2CppArray* genericContextSelections);
+		static int32_t LoadDifferentialHybridAssemblyBatch(Il2CppArray* dllData, Il2CppArray* baseMvData, Il2CppArray* currentMvData, Il2CppArray* typeSelections, Il2CppArray* methodSelections, Il2CppArray* sourceKinds, Il2CppArray* excludedTypeSelections, Il2CppArray* genericContextSelections, Il2CppArray* interpreterDlls);
 		static int32_t IsDifferentialMethodChanged(Il2CppReflectionMethod* method);
 		static int32_t GetDifferentialInterpreterEntryCount();
 		static int32_t GetDifferentialAotBridgeCallCount();

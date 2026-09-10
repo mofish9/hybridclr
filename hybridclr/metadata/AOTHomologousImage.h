@@ -6,6 +6,7 @@ namespace hybridclr
 {
 namespace metadata
 {
+	class InterpreterImage;
 	struct AOTFieldData
 	{
 		uint32_t typeDefIndex; // rowIndex - 1
@@ -25,15 +26,18 @@ namespace metadata
 		static AOTHomologousImage* FindImageByAssembly(const Il2CppAssembly* ass);
 		// Only the metadata-locked batch loader's thread can see these images.
 		static AOTHomologousImage* FindPreparingImageByAssembly(const Il2CppAssembly* ass);
+		static const Il2CppType* FindPreparingInterpreterType(const char* assemblyName, const char* namespaze, const char* name);
 		class PreparationScope
 		{
 		public:
-			PreparationScope(const std::vector<AOTHomologousImage*>& images, il2cpp::os::FastAutoLock& lock);
+			PreparationScope(const std::vector<AOTHomologousImage*>& images, il2cpp::os::FastAutoLock& lock,
+				const std::vector<InterpreterImage*>* interpreterImages = nullptr);
 			~PreparationScope();
 			PreparationScope(const PreparationScope&) = delete;
 			PreparationScope& operator=(const PreparationScope&) = delete;
 		private:
 			const std::vector<AOTHomologousImage*>* _previous;
+			const std::vector<InterpreterImage*>* _previousInterpreters;
 		};
 		static AOTHomologousImage* FindImageByAssemblyLocked(const Il2CppAssembly* ass, il2cpp::os::FastAutoLock& lock);
 		static void RegisterLocked(AOTHomologousImage* image, il2cpp::os::FastAutoLock& lock);

@@ -1003,6 +1003,7 @@ namespace metadata
 		{
 			return _homologousTypeReferenceImage;
 		}
+		void SetDheInterpreterAssembly() { _isDheInterpreterAssembly = true; }
 		bool TryApplyClassLayoutLocked(Il2CppClass* klass);
 	protected:
 
@@ -1076,6 +1077,7 @@ namespace metadata
 		bool _inited;
 		Il2CppImage* _il2cppImage;
 		SuperSetAOTHomologousImage* _homologousTypeReferenceImage = nullptr;
+		bool _isDheInterpreterAssembly = false;
 		uint8_t _runtimeMetadataStage = 0; // guarded by g_MetadataLock
 		const uint32_t _index;
 		static bool IsMetadataPublished(const int32_t* initialized)

@@ -1,6 +1,7 @@
 #include "RuntimeApi.h"
 
 #include <cstring>
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -28,6 +29,7 @@
 #include "metadata/Assembly.h"
 #include "DheRuntime.h"
 #include "metadata/AOTHomologousImage.h"
+#include "metadata/RawImage.h"
 #include "interpreter/InterpreterModule.h"
 #include "interpreter/InterpreterProfile.h"
 #include "RuntimeConfig.h"
@@ -54,6 +56,7 @@ namespace hybridclr
 {
 	namespace
 	{
+		using InterpreterPeerHashes = std::vector<std::pair<std::string, dhe::Sha256Digest>>;
 		struct PendingDheImage
 		{
 			metadata::AOTHomologousImage* image;
@@ -61,6 +64,23 @@ namespace hybridclr
 			std::shared_ptr<const dhe::CurrentImagePlan> executionPlan;
 			std::vector<const Il2CppAssembly*> batchAssemblies;
 			bool metadataReady = false;
+			InterpreterPeerHashes interpreterPeers;
+		};
+		struct PendingInterpreterImage
+		{
+			metadata::InterpreterImage* image = nullptr;
+			Il2CppAssembly* assembly = nullptr;
+			dhe::Sha256Digest hash{};
+			std::vector<const Il2CppAssembly*> batchAssemblies;
+			InterpreterPeerHashes interpreterPeers;
+			bool metadataReady = false;
+		};
+		struct InterpreterLoadPayload
+		{
+			const void* bytes = nullptr;
+			uint32_t size = 0;
+			std::string name;
+			dhe::Sha256Digest hash{};
 		};
 
 		// DHE images are one-shot process metadata. If MV registration fails
@@ -69,6 +89,7 @@ namespace hybridclr
 		// pending image per Base assembly and reuse it for a corrected MV retry.
 		std::mutex s_dheLoadMutex;
 		std::unordered_map<const Il2CppAssembly*, PendingDheImage> s_pendingDheImages;
+		std::unordered_map<std::string, PendingInterpreterImage> s_pendingInterpreterImages;
 
 		struct DheLoadPayload
 		{
@@ -111,16 +132,25 @@ namespace hybridclr
 			return (int32_t)metadata::LoadImageErrorCode::OK;
 		}
 
-		int32_t LoadDhePayloads(std::vector<DheLoadPayload>& payloads)
+		int32_t LoadDhePayloads(std::vector<DheLoadPayload>& payloads,
+			const std::vector<InterpreterLoadPayload>& interpreterPayloads = {})
 		{
 			if (payloads.empty())
 			{
 				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
 			}
 
-			std::lock_guard<std::mutex> loadLock(s_dheLoadMutex);
+			std::unique_lock<std::mutex> loadLock(s_dheLoadMutex);
 			std::unordered_set<const Il2CppAssembly*> uniqueAssemblies;
 			std::unordered_set<std::string> uniqueNames;
+			InterpreterPeerHashes interpreterPeers;
+			for (const auto& input : interpreterPayloads)
+			{
+				if (!uniqueNames.insert(input.name).second || il2cpp::vm::MetadataCache::GetAssemblyByName(input.name.c_str()))
+					return (int32_t)metadata::LoadImageErrorCode::HOMOLOGOUS_ASSEMBLY_HAS_BEEN_LOADED;
+				interpreterPeers.push_back({ input.name, input.hash });
+			}
+			std::sort(interpreterPeers.begin(), interpreterPeers.end());
 			for (DheLoadPayload& payload : payloads)
 			{
 				payload.baseAssembly = il2cpp::vm::MetadataCache::GetAssemblyByName(
@@ -154,6 +184,8 @@ namespace hybridclr
 			{
 				auto pending = s_pendingDheImages.find(payload.baseAssembly);
 				if (pending == s_pendingDheImages.end()) continue;
+				if (pending->second.interpreterPeers != interpreterPeers)
+					return (int32_t)metadata::LoadImageErrorCode::HOMOLOGOUS_ASSEMBLY_HAS_BEEN_LOADED;
 				if (!pending->second.metadataReady)
 					return (int32_t)metadata::LoadImageErrorCode::DHE_MV_REGISTRATION_FAILED;
 				if (pending->second.batchAssemblies.size() != batchAssemblies.size())
@@ -161,6 +193,18 @@ namespace hybridclr
 				for (const Il2CppAssembly* peer : pending->second.batchAssemblies)
 					if (!uniqueAssemblies.count(peer))
 						return (int32_t)metadata::LoadImageErrorCode::HOMOLOGOUS_ASSEMBLY_HAS_BEEN_LOADED;
+			}
+			for (const auto& input : interpreterPayloads)
+			{
+				auto pending = s_pendingInterpreterImages.find(input.name);
+				if (pending == s_pendingInterpreterImages.end()) continue;
+				const PendingInterpreterImage& entry = pending->second;
+				if (entry.hash != input.hash || entry.interpreterPeers != interpreterPeers ||
+					entry.batchAssemblies.size() != batchAssemblies.size())
+					return (int32_t)metadata::LoadImageErrorCode::HOMOLOGOUS_ASSEMBLY_HAS_BEEN_LOADED;
+				for (const Il2CppAssembly* peer : entry.batchAssemblies)
+					if (!uniqueAssemblies.count(peer)) return (int32_t)metadata::LoadImageErrorCode::HOMOLOGOUS_ASSEMBLY_HAS_BEEN_LOADED;
+				if (!entry.metadataReady) return (int32_t)metadata::LoadImageErrorCode::DHE_MV_REGISTRATION_FAILED;
 			}
 			std::vector<metadata::AOTHomologousImage*> newImages;
 			newImages.reserve(payloads.size());
@@ -192,13 +236,30 @@ namespace hybridclr
 					// an MV rejection after initialization can reuse the exact graph.
 					s_pendingDheImages.emplace(payload.baseAssembly, PendingDheImage{
 						payload.currentImage, payload.currentAssemblyHash, payload.executionPlan,
-						batchAssemblies, false });
+						batchAssemblies, false, interpreterPeers });
 					newImages.push_back(payload.currentImage);
 				}
 			}
-			metadata::Assembly::InitializeDheMetadataBatch(newImages);
+			std::vector<metadata::InterpreterImage*> newInterpreterImages;
+			std::vector<Il2CppAssembly*> interpreterAssemblies;
+			for (const auto& input : interpreterPayloads)
+			{
+				auto pending = s_pendingInterpreterImages.find(input.name);
+				if (pending == s_pendingInterpreterImages.end())
+				{
+					PendingInterpreterImage entry;
+					entry.hash = input.hash; entry.batchAssemblies = batchAssemblies; entry.interpreterPeers = interpreterPeers;
+					auto error = metadata::Assembly::PrepareDheInterpreterAssembly(input.bytes, input.size, entry.image, entry.assembly);
+					if (error != metadata::LoadImageErrorCode::OK) return (int32_t)error;
+					pending = s_pendingInterpreterImages.emplace(input.name, std::move(entry)).first;
+					newInterpreterImages.push_back(pending->second.image);
+				}
+				interpreterAssemblies.push_back(pending->second.assembly);
+			}
+			metadata::Assembly::InitializeDheMetadataBatch(newImages, newInterpreterImages);
 			for (const DheLoadPayload& payload : payloads)
 				s_pendingDheImages.at(payload.baseAssembly).metadataReady = true;
+			for (const auto& input : interpreterPayloads) s_pendingInterpreterImages.at(input.name).metadataReady = true;
 
 			std::vector<dhe::MetaVersionRegistration> registrations;
 			registrations.reserve(payloads.size());
@@ -209,7 +270,7 @@ namespace hybridclr
 					&payload.baseMetaVersion, &payload.currentMetaVersion });
 				executionPlansReady = payload.currentImage->AppendDheCurrentExecutions(registrations.back()) && executionPlansReady;
 			}
-			if (!executionPlansReady || !dhe::PrepareAndRegisterMetaVersions(registrations))
+			if (!executionPlansReady || !dhe::PrepareAndRegisterMetaVersions(registrations, interpreterAssemblies))
 			{
 				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_REGISTRATION_FAILED;
 			}
@@ -217,6 +278,11 @@ namespace hybridclr
 			{
 				s_pendingDheImages.erase(payload.baseAssembly);
 			}
+			for (const auto& input : interpreterPayloads) s_pendingInterpreterImages.erase(input.name);
+			loadLock.unlock();
+			// Module code may recursively load assemblies or start other threads.
+			// It runs only after the entire graph is committed and load locks exit.
+			for (Il2CppAssembly* assembly : interpreterAssemblies) metadata::Assembly::RunDheModuleInitializer(assembly);
 			return (int32_t)metadata::LoadImageErrorCode::OK;
 		}
 
@@ -225,7 +291,8 @@ namespace hybridclr
 		// coverage; the native side checks token, identity and member bindings.
 		int32_t LoadDhePayloadsWithExecutionPlanAndSources(Il2CppArray* dllBytes, Il2CppArray* baseMvBytes,
 			Il2CppArray* currentMvBytes, Il2CppArray* typeSelections, Il2CppArray* methodSelections,
-			Il2CppArray* sourceKinds, Il2CppArray* excludedTypeSelections, Il2CppArray* genericContextSelections = nullptr)
+			Il2CppArray* sourceKinds, Il2CppArray* excludedTypeSelections, Il2CppArray* genericContextSelections = nullptr,
+			Il2CppArray* interpreterDlls = nullptr)
 		{
 			if (!dllBytes || !baseMvBytes || !currentMvBytes || !typeSelections || !methodSelections)
 				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
@@ -252,6 +319,13 @@ namespace hybridclr
 				if (error != (int32_t)metadata::LoadImageErrorCode::OK) return error;
 				Il2CppArray* types = elements(typeSelections)[index];
 				Il2CppArray* methods = elements(methodSelections)[index];
+				// Preserve the existing no-execution-plan path for differential
+				// peers whose layouts do not require explicit selections.
+				if (!types && !methods && interpreterDlls && sourceKinds &&
+					reinterpret_cast<const int32_t*>(il2cpp::vm::Array::GetFirstElementAddress(sourceKinds))[index] == 0 &&
+					elements(excludedTypeSelections)[index] && !il2cpp::vm::Array::GetLength(elements(excludedTypeSelections)[index]) &&
+					genericContextSelections && elements(genericContextSelections)[index] && !il2cpp::vm::Array::GetLength(elements(genericContextSelections)[index]))
+					continue;
 				if (!types || !methods) return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
 				const uint32_t* typeTokens = reinterpret_cast<const uint32_t*>(il2cpp::vm::Array::GetFirstElementAddress(types));
 				const uint32_t* methodTokens = reinterpret_cast<const uint32_t*>(il2cpp::vm::Array::GetFirstElementAddress(methods));
@@ -285,7 +359,25 @@ namespace hybridclr
 					return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
 				payload.executionPlan = plan;
 			}
-			return LoadDhePayloads(payloads);
+			std::vector<InterpreterLoadPayload> interpreterPayloads;
+			if (interpreterDlls)
+				for (uint32_t index = 0; index < il2cpp::vm::Array::GetLength(interpreterDlls); ++index)
+				{
+					Il2CppArray* dll = elements(interpreterDlls)[index];
+					if (!dll) return (int32_t)metadata::LoadImageErrorCode::BAD_IMAGE;
+					InterpreterLoadPayload input;
+					input.bytes = il2cpp::vm::Array::GetFirstElementAddress(dll);
+					input.size = il2cpp::vm::Array::GetByteLength(dll);
+					metadata::RawImage raw;
+					auto error = raw.Load((byte*)input.bytes, input.size);
+					if (error != metadata::LoadImageErrorCode::OK || raw.GetTable(metadata::TableType::ASSEMBLY).rowNum != 1)
+						return (int32_t)metadata::LoadImageErrorCode::BAD_IMAGE;
+					input.name = raw.GetStringFromRawIndex(raw.ReadAssembly(1).name);
+					if (input.name.empty() || !dhe::ComputeSha256(input.bytes, input.size, input.hash))
+						return (int32_t)metadata::LoadImageErrorCode::BAD_IMAGE;
+					interpreterPayloads.push_back(std::move(input));
+				}
+			return LoadDhePayloads(payloads, interpreterPayloads);
 		}
 
 		int32_t LoadDhePayloadsWithExecutionPlan(Il2CppArray* dllBytes, Il2CppArray* baseMvBytes,
@@ -608,6 +700,7 @@ namespace hybridclr
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlan(System.Byte[][],System.Byte[][],System.Byte[][],System.UInt32[][],System.UInt32[][])", (Il2CppMethodPointer)LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlan);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlanAndSources(System.Byte[][],System.Byte[][],System.Byte[][],System.UInt32[][],System.UInt32[][],System.Int32[],System.UInt32[][])", (Il2CppMethodPointer)LoadDifferentialHybridAssembliesWithMetaVersionAndExecutionPlanAndSources);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssemblySources(System.Byte[][],System.Byte[][],System.Byte[][],System.UInt32[][],System.UInt32[][],System.Int32[],System.UInt32[][],System.UInt32[][])", (Il2CppMethodPointer)LoadDifferentialHybridAssemblySources);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadDifferentialHybridAssemblyBatch(System.Byte[][],System.Byte[][],System.Byte[][],System.UInt32[][],System.UInt32[][],System.Int32[],System.UInt32[][],System.UInt32[][],System.Byte[][])", (Il2CppMethodPointer)LoadDifferentialHybridAssemblyBatch);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::IsDifferentialMethodChanged(System.Reflection.MethodInfo)", (Il2CppMethodPointer)IsDifferentialMethodChanged);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetDifferentialInterpreterEntryCount()", (Il2CppMethodPointer)GetDifferentialInterpreterEntryCount);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetDifferentialAotBridgeCallCount()", (Il2CppMethodPointer)GetDifferentialAotBridgeCallCount);
@@ -734,6 +827,17 @@ namespace hybridclr
 			return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
 		return LoadDhePayloadsWithExecutionPlanAndSources(dllBytes, baseMvBytes, currentMvBytes,
 			typeSelections, methodSelections, sourceKinds, excludedTypeSelections, genericContextSelections);
+	}
+
+	int32_t RuntimeApi::LoadDifferentialHybridAssemblyBatch(
+		Il2CppArray* dllBytes, Il2CppArray* baseMvBytes, Il2CppArray* currentMvBytes,
+		Il2CppArray* typeSelections, Il2CppArray* methodSelections, Il2CppArray* sourceKinds,
+		Il2CppArray* excludedTypeSelections, Il2CppArray* genericContextSelections, Il2CppArray* interpreterDlls)
+	{
+		if (!sourceKinds || !excludedTypeSelections || !genericContextSelections || !interpreterDlls)
+			return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
+		return LoadDhePayloadsWithExecutionPlanAndSources(dllBytes, baseMvBytes, currentMvBytes,
+			typeSelections, methodSelections, sourceKinds, excludedTypeSelections, genericContextSelections, interpreterDlls);
 	}
 
 	int32_t RuntimeApi::IsDifferentialMethodChanged(Il2CppReflectionMethod* method)

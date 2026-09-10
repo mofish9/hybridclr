@@ -174,6 +174,12 @@ namespace metadata
 			}
 			return nullptr;
 		}
+		// Only for unpublished images under the metadata lock. These references
+		// remain valid if MV registration retains the exact graph for a retry.
+		void AddPreparedAssemblyReference(const Il2CppAssembly* assembly)
+		{
+			_nameToAssemblies[assembly->image->nameNoExt] = assembly;
+		}
 
 		Il2CppClass* FindNetStandardExportedType(const char* namespaceStr, const char* nameStr);
 

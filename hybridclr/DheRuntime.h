@@ -175,7 +175,8 @@ namespace dhe
     // Resolve and prepare every assembly first, then publish the complete set
     // with one release store. A failure restores all MethodInfo/vtable state.
     bool PrepareAndRegisterMetaVersions(
-        const std::vector<MetaVersionRegistration>& registrations);
+        const std::vector<MetaVersionRegistration>& registrations,
+        const std::vector<Il2CppAssembly*>& interpreterAssemblies = {});
 
     bool IsDheAssembly(const Il2CppAssembly* assembly);
     bool IsMutableDheAssembly(const Il2CppAssembly* assembly);

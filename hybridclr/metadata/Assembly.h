@@ -20,7 +20,11 @@ namespace metadata
             AOTHomologousImage** targetImage = nullptr, const char* expectedAssemblyName = nullptr,
             const dhe::CurrentImagePlan* currentImagePlan = nullptr,
             bool deferRuntimeInitialization = false);
-        static void InitializeDheMetadataBatch(const std::vector<AOTHomologousImage*>& images);
+        static void InitializeDheMetadataBatch(const std::vector<AOTHomologousImage*>& images,
+            const std::vector<InterpreterImage*>& interpreterImages = {});
+        static LoadImageErrorCode PrepareDheInterpreterAssembly(const void* bytes, uint32_t size,
+            InterpreterImage*& image, Il2CppAssembly*& assembly);
+        static void RunDheModuleInitializer(Il2CppAssembly* assembly);
     private:
         static Il2CppAssembly* Create(const byte* assemblyData, uint64_t length, const byte* rawSymbolStoreBytes, uint64_t rawSymbolStoreLength);
     };

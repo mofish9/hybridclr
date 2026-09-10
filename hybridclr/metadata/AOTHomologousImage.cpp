@@ -1,4 +1,5 @@
 #include "AOTHomologousImage.h"
+#include "InterpreterImage.h"
 
 #include <algorithm>
 #include "vm/MetadataLock.h"
@@ -15,17 +16,37 @@ namespace metadata
 {
 	std::vector<AOTHomologousImage*> s_images;
 	static thread_local const std::vector<AOTHomologousImage*>* s_preparingImages = nullptr;
+	static thread_local const std::vector<InterpreterImage*>* s_preparingInterpreterImages = nullptr;
 
 	AOTHomologousImage::PreparationScope::PreparationScope(
-		const std::vector<AOTHomologousImage*>& images, il2cpp::os::FastAutoLock&)
-		: _previous(s_preparingImages)
+		const std::vector<AOTHomologousImage*>& images, il2cpp::os::FastAutoLock&,
+		const std::vector<InterpreterImage*>* interpreterImages)
+		: _previous(s_preparingImages), _previousInterpreters(s_preparingInterpreterImages)
 	{
 		s_preparingImages = &images;
+		s_preparingInterpreterImages = interpreterImages;
 	}
 
 	AOTHomologousImage::PreparationScope::~PreparationScope()
 	{
 		s_preparingImages = _previous;
+		s_preparingInterpreterImages = _previousInterpreters;
+	}
+
+	const Il2CppType* AOTHomologousImage::FindPreparingInterpreterType(const char* assemblyName, const char* namespaze, const char* name)
+	{
+		if (s_preparingInterpreterImages)
+			for (InterpreterImage* image : *s_preparingInterpreterImages)
+				if (std::strcmp(image->GetIl2CppImage()->assembly->aname.name, assemblyName) == 0)
+					for (uint32_t index = 0; index < image->GetTypeDefinitionCount(); ++index)
+					{
+						const Il2CppTypeDefinition* type = image->GetTypeFromRawIndex(index);
+						if (type->declaringTypeIndex == kTypeDefinitionIndexInvalid &&
+							std::strcmp(il2cpp::vm::GlobalMetadata::GetStringFromIndex(type->namespaceIndex), namespaze) == 0 &&
+							std::strcmp(il2cpp::vm::GlobalMetadata::GetStringFromIndex(type->nameIndex), name) == 0)
+							return image->GetRawTypeDefinitionType(index);
+					}
+		return nullptr;
 	}
 
 	AOTHomologousImage* AOTHomologousImage::FindPreparingImageByAssembly(const Il2CppAssembly* ass)

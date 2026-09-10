@@ -13,6 +13,7 @@
 #include "il2cpp-class-internals.h"
 #include "vm/Assembly.h"
 #include "vm/MetadataCache.h"
+#include "vm/MetadataLock.h"
 #include "vm/Class.h"
 #include "vm/Image.h"
 #include "interpreter/Interpreter.h"
@@ -1224,9 +1225,20 @@ struct PendingMetaVersionRegistration
 };
 
 bool PrepareAndRegisterMetaVersions(
-    const std::vector<MetaVersionRegistration>& registrations)
+    const std::vector<MetaVersionRegistration>& registrations,
+    const std::vector<Il2CppAssembly*>& interpreterAssemblies)
 {
     std::lock_guard<std::recursive_mutex> lock(s_registrationMutex);
+    // Keep the established registration -> metadata lock order. New assembly
+    // name lookups take the metadata lock, so they see the complete committed
+    // graph after the DHE release publication below.
+    std::unique_ptr<il2cpp::os::FastAutoLock> metadataCommitLock;
+    if (!interpreterAssemblies.empty())
+    {
+        metadataCommitLock.reset(new il2cpp::os::FastAutoLock(&il2cpp::vm::g_MetadataLock));
+        for (Il2CppAssembly* assembly : interpreterAssemblies)
+            if (!assembly || il2cpp::vm::MetadataCache::GetAssemblyByName(assembly->aname.name)) return false;
+    }
     if (registrations.empty())
     {
         return false;
@@ -1430,6 +1442,8 @@ bool PrepareAndRegisterMetaVersions(
     }
 
     CommitMethodPreparations(snapshots);
+    for (Il2CppAssembly* assembly : interpreterAssemblies)
+        il2cpp::vm::MetadataCache::RegisterInterpreterAssembly(assembly);
     s_publishedState.store(next.release(), std::memory_order_release);
     return true;
 }
