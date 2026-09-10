@@ -2,6 +2,7 @@
 
 #include "utils/Il2CppHashMap.h"
 #include "utils/HashUtils.h"
+#include "NullableIntrinsic.h"
 #include "utils/StringUtils.h"
 
 namespace hybridclr
@@ -101,6 +102,7 @@ namespace transform
 			return false;
 		}
 		Il2CppClass* klass = method->klass;
+		if (!CanUseNullableIntrinsic(klass)) return false;
 		il2cpp::vm::Class::SetupFields(klass);
 		il2cpp::vm::Class::SetupFields(klass->castClass);
 
@@ -117,6 +119,7 @@ namespace transform
 	static bool IH_Nullable_GetValueOrDefault(TransformContext& ctx, const MethodInfo* method)
 	{
 		Il2CppClass* klass = method->klass;
+		if (!CanUseNullableIntrinsic(klass)) return false;
 		il2cpp::vm::Class::SetupFields(klass);
 		il2cpp::vm::Class::SetupFields(klass->castClass);
 		uint32_t classIndirectIndex = ctx.GetOrAddResolveDataIndex(klass);
@@ -154,6 +157,7 @@ namespace transform
 	{
 		IL2CPP_ASSERT(ctx.GetEvalStackTop() >= 1);
 		Il2CppClass* klass = method->klass;
+		if (!CanUseNullableIntrinsic(klass)) return false;
 		il2cpp::vm::Class::SetupFields(klass);
 		il2cpp::vm::Class::SetupFields(klass->castClass);
 		uint32_t classIndirectIndex = ctx.GetOrAddResolveDataIndex(klass);
@@ -174,6 +178,7 @@ namespace transform
 	{
 		IL2CPP_ASSERT(ctx.GetEvalStackTop() >= 1);
 		Il2CppClass* klass = method->klass;
+		if (!CanUseNullableIntrinsic(klass)) return false;
 		il2cpp::vm::Class::SetupFields(klass);
 		il2cpp::vm::Class::SetupFields(klass->castClass);
 		uint32_t classIndirectIndex = ctx.GetOrAddResolveDataIndex(klass);
@@ -627,6 +632,7 @@ namespace transform
 	static bool CIH_Nullable(TransformContext& ctx, const MethodInfo* method)
 	{
 		Il2CppClass* klass = method->klass;
+		if (!CanUseNullableIntrinsic(klass)) return false;
 		IL2CPP_ASSERT(IS_CLASS_VALUE_TYPE(klass));
 		IL2CPP_ASSERT(ctx.GetEvalStackTop() > 0);
 		il2cpp::vm::Class::SetupFields(klass);
