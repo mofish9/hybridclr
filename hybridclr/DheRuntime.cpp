@@ -476,7 +476,7 @@ bool RegisterLogicalMethodMapping(const Il2CppAssembly* assembly,
     return true;
 }
 
-static bool IsUnaffectedFrozenGenericInstance(const MethodInfo* method,
+static bool IsUnaffectedConditionalGenericInstance(const MethodInfo* method,
     const DHEAssemblyState& state, uint32_t token);
 
 bool IsChangedMethod(const MethodInfo* method)
@@ -501,7 +501,7 @@ bool IsChangedMethod(const MethodInfo* method)
         return false;
     }
     const uint32_t token = identity->second;
-    if (IsUnaffectedFrozenGenericInstance(method, state->second, token)) return false;
+    if (IsUnaffectedConditionalGenericInstance(method, state->second, token)) return false;
     return state->second.baseMethods.find(token) != state->second.baseMethods.end() &&
         state->second.changedMethodTokens.find(token) !=
             state->second.changedMethodTokens.end();
@@ -565,7 +565,7 @@ bool CanEnterWithBaseAbi(const MethodInfo* method)
     auto identity = state->second.methodBaseTokens.find(definition);
     if (identity == state->second.methodBaseTokens.end())
         return true;
-    if (IsUnaffectedFrozenGenericInstance(method, state->second, identity->second)) return true;
+    if (IsUnaffectedConditionalGenericInstance(method, state->second, identity->second)) return true;
     auto native = state->second.baseMethods.find(identity->second);
     // Current execution metadata already describes a Current frame.
     return native == state->second.baseMethods.end() || native->second != definition ||
@@ -771,11 +771,10 @@ static bool GenericArgumentNeedsCurrent(const Il2CppType* type, const Il2CppAsse
     }
 }
 
-static bool IsUnaffectedFrozenGenericInstance(const MethodInfo* method,
+static bool IsUnaffectedConditionalGenericInstance(const MethodInfo* method,
     const DHEAssemblyState& state, uint32_t token)
 {
-    if (state.source.kind != CurrentImageSourceKind::FrozenBaseAot ||
-        !std::binary_search(state.source.genericContextMethodTokens.begin(),
+    if (!std::binary_search(state.source.genericContextMethodTokens.begin(),
             state.source.genericContextMethodTokens.end(), token) ||
         !method->is_inflated || !method->genericMethod)
         return false;
@@ -815,7 +814,7 @@ const MethodInfo* ResolveInterpreterMethod(const MethodInfo* baseMethod)
 		return baseMethod;
 	}
 	const uint32_t token = identity->second;
-	if (IsUnaffectedFrozenGenericInstance(baseMethod, state->second, token)) return baseMethod;
+	if (IsUnaffectedConditionalGenericInstance(baseMethod, state->second, token)) return baseMethod;
 	if (state->second.changedMethodTokens.find(token) == state->second.changedMethodTokens.end())
 	{
 		return baseMethod;
@@ -894,7 +893,7 @@ const MethodInfo* ResolveCurrentExecutionMethod(const MethodInfo* method)
         ? method->genericMethod->methodDefinition : method;
     auto identity = state->second.methodBaseTokens.find(definition);
     if (identity == state->second.methodBaseTokens.end()) return method;
-    if (IsUnaffectedFrozenGenericInstance(method, state->second, identity->second)) return method;
+    if (IsUnaffectedConditionalGenericInstance(method, state->second, identity->second)) return method;
     auto base = state->second.baseMethods.find(identity->second);
     auto current = state->second.resolvedMethods.find(identity->second);
     if (base == state->second.baseMethods.end() || base->second != definition ||
@@ -1034,9 +1033,11 @@ bool ValidateCurrentImageSource(const CurrentImageSource& source,
     const Sha256Digest& baseHash, const Sha256Digest& currentHash)
 {
     if (source.kind == CurrentImageSourceKind::MutableHotfix)
-        return source.baseSourceHash == Sha256Digest{} && source.excludedBaseTypeTokens.empty() &&
-            source.genericContextMethodTokens.empty();
-    if (source.kind != CurrentImageSourceKind::FrozenBaseAot ||
+    {
+        if (source.baseSourceHash != Sha256Digest{} || !source.excludedBaseTypeTokens.empty())
+            return false;
+    }
+    else if (source.kind != CurrentImageSourceKind::FrozenBaseAot ||
         source.baseSourceHash == Sha256Digest{} || source.baseSourceHash != baseHash || baseHash != currentHash)
         return false;
     uint32_t previous = 0;
@@ -1164,7 +1165,17 @@ bool BuildCurrentImagePlan(const MetaVersionData& baseMetaVersion,
         auto method = currentMethods.find(token);
         if (!selectedMethods.count(token) || method == currentMethods.end() ||
             selectedTypes.count(DigestKey(method->second->declaringTypeStableId))) return false;
+        auto old = baseMethods.find(DigestKey(method->second->stableId));
+        if (old == baseMethods.end() || old->second->version != method->second->version)
+            return false;
     }
+    // External selections use Current tokens. The published registry is keyed
+    // by immutable Base identity, including reordered or colliding tokens.
+    plan.source.genericContextMethodTokens.clear();
+    for (uint32_t token : source.genericContextMethodTokens)
+        plan.source.genericContextMethodTokens.push_back(
+            baseMethods.at(DigestKey(currentMethods.at(token)->stableId))->token);
+    std::sort(plan.source.genericContextMethodTokens.begin(), plan.source.genericContextMethodTokens.end());
     for (const MetaVersionMethod& method : currentMetaVersion.methods)
     {
         auto old = baseMethods.find(DigestKey(method.stableId));
@@ -1407,7 +1418,8 @@ bool PrepareAndRegisterMetaVersions(
                 return false;
             const bool conditional = std::binary_search(registration.source.genericContextMethodTokens.begin(),
                 registration.source.genericContextMethodTokens.end(), baseMethodVersion.token);
-            if (conditional && (!currentExecution ||
+            if (conditional && (!currentExecution || !currentMethodVersion ||
+                baseMethodVersion.version != currentMethodVersion->version ||
                 (!currentExecution->is_generic && !currentExecution->klass->genericContainerHandle)))
                 return false;
             const bool changed = !currentMethodVersion ||

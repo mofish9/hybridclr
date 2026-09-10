@@ -99,8 +99,10 @@ namespace dhe
         // Sorted Base tokens, including the generated identity type. Its
         // archived initializer is deliberately normalized by the Base workflow.
         std::vector<uint32_t> excludedBaseTypeTokens;
-        // Frozen methods selected solely for their concrete generic arguments.
-        // An unaffected closed context must keep its Base AOT entry.
+        // Unchanged methods selected solely for concrete generic arguments.
+        // BuildCurrentImagePlan accepts Current tokens here and maps them to
+        // sorted Base tokens in the bound plan/registration. Frozen MV tokens
+        // are identical on both sides. Unaffected closed instances keep AOT.
         std::vector<uint32_t> genericContextMethodTokens;
         bool operator==(const CurrentImageSource& other) const
         {
