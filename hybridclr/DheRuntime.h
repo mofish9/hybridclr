@@ -239,6 +239,11 @@ namespace dhe
     // Raw native invocation may retain Base metadata. Only select Current
     // when the concrete argument ABI and actual reference receiver are valid.
     const MethodInfo* ResolveNativeReferenceInvokeMethod(const MethodInfo* method, void* receiver);
+    // Use before constructing a managed/boxed argument frame. Unlike raw native
+    // invocation, the caller can size that frame from the selected signature.
+    const MethodInfo* ResolveCurrentReceiverMethod(const MethodInfo* method, void* receiver);
+    const MethodInfo* ResolveInterpreterVirtualMethod(const MethodInfo* method, void* receiver,
+        const MethodInfo* callSignature);
     // Direct bridge for supported generated native ABI shapes. It executes
     // current IL through Interpreter::Execute instead of calling
     // methodPointerCallByInterp, whose generated entry may be the AOT guard.

@@ -1351,6 +1351,43 @@ const MethodInfo* ResolveNativeReferenceInvokeMethod(const MethodInfo* method, v
     return method;
 }
 
+const MethodInfo* ResolveCurrentReceiverMethod(const MethodInfo* method, void* receiver)
+{
+    if (!receiver || !method || !method->klass || method->klass->byval_arg.valuetype ||
+        (method->flags & METHOD_ATTRIBUTE_STATIC) || method->is_generic || CanEnterWithBaseAbi(method))
+        return method;
+    const MethodInfo* current = ResolveCurrentExecutionMethod(method);
+    if (!current || current == method || !current->klass || current->klass->byval_arg.valuetype ||
+        (current->flags & METHOD_ATTRIBUTE_STATIC) || current->is_generic)
+        return method;
+    for (Il2CppClass* owner = static_cast<Il2CppObject*>(receiver)->klass; owner; owner = owner->parent)
+        if (owner == current->klass) return current;
+    return method;
+}
+
+const MethodInfo* ResolveInterpreterVirtualMethod(const MethodInfo* method, void* receiver,
+    const MethodInfo* callSignature)
+{
+    const MethodInfo* current = ResolveCurrentReceiverMethod(method, receiver);
+    if (current == method) return method;
+    bool compatible = callSignature && callSignature->parameters_count == current->parameters_count &&
+        SameClosedPhysicalAbiType(callSignature->return_type, current->return_type);
+    for (uint8_t index = 0; compatible && index < current->parameters_count; ++index)
+    {
+#if HYBRIDCLR_UNITY_2021
+        const Il2CppType* expected = callSignature->parameters[index].parameter_type;
+        const Il2CppType* actual = current->parameters[index].parameter_type;
+#else
+        const Il2CppType* expected = callSignature->parameters[index];
+        const Il2CppType* actual = current->parameters[index];
+#endif
+        compatible = SameClosedPhysicalAbiType(expected, actual);
+    }
+    if (!compatible)
+        metadata::RaiseExecutionEngineException("DHE interpreter virtual call frame does not match the Current implementation.");
+    return current;
+}
+
 struct PendingMetaVersionRegistration
 {
     const Il2CppAssembly* baseAssembly = nullptr;

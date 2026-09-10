@@ -681,38 +681,38 @@ namespace interpreter
 		{
 			// The cache may have been warmed before DHE publication. A stable
 			// logical method can now require the receiver's Current storage.
-			cache.actualMethod = const_cast<MethodInfo*>(hybridclr::dhe::ResolveNativeReferenceInvokeMethod(cache.actualMethod, obj));
-			return cache.actualMethod;
+			return const_cast<MethodInfo*>(hybridclr::dhe::ResolveInterpreterVirtualMethod(cache.actualMethod, obj, method));
 		}
 
+		// Stack sizing uses Current signatures, while interface/virtual slot
+		// identity stays logical. In particular, a physical Current interface
+		// is not an entry in the receiver's logical interface-offset table.
+		const MethodInfo* dispatchMethod = hybridclr::metadata::MetadataModule::ResolveDheMethod(method);
 		const MethodInfo* result;
-		if (hybridclr::metadata::IsInterface(method->klass->flags))
+		if (hybridclr::metadata::IsInterface(dispatchMethod->klass->flags))
 		{
-			result = il2cpp_codegen_get_interface_invoke_data(method->slot, obj, method->klass).method;
+			result = il2cpp_codegen_get_interface_invoke_data(dispatchMethod->slot, obj, dispatchMethod->klass).method;
 		}
 		else
 		{
 			const VirtualInvokeData* dheData;
-			result = hybridclr::dhe::TryGetVirtualInvokeData(klass, method, dheData)
-				? dheData->method : il2cpp_codegen_get_virtual_invoke_data(method->slot, obj).method;
+			result = hybridclr::dhe::TryGetVirtualInvokeData(klass, dispatchMethod, dheData)
+				? dheData->method : il2cpp_codegen_get_virtual_invoke_data(dispatchMethod->slot, obj).method;
 		}
 		IL2CPP_ASSERT(!method->genericMethod || method->is_inflated);
 		if (method->genericMethod && method->genericMethod->context.method_inst/* && method->genericMethod*/) // means it's genericInstance method 或generic method
 		{
 			result = GetGenericVirtualMethod(result, method);
 		}
-		// Logical interface dispatch can return a Base method even for a
-		// Current object. Keep the scalar/reference ABI and physical receiver
-		// checks used by native reflection before selecting its Current body.
-		result = hybridclr::dhe::ResolveNativeReferenceInvokeMethod(result, obj);
 		if (cacheable)
 		{
 			cache.klass = klass;
 			cache.method = method;
 			cache.actualMethod = const_cast<MethodInfo*>(result);
-			return cache.actualMethod;
 		}
-		return const_cast<MethodInfo*>(result);
+		// Cache the logical dispatch result. Validate the caller's concrete
+		// frame and physical receiver on both first lookup and cache hits.
+		return const_cast<MethodInfo*>(hybridclr::dhe::ResolveInterpreterVirtualMethod(result, obj, method));
 	}
 
 #define GET_OBJECT_INTERFACE_METHOD(obj, intfKlass, slot) (MethodInfo*)nullptr

@@ -1359,8 +1359,12 @@ namespace metadata
     {
         const MethodInfo* logical = GetMethodInfoFromToken(tokenCache, token,
             klassGenericContainer, methodGenericContainer, genericContext);
-        const MethodInfo* execution = logical;
-        if (logical->is_inflated && logical->genericMethod)
+        // Abstract declarations have no executable entry in the DHE dispatch
+        // table, but their signatures still size virtual-call argument/return
+        // storage. Keep this Current descriptor out of the logical token cache.
+        const MethodInfo* execution = IsAbstractMethod(logical->flags)
+            ? MetadataModule::GetDheCurrentMethodMetadata(logical) : logical;
+        if (execution->is_inflated && execution->genericMethod)
         {
             // Current-only and unchanged generic methods have no replacement
             // entry in the DHE dispatch table. Their argument/return layouts
@@ -1379,10 +1383,10 @@ namespace metadata
                 }
                 return changed ? il2cpp::vm::MetadataCache::GetGenericInst(args.data(), inst->type_argc) : inst;
             };
-            const Il2CppGenericContext& original = logical->genericMethod->context;
+            const Il2CppGenericContext& original = execution->genericMethod->context;
             Il2CppGenericContext current = { mapInst(original.class_inst), mapInst(original.method_inst) };
             if (current.class_inst != original.class_inst || current.method_inst != original.method_inst)
-                execution = il2cpp::metadata::GenericMetadata::Inflate(logical->genericMethod->methodDefinition, &current);
+                execution = il2cpp::metadata::GenericMetadata::Inflate(execution->genericMethod->methodDefinition, &current);
         }
         execution = dhe::ResolveCurrentExecutionMethod(execution);
         if (execution != logical) il2cpp::vm::Class::Init(execution->klass);

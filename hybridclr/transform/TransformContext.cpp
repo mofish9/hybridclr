@@ -4014,7 +4014,8 @@ else \
 				uint32_t methodDataIndex = GetOrAddResolveDataIndex(shareMethod);
 
 				bool isMultiDelegate = IsChildTypeOfMulticastDelegate(shareMethod->klass);
-				if (!isMultiDelegate && IsInterpreterMethod(shareMethod) && !IsInterface(shareMethod->klass->flags))
+				if (!isMultiDelegate && IsInterpreterMethod(shareMethod) && !IsInterface(shareMethod->klass->flags) &&
+					!IsAbstractMethod(shareMethod->flags))
 				{
 					PopStackN(resolvedTotalArgNum);
 
