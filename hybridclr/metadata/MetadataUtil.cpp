@@ -680,7 +680,13 @@ namespace metadata
 			if (current)
 				typeDef = GetUnderlyingTypeDefinition(current);
 		}
-		const Il2CppGenericContainer* klassGenericContainer = GetGenericContainerFromIl2CppType(type);
+		// MemberRef signatures encode VAR ordinals, whereas method definitions
+		// hold parameter handles owned by their declaring type. If DHE selected
+		// a Current declaration above, matching must use that same owner. Keep
+		// the caller's logical container and closed instantiation unchanged.
+		const Il2CppGenericContainer* klassGenericContainer = typeDef->genericContainerIndex == kGenericContainerIndexInvalid
+			? nullptr : reinterpret_cast<const Il2CppGenericContainer*>(
+				il2cpp::vm::GlobalMetadata::GetGenericContainerFromIndex(typeDef->genericContainerIndex));
 		const char* typeName = il2cpp::vm::GlobalMetadata::GetStringFromIndex(typeDef->nameIndex);
 		for (uint32_t i = 0; i < typeDef->method_count; i++)
 		{
