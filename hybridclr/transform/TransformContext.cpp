@@ -1,5 +1,8 @@
 #include "TransformContext.h"
 #include "InstructionCombiner.h"
+#include "FrozenFieldValidation.h"
+#include "../DheRuntime.h"
+#include <initializer_list>
 
 #include "metadata/GenericMetadata.h"
 #include "vm/Class.h"
@@ -3116,6 +3119,51 @@ else \
 		BuildInterpMethodInfo(result);
 	}
 
+	static bool HasCorlibSignature(const MethodInfo* method, const char* owner, const char* name,
+		const char* result, std::initializer_list<const char*> parameters)
+	{
+		if (!method || !method->klass || !method->klass->image || !method->klass->image->assembly ||
+			std::strcmp(method->klass->image->assembly->aname.name, "mscorlib") != 0 ||
+			std::strcmp(method->name, name) != 0 || !IsInstanceMethod(method) ||
+			method->parameters_count != parameters.size() ||
+			il2cpp::vm::Type::GetName(&method->klass->byval_arg, IL2CPP_TYPE_NAME_FORMAT_FULL_NAME) != owner ||
+			il2cpp::vm::Type::GetName(method->return_type, IL2CPP_TYPE_NAME_FORMAT_FULL_NAME) != result)
+			return false;
+		uint32_t index = 0;
+		for (const char* parameter : parameters)
+			if (il2cpp::vm::Type::GetName(GET_METHOD_PARAMETER_TYPE(method->parameters[index++]),
+				IL2CPP_TYPE_NAME_FORMAT_FULL_NAME) != parameter) return false;
+		return true;
+	}
+
+	static const MethodInfo* PrepareFrozenFieldValidation(Image* image, const MethodInfo* method,
+		const MethodBody& body, const std::set<uint32_t>& splitOffsets)
+	{
+		if (!method->klass->image->assembly || !dhe::IsFrozenAotExecutionSource(method->klass->image->assembly) ||
+			(!HasCorlibSignature(method, "System.Reflection.RuntimeFieldInfo", "GetValue", "System.Object", { "System.Object" }) &&
+			 !HasCorlibSignature(method, "System.Reflection.RuntimeFieldInfo", "SetValue", "System.Void",
+				{ "System.Object", "System.Object", "System.Reflection.BindingFlags", "System.Reflection.Binder", "System.Globalization.CultureInfo" })))
+			return nullptr;
+		Token2RuntimeHandleMap tokens(8);
+		bool valid = HasFrozenFieldValidationPrefix(body, splitOffsets, [&](size_t index, uint32_t token) {
+			const MethodInfo* target = image->GetMethodInfoFromToken(tokens, token, nullptr, nullptr, nullptr);
+			switch (index)
+			{
+			case 0: return HasCorlibSignature(target, "System.Reflection.FieldInfo", "get_IsStatic", "System.Boolean", {});
+			case 1: return HasCorlibSignature(target, "System.Reflection.TargetException", ".ctor", "System.Void", { "System.String" });
+			case 2: return HasCorlibSignature(target, "System.Reflection.MemberInfo", "get_DeclaringType", "System.Type", {});
+			case 3: return HasCorlibSignature(target, "System.Object", "GetType", "System.Type", {});
+			case 4: return HasCorlibSignature(target, "System.Type", "IsAssignableFrom", "System.Boolean", { "System.Type" });
+			default: return false;
+			}
+		});
+		const MethodInfo* instanceCheck = il2cpp::vm::Class::GetMethodFromName(il2cpp_defaults.systemtype_class, "IsInstanceOfType", 1);
+		if (!valid || !HasCorlibSignature(instanceCheck, "System.Type", "IsInstanceOfType", "System.Boolean", { "System.Object" }) ||
+			!IsVirtualMethod(instanceCheck->flags))
+			RaiseNotSupportedException("DHE frozen reflected-field validation does not match the supported Base IL.");
+		return instanceCheck;
+	}
+
 	void TransformContext::TransformBodyImpl(int32_t depth, int32_t localVarOffset)
 	{
 #pragma region header
@@ -3131,6 +3179,7 @@ else \
 
 
 		splitOffsets = bbc.GetSplitOffsets();
+		const MethodInfo* frozenFieldInstanceCheck = PrepareFrozenFieldValidation(image, methodInfo, body, splitOffsets);
 
 		ip2bb = pool.NewNAny<IRBasicBlock*>(body.codeSize + 1);
 		uint32_t lastSplitBegin = 0;
@@ -3973,6 +4022,15 @@ else \
 				directDelegateReceiverOffset = -1;
 				uint32_t token = (uint32_t)GetI4LittleEndian(ip + 1);
 				ip += 5;
+				// Preserve the object on the evaluation stack instead of replacing
+				// it with its selected logical Type. Adapt only this authenticated
+				// prefix; diagnostic GetType calls and cached raw IL remain intact.
+				if (frozenFieldInstanceCheck && ipOffset == 29) continue;
+				if (frozenFieldInstanceCheck && ipOffset == 34)
+				{
+					shareMethod = frozenFieldInstanceCheck;
+					goto LabelCallVir;
+				}
 				shareMethod = image->GetMethodExecutionInfoFromToken(tokenCache, token, klassContainer, methodContainer, genericContext);
 			}
 		LabelCallVir:
