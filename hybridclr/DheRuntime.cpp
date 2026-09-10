@@ -343,7 +343,6 @@ bool ParseMetaVersion(const void* data, uint32_t size, MetaVersionData& result)
             }
         }
         mutableMethod->isInterpterImpl = true;
-        RecordInterpreterEntry();
         return mutableMethod->interpData != nullptr;
     }
 

@@ -1699,6 +1699,9 @@ const int32_t kMaxRetValueTypeStackObjectSize = 1024;
 
 	void Interpreter::Execute(const MethodInfo* methodInfo, StackObject* args, void* ret)
 	{
+		// Count the actual native-to-interpreter entry, including reflection's
+		// prepared Current invoker. Preparation alone is not an execution.
+		if (dhe::IsChangedMethod(methodInfo)) dhe::RecordInterpreterEntry();
 	#if defined(HYBRIDCLR_LAB_INSTRUMENTED)
 		InterpreterProfile::RecordInterpreterEntry();
 	#endif
