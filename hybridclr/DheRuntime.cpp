@@ -1244,7 +1244,8 @@ static bool SameStableBaseAbiType(const Il2CppType* baseType, const Il2CppType* 
 
 static bool SameClosedPhysicalAbiType(const Il2CppType* before, const Il2CppType* after);
 
-static bool HasCompatiblePhysicalBaseFrame(const MethodInfo* baseMethod, const MethodInfo* currentMethod)
+static bool HasCompatiblePhysicalBaseFrame(const MethodInfo* baseMethod, const MethodInfo* currentMethod,
+    bool authenticatedFrozenDeclaration)
 {
     if ((baseMethod->flags & METHOD_ATTRIBUTE_STATIC) != (currentMethod->flags & METHOD_ATTRIBUTE_STATIC) ||
         baseMethod->is_generic || currentMethod->is_generic || baseMethod->is_inflated || currentMethod->is_inflated ||
@@ -1279,12 +1280,17 @@ static bool HasCompatiblePhysicalBaseFrame(const MethodInfo* baseMethod, const M
             metadata::AOTHomologousImage* image = metadata::AOTHomologousImage::FindImageByAssembly(owner->image->assembly);
             if (owner == baseMethod->klass)
             {
-                const Il2CppType* declaration = image ? image->GetDheCurrentType(&owner->byval_arg) : nullptr;
-                // Require the staged declaration that actually owns this body.
-                // An absent mapping cannot establish an unchanged receiver ABI.
-                if (!declaration || declaration->type != currentMethod->klass->byval_arg.type ||
-                    declaration->data.typeHandle != currentMethod->klass->byval_arg.data.typeHandle)
-                    return false;
+                if (!image) return false;
+                if (!authenticatedFrozenDeclaration)
+                {
+                    const Il2CppType* declaration = image->GetDheCurrentType(&owner->byval_arg);
+                    // Mutable sources need their staged owner declaration.
+                    // Frozen sources preserve public Base declarations and
+                    // instead require the exact authenticated method mapping.
+                    if (!declaration || declaration->type != currentMethod->klass->byval_arg.type ||
+                        declaration->data.typeHandle != currentMethod->klass->byval_arg.data.typeHandle)
+                        return false;
+                }
             }
             const Il2CppType* selected = image ? image->GetDheExecutionType(&owner->byval_arg) : nullptr;
             if (selected && selected != &owner->byval_arg) return false;
@@ -1601,7 +1607,14 @@ bool PrepareAndRegisterMetaVersions(
                     auto currentIdentity = plan.state.methodBaseTokens.emplace(currentExecution, baseMethodVersion.token);
                     if (!currentIdentity.second && currentIdentity.first->second != baseMethodVersion.token)
                         return false;
-                    if (!HasCompatiblePhysicalBaseFrame(baseMethod, currentExecution))
+                    bool frozenDeclaration = false;
+                    if (registration.source.kind == CurrentImageSourceKind::FrozenBaseAot &&
+                        logicalMappings != s_logicalMethodMappings.end())
+                    {
+                        auto mapped = logicalMappings->second.find(currentExecution);
+                        frozenDeclaration = mapped != logicalMappings->second.end() && mapped->second == baseMethod;
+                    }
+                    if (!HasCompatiblePhysicalBaseFrame(baseMethod, currentExecution, frozenDeclaration))
                         plan.state.incompatibleBaseAbiTokens.insert(baseMethodVersion.token);
                     currentExecutions.erase(execution);
                 }
