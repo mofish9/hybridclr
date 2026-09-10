@@ -596,10 +596,13 @@ static const MethodInfo* ResolveMethodInAssembly(const Il2CppAssembly* assembly,
         return nullptr;
     }
 
-    il2cpp::vm::TypeVector types;
-    il2cpp::vm::Image::GetTypes(image, false, &types);
-    for (const Il2CppClass* type : types)
+    // Resolve against the physical Base definition table. The reflection
+    // enumeration hides <Module> and can include Current supplemental types;
+    // neither behavior is valid for an assembly-local Base MethodDef token.
+    const uint32_t typeCount = il2cpp::vm::Image::GetNumTypes(image);
+    for (uint32_t index = 0; index < typeCount; ++index)
     {
+        const Il2CppClass* type = il2cpp::vm::Image::GetType(image, index);
         if (!type)
         {
             continue;
