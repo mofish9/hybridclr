@@ -24,6 +24,8 @@ namespace hybridclr
 {
 namespace dhe
 {
+    Il2CppClass* ResolveReferenceAllocationClass(Il2CppClass* klass);
+
     // The Base Player embeds one immutable MetaVersion per DHE assembly. At
     // runtime it is compared with the current MetaVersion shipped beside the
     // current managed assembly.
