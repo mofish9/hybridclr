@@ -1242,13 +1242,15 @@ static bool SameStableBaseAbiType(const Il2CppType* baseType, const Il2CppType* 
     }
 }
 
-static bool HasCompatibleScalarBaseFrame(const MethodInfo* baseMethod, const MethodInfo* currentMethod)
+static bool SameClosedPhysicalAbiType(const Il2CppType* before, const Il2CppType* after);
+
+static bool HasCompatiblePhysicalBaseFrame(const MethodInfo* baseMethod, const MethodInfo* currentMethod)
 {
     if ((baseMethod->flags & METHOD_ATTRIBUTE_STATIC) != (currentMethod->flags & METHOD_ATTRIBUTE_STATIC) ||
         baseMethod->is_generic || currentMethod->is_generic || baseMethod->is_inflated || currentMethod->is_inflated ||
         baseMethod->klass->genericContainerHandle || currentMethod->klass->genericContainerHandle ||
         baseMethod->parameters_count != currentMethod->parameters_count ||
-        !SameStableBaseAbiType(baseMethod->return_type, currentMethod->return_type))
+        !SameClosedPhysicalAbiType(baseMethod->return_type, currentMethod->return_type))
         return false;
     for (uint8_t index = 0; index < baseMethod->parameters_count; ++index)
     {
@@ -1259,7 +1261,7 @@ static bool HasCompatibleScalarBaseFrame(const MethodInfo* baseMethod, const Met
         const Il2CppType* baseType = baseMethod->parameters[index];
         const Il2CppType* currentType = currentMethod->parameters[index];
 #endif
-        if (!SameStableBaseAbiType(baseType, currentType))
+        if (!SameClosedPhysicalAbiType(baseType, currentType))
             return false;
     }
     if (!(baseMethod->flags & METHOD_ATTRIBUTE_STATIC))
@@ -1268,7 +1270,7 @@ static bool HasCompatibleScalarBaseFrame(const MethodInfo* baseMethod, const Met
             return false;
         // A native callback can keep its Base receiver when that physical
         // storage (including its parents) is still selected. Changed locals
-        // belong to the interpreter's frame and do not change this scalar ABI.
+        // belong to the interpreter's frame and do not change this physical ABI.
         // Receiver/layout evolution must still enter through a Current frame.
         for (Il2CppClass* owner = baseMethod->klass; owner; owner = owner->parent)
         {
@@ -1599,7 +1601,7 @@ bool PrepareAndRegisterMetaVersions(
                     auto currentIdentity = plan.state.methodBaseTokens.emplace(currentExecution, baseMethodVersion.token);
                     if (!currentIdentity.second && currentIdentity.first->second != baseMethodVersion.token)
                         return false;
-                    if (!HasCompatibleScalarBaseFrame(baseMethod, currentExecution))
+                    if (!HasCompatiblePhysicalBaseFrame(baseMethod, currentExecution))
                         plan.state.incompatibleBaseAbiTokens.insert(baseMethodVersion.token);
                     currentExecutions.erase(execution);
                 }
