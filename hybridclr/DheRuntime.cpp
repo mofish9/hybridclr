@@ -460,6 +460,15 @@ bool IsMutableDheAssembly(const Il2CppAssembly* assembly)
         entry->second.source.kind == CurrentImageSourceKind::MutableHotfix;
 }
 
+const Il2CppImage* ResolvePublicAssemblyImage(const Il2CppImage* image)
+{
+    // IsDheAssembly acquires the completed registration. Both image ownership
+    // and the public assembly image are initialized before that publication.
+    // In particular, do not publish a hidden image during Current preparation.
+    return image && image->assembly && IsDheAssembly(image->assembly) && image->assembly->image
+        ? image->assembly->image : image;
+}
+
 bool IsDheModuleInitializationReady(const char* assemblyName)
 {
     return assemblyName && assemblyName[0] && IsMutableDheAssembly(

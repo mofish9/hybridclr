@@ -15,8 +15,10 @@
 #define HYBRIDCLR_DHE_HAS_LENGTH_PRESERVED_CONSTANT_STRINGS 1
 #define HYBRIDCLR_DHE_HAS_TRACKED_LOAD_PHASE 1
 #define HYBRIDCLR_DHE_HAS_REFERENCE_INTERFACE_QUERY 1
+#define HYBRIDCLR_DHE_HAS_PUBLIC_ASSEMBLY_IMAGE 1
 
 struct Il2CppAssembly;
+struct Il2CppImage;
 struct Il2CppClass;
 struct MethodInfo;
 struct VirtualInvokeData;
@@ -26,6 +28,10 @@ namespace hybridclr
 namespace dhe
 {
     Il2CppClass* ResolveReferenceAllocationClass(Il2CppClass* klass);
+
+    // Native consumers identify assemblies by their registered public image.
+    // The hidden Current image remains the owner of physical metadata.
+    const Il2CppImage* ResolvePublicAssemblyImage(const Il2CppImage* image);
 
     // Keep an in-progress native interface cursor on the table it started in.
     // requested is the caller's descriptor; selected is its published mapping.
