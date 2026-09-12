@@ -6688,14 +6688,15 @@ ir->ele = ele.locOffset;
 					if (IS_CLASS_VALUE_TYPE(conKlass))
 					{
 						// impl in self
-						const MethodInfo* implMethod = image->FindImplMethod(conKlass, shareMethod);
+						const MethodInfo* implMethod = dhe::ResolveCurrentExecutionMethod(
+							image->FindImplMethod(conKlass, shareMethod));
 						if (implMethod && implMethod->klass == conKlass)
 						{
 							// The constrained receiver already uses Current storage.
 							// Vtable lookup retains the logical Base descriptor; use
 							// the same execution mapping as a direct call token before
 							// sizing/emitting the concrete value-type call frame.
-							shareMethod = dhe::ResolveCurrentExecutionMethod(implMethod);
+							shareMethod = implMethod;
 							goto LabelCall;
 						}
 						else if (conKlass->enumtype && !std::strcmp(shareMethod->name, "GetHashCode"))

@@ -1412,6 +1412,18 @@ const MethodInfo* ResolveInterpreterVirtualMethod(const MethodInfo* method, void
     const MethodInfo* callSignature)
 {
     const MethodInfo* current = ResolveCurrentReceiverMethod(method, receiver);
+    if (current == method && receiver && method && method->klass && method->klass->byval_arg.valuetype)
+    {
+        // This entry is called with a boxed receiver before interpreter unboxing.
+        // The native receiver helper deliberately excludes value types because
+        // its other callers can hold an unboxed native frame. Match the actual
+        // physical box here; logical type equivalence is insufficient.
+        const MethodInfo* selected = ResolveCurrentExecutionMethod(method);
+        if (selected && selected != method && selected->klass && selected->klass->byval_arg.valuetype &&
+            !(selected->flags & METHOD_ATTRIBUTE_STATIC) && !selected->is_generic &&
+            static_cast<Il2CppObject*>(receiver)->klass == selected->klass)
+            current = selected;
+    }
     if (current == method) return method;
     bool compatible = callSignature && callSignature->parameters_count == current->parameters_count &&
         SameClosedPhysicalAbiType(callSignature->return_type, current->return_type);
