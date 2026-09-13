@@ -582,16 +582,21 @@ namespace metadata
 
 	Il2CppClass* MetadataModule::GetDheReferenceAllocationClass(Il2CppClass* klass)
 	{
+		return klass && !klass->byval_arg.valuetype ? GetDheExecutionClass(klass) : klass;
+	}
+
+	Il2CppClass* MetadataModule::GetDheExecutionClass(Il2CppClass* klass)
+	{
 		// Acquire completed publication before looking up an execution layout.
 		// Native callers may still hold the public Base type (for example Unity
 		// AddComponent(Type)). A new object must own the selected physical fields.
 		// Existing objects and value-type ABI checks are not changed here.
-		if (!klass || !klass->image || klass->byval_arg.valuetype)
+		if (!klass || !klass->image)
 			return klass;
 		// Public type queries also accept generic parameters and pointers. Their
 		// metadata payload is not a TypeDef and must not enter the image lookup.
 		const Il2CppTypeEnum type = static_cast<Il2CppTypeEnum>(klass->byval_arg.type);
-		if (type != IL2CPP_TYPE_CLASS && type != IL2CPP_TYPE_GENERICINST &&
+		if (type != IL2CPP_TYPE_CLASS && type != IL2CPP_TYPE_VALUETYPE && type != IL2CPP_TYPE_GENERICINST &&
 			type != IL2CPP_TYPE_ARRAY && type != IL2CPP_TYPE_SZARRAY)
 			return klass;
 		// A generic container need not belong to the assembly owning its selected

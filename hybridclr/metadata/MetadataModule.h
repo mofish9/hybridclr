@@ -61,6 +61,9 @@ namespace metadata
 		static const MethodInfo* GetDheCurrentMethodMetadata(const MethodInfo* method);
 		static Il2CppClass* GetDheClassInitializationOwner(Il2CppClass* klass);
 		static Il2CppClass* GetDheReferenceAllocationClass(Il2CppClass* klass);
+		// Physical storage selected for a method declaration owner, including
+		// boxed value owners. Does not establish compatibility with an old object.
+		static Il2CppClass* GetDheExecutionClass(Il2CppClass* klass);
 		static const Il2CppType* GetDhePublicReferenceType(const Il2CppType* type);
 		static FieldInfo* ResolveDheReferenceInstanceField(Il2CppObject* obj, const FieldInfo* field);
 		static bool TryGetDheVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot,

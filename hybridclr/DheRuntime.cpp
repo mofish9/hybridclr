@@ -21,6 +21,7 @@
 #include "interpreter/InterpreterDefs.h"
 #include "metadata/GenericMetadata.h"
 #include "metadata/AOTHomologousImage.h"
+#include "metadata/MetadataModule.h"
 #include "vm/Exception.h"
 #include "Il2CppCompatibleDef.h"
 
@@ -1389,8 +1390,9 @@ const MethodInfo* ResolveNativeReferenceInvokeMethod(const MethodInfo* method, v
     }
     // Public type equivalence and the native descriptor cache do not establish
     // object storage. Walk actual physical parents without logical remapping.
+    Il2CppClass* executionOwner = metadata::MetadataModule::GetDheExecutionClass(current->klass);
     for (Il2CppClass* owner = static_cast<Il2CppObject*>(receiver)->klass; owner; owner = owner->parent)
-        if (owner == current->klass) return current;
+        if (owner == executionOwner) return current;
     return method;
 }
 
@@ -1403,8 +1405,9 @@ const MethodInfo* ResolveCurrentReceiverMethod(const MethodInfo* method, void* r
     if (!current || current == method || !current->klass || current->klass->byval_arg.valuetype ||
         (current->flags & METHOD_ATTRIBUTE_STATIC) || current->is_generic)
         return method;
+    Il2CppClass* executionOwner = metadata::MetadataModule::GetDheExecutionClass(current->klass);
     for (Il2CppClass* owner = static_cast<Il2CppObject*>(receiver)->klass; owner; owner = owner->parent)
-        if (owner == current->klass) return current;
+        if (owner == executionOwner) return current;
     return method;
 }
 
@@ -1421,7 +1424,7 @@ const MethodInfo* ResolveInterpreterVirtualMethod(const MethodInfo* method, void
         const MethodInfo* selected = ResolveCurrentExecutionMethod(method);
         if (selected && selected != method && selected->klass && selected->klass->byval_arg.valuetype &&
             !(selected->flags & METHOD_ATTRIBUTE_STATIC) && !selected->is_generic &&
-            static_cast<Il2CppObject*>(receiver)->klass == selected->klass)
+            static_cast<Il2CppObject*>(receiver)->klass == metadata::MetadataModule::GetDheExecutionClass(selected->klass))
             current = selected;
     }
     if (current == method) return method;
