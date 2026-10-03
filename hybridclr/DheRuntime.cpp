@@ -978,6 +978,9 @@ static bool PrepareResolvedMethods(const std::vector<const MethodInfo*>& methods
         // a changed value-type instantiation cannot fall back to the Base ABI.
         if (method->klass && (method->klass->generic_class || method->klass->genericContainerHandle))
         {
+            // Only the definition flag is prepared here; no concrete virtual
+            // bridge exists yet. Do not commit a possibly null vtable pointer.
+            snapshots.back().vtableEntry = nullptr;
             // Inflated methods copy this definition's implementation state.
             // Establish it before registration publishes any Current binding.
             const_cast<MethodInfo*>(method)->isInterpterImpl = true;
