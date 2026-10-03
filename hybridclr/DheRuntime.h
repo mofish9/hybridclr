@@ -246,8 +246,8 @@ namespace dhe
     // Raw native invocation may retain Base metadata. Only select Current
     // when the concrete argument ABI and actual reference receiver are valid.
     const MethodInfo* ResolveNativeReferenceInvokeMethod(const MethodInfo* method, void* receiver);
-    // Use before constructing a managed/boxed argument frame. Unlike raw native
-    // invocation, the caller can size that frame from the selected signature.
+    // Use before unboxing or constructing a managed argument frame. Boxed value
+    // receivers require exact physical storage; raw native invocation is separate.
     const MethodInfo* ResolveCurrentReceiverMethod(const MethodInfo* method, void* receiver);
     const MethodInfo* ResolveInterpreterVirtualMethod(const MethodInfo* method, void* receiver,
         const MethodInfo* callSignature);

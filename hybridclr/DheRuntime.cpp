@@ -345,22 +345,13 @@ bool ParseMetaVersion(const void* data, uint32_t size, MetaVersionData& result)
         {
             return false;
         }
-        MethodInfo* mutableMethod = const_cast<MethodInfo*>(method);
-        const bool wasInterpreterMethod = mutableMethod->isInterpterImpl;
-        // GetInterpMethodInfo requires the interpreter bit while it builds the
-        // transformed body. If transformation fails, restore that bit before
-        // returning so a failed guard cannot masquerade as a prepared method.
-        if (!mutableMethod->interpData)
-        {
-            mutableMethod->isInterpterImpl = true;
-            if (!hybridclr::interpreter::InterpreterModule::GetInterpMethodInfo(mutableMethod))
-            {
-                mutableMethod->isInterpterImpl = wasInterpreterMethod;
-                return false;
-            }
-        }
-        mutableMethod->isInterpterImpl = true;
-        return mutableMethod->interpData != nullptr;
+        // Registration and generic inflation establish the interpreter flag
+        // before publishing the method. Execution must not rewrite shared
+        // MethodInfo bitfields, including after a failed first transform.
+        if (il2cpp::os::Atomic::LoadPointerAcquire(&method->interpData))
+            return true;
+        return method->isInterpterImpl &&
+            hybridclr::interpreter::InterpreterModule::GetInterpMethodInfo(method) != nullptr;
     }
 
     void RequireDheInterpreterMethod(const MethodInfo* method)
@@ -879,7 +870,6 @@ const MethodInfo* ResolveInterpreterMethod(const MethodInfo* baseMethod)
             // makes that entry unsafe for this concrete instantiation, so
             // materialize the interpreter bridge on the inflated MethodInfo.
             hybridclr::InitAndGetInterpreterDirectlyCallMethodPointer(currentMethod);
-            const_cast<MethodInfo*>(currentMethod)->isInterpterImpl = true;
         }
     }
     return currentMethod;
@@ -941,7 +931,6 @@ const MethodInfo* ResolveCurrentExecutionMethod(const MethodInfo* method)
         if (execution)
         {
             hybridclr::InitAndGetInterpreterDirectlyCallMethodPointer(execution);
-            const_cast<MethodInfo*>(execution)->isInterpterImpl = true;
         }
         return execution;
     }
@@ -981,6 +970,7 @@ static bool PrepareResolvedMethods(const std::vector<const MethodInfo*>& methods
             return false;
         }
 
+        snapshots.push_back(CaptureMethodPreparationSnapshot(method));
         // Methods declared on generic classes do not have a concrete
         // direct-call ABI until an inflated instantiation is used; leave
         // those shapes to the normal interpreter metadata path. Generic
@@ -988,10 +978,12 @@ static bool PrepareResolvedMethods(const std::vector<const MethodInfo*>& methods
         // a changed value-type instantiation cannot fall back to the Base ABI.
         if (method->klass && (method->klass->generic_class || method->klass->genericContainerHandle))
         {
+            // Inflated methods copy this definition's implementation state.
+            // Establish it before registration publishes any Current binding.
+            const_cast<MethodInfo*>(method)->isInterpterImpl = true;
             continue;
         }
 
-        snapshots.push_back(CaptureMethodPreparationSnapshot(method));
         Il2CppMethodPointer interpreterPointer =
             hybridclr::InitAndGetInterpreterDirectlyCallMethodPointer(method);
         if (!interpreterPointer)
@@ -1398,9 +1390,27 @@ const MethodInfo* ResolveNativeReferenceInvokeMethod(const MethodInfo* method, v
 
 const MethodInfo* ResolveCurrentReceiverMethod(const MethodInfo* method, void* receiver)
 {
-    if (!receiver || !method || !method->klass || method->klass->byval_arg.valuetype ||
-        (method->flags & METHOD_ATTRIBUTE_STATIC) || method->is_generic || CanEnterWithBaseAbi(method))
+    if (!receiver || !method || !method->klass ||
+        (method->flags & METHOD_ATTRIBUTE_STATIC) || method->is_generic)
         return method;
+    if (method->klass->byval_arg.valuetype)
+    {
+        // Managed/reflection callers still hold a box here. Raw native callers
+        // use ResolveNativeReferenceInvokeMethod, which excludes value owners.
+        const MethodInfo* current = ResolveCurrentExecutionMethod(method);
+        if (!current || !current->klass || !current->klass->byval_arg.valuetype ||
+            (current->flags & METHOD_ATTRIBUTE_STATIC) || current->is_generic)
+            return method;
+        Il2CppClass* executionOwner = metadata::MetadataModule::GetDheExecutionClass(current->klass);
+        if (static_cast<Il2CppObject*>(receiver)->klass == executionOwner)
+            return current;
+        // A logical Base entry retains its ABI rejection guard. A concrete
+        // Current descriptor must reject an old box before it can be unboxed.
+        if (current == method && IsChangedMethod(method))
+            RaiseExecutionEngineException("DHE boxed receiver does not own the Current value layout.");
+        return method;
+    }
+    if (CanEnterWithBaseAbi(method)) return method;
     const MethodInfo* current = ResolveCurrentExecutionMethod(method);
     if (!current || current == method || !current->klass || current->klass->byval_arg.valuetype ||
         (current->flags & METHOD_ATTRIBUTE_STATIC) || current->is_generic)
@@ -1415,18 +1425,6 @@ const MethodInfo* ResolveInterpreterVirtualMethod(const MethodInfo* method, void
     const MethodInfo* callSignature)
 {
     const MethodInfo* current = ResolveCurrentReceiverMethod(method, receiver);
-    if (current == method && receiver && method && method->klass && method->klass->byval_arg.valuetype)
-    {
-        // This entry is called with a boxed receiver before interpreter unboxing.
-        // The native receiver helper deliberately excludes value types because
-        // its other callers can hold an unboxed native frame. Match the actual
-        // physical box here; logical type equivalence is insufficient.
-        const MethodInfo* selected = ResolveCurrentExecutionMethod(method);
-        if (selected && selected != method && selected->klass && selected->klass->byval_arg.valuetype &&
-            !(selected->flags & METHOD_ATTRIBUTE_STATIC) && !selected->is_generic &&
-            static_cast<Il2CppObject*>(receiver)->klass == metadata::MetadataModule::GetDheExecutionClass(selected->klass))
-            current = selected;
-    }
     if (current == method) return method;
     bool compatible = callSignature && callSignature->parameters_count == current->parameters_count &&
         SameClosedPhysicalAbiType(callSignature->return_type, current->return_type);
