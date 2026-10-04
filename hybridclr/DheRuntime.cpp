@@ -1,6 +1,7 @@
 #include "DheRuntime.h"
 #include "DheThreadCache.h"
 #include "DheInvokeBuffer.h"
+#include "DheAotGuardCache.h"
 
 #include <algorithm>
 #include <atomic>
@@ -53,9 +54,27 @@ namespace
         std::unordered_map<const MethodInfo*, uint32_t> methodBaseTokens;
     };
 
+    struct AssemblyNameHash
+    {
+        size_t operator()(const char* name) const
+        {
+            size_t hash = 2166136261u;
+            for (const unsigned char* value = reinterpret_cast<const unsigned char*>(name); *value; ++value)
+                hash = (hash ^ *value) * 16777619u;
+            return hash;
+        }
+    };
+    struct AssemblyNameEqual
+    {
+        bool operator()(const char* left, const char* right) const { return std::strcmp(left, right) == 0; }
+    };
+
     struct PublishedState
     {
         std::unordered_map<const Il2CppAssembly*, DHEAssemblyState> assemblyStates;
+        // Keys are process-lifetime metadata names; values point into this
+        // immutable snapshot. Build the entire index before release publication.
+        std::unordered_map<const char*, const DHEAssemblyState*, AssemblyNameHash, AssemblyNameEqual> guardAssemblies;
         bool hasChangedMethods = false;
     };
 
@@ -66,6 +85,7 @@ namespace
     const PublishedState* s_emptyState = new PublishedState();
     std::atomic<const PublishedState*> s_publishedState{ s_emptyState };
     thread_local ThreadCache<bool> s_methodDecisionCache;
+    thread_local AotGuardCache<const MethodInfo*> s_aotGuardCache;
     // SUPERSET creates the current MethodInfo objects before DHE receives the
     // MetaVersion pair. Keep these mappings until the registration snapshot
     // copies them into its lock-free dispatch state.
@@ -685,17 +705,21 @@ const MethodInfo* ResolveAotGuardMethodByToken(const char* assemblyName, uint32_
         return nullptr;
     const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
     if (!published->hasChangedMethods) return nullptr;
-    for (const auto& entry : published->assemblyStates)
+    const MethodInfo* result;
+    if (s_aotGuardCache.TryGet(published, assemblyName, token, result)) return result;
+    result = nullptr;
+    auto assembly = published->guardAssemblies.find(assemblyName);
+    if (assembly != published->guardAssemblies.end())
     {
-        const Il2CppAssembly* assembly = entry.first;
-        if (!assembly || !assembly->aname.name || std::strcmp(assembly->aname.name, assemblyName) != 0)
-            continue;
-        if (entry.second.changedMethodTokens.find(token) == entry.second.changedMethodTokens.end())
-            return nullptr;
-        auto method = entry.second.baseMethods.find(token);
-        return method == entry.second.baseMethods.end() ? nullptr : method->second;
+        const DHEAssemblyState& state = *assembly->second;
+        if (state.changedMethodTokens.find(token) != state.changedMethodTokens.end())
+        {
+            auto method = state.baseMethods.find(token);
+            if (method != state.baseMethods.end()) result = method->second;
+        }
     }
-    return nullptr;
+    s_aotGuardCache.Put(published, assemblyName, token, result);
+    return result;
 }
 
 const MethodInfo* ResolveMethodByToken(const char* assemblyName, uint32_t token)
@@ -1710,12 +1734,18 @@ bool PrepareAndRegisterMetaVersions(
         }
         // Finish allocations before committing vtables. Signature resolution
         // and state allocation can throw as well as return a failure code.
-        next.reset(new PublishedState(*published));
+        next.reset(new PublishedState());
+        next->assemblyStates = published->assemblyStates;
+        next->hasChangedMethods = published->hasChangedMethods;
         for (PendingMetaVersionRegistration& plan : pending)
         {
             next->hasChangedMethods |= !plan.state.changedMethodTokens.empty();
             next->assemblyStates.emplace(plan.baseAssembly, std::move(plan.state));
         }
+        next->guardAssemblies.reserve(next->assemblyStates.size());
+        for (const auto& entry : next->assemblyStates)
+            if (entry.first && entry.first->aname.name)
+                next->guardAssemblies.emplace(entry.first->aname.name, &entry.second);
     }
     catch (...)
     {
