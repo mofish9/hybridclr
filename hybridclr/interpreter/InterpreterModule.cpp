@@ -308,12 +308,14 @@ namespace interpreter
 			Interpreter::Execute(method, args.data(), ret);
 			return;
 		}
+	#if HYBRIDCLR_DHE_DIAGNOSTICS
 		if (method && method->klass && method->klass->image &&
 			method->klass->image->assembly &&
 			hybridclr::dhe::IsDheAssembly(method->klass->image->assembly))
 		{
 			hybridclr::dhe::RecordAotBridgeCall();
 		}
+	#endif
 		if (!PrepareInterpreterManaged2NativeCall(method))
 		{
 			if (method->invoker_method == nullptr)

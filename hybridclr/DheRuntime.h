@@ -5,6 +5,12 @@
 #include <string>
 #include <vector>
 
+// Production builds do not collect dispatch statistics. Diagnostic Players
+// opt in explicitly through the native compiler definitions.
+#ifndef HYBRIDCLR_DHE_DIAGNOSTICS
+#define HYBRIDCLR_DHE_DIAGNOSTICS 0
+#endif
+
 #define HYBRIDCLR_DHE_HAS_CURRENT_EXECUTION 1
 #define HYBRIDCLR_DHE_HAS_CURRENT_IMAGE_PLAN 1
 #define HYBRIDCLR_DHE_HAS_FROZEN_AOT_SOURCE 1
@@ -17,6 +23,7 @@
 #define HYBRIDCLR_DHE_HAS_REFERENCE_INTERFACE_QUERY 1
 #define HYBRIDCLR_DHE_HAS_PUBLIC_ASSEMBLY_IMAGE 1
 #define HYBRIDCLR_DHE_HAS_PHYSICAL_RECEIVER_DISPATCH 1
+#define HYBRIDCLR_DHE_HAS_PUBLICATION_IDENTITY 1
 
 struct Il2CppAssembly;
 struct Il2CppImage;
@@ -29,6 +36,10 @@ namespace hybridclr
 namespace dhe
 {
     Il2CppClass* ResolveReferenceAllocationClass(Il2CppClass* klass);
+
+    // Acquire the complete one-shot registration. Null means no DHE assembly
+    // has been published. Every non-null identity lives for the process lifetime.
+    const void* GetPublicationIdentity();
 
     // Native consumers identify assemblies by their registered public image.
     // The hidden Current image remains the owner of physical metadata.
@@ -274,9 +285,16 @@ namespace dhe
     int64_t ExecuteInterpreterInstanceI8I8(const MethodInfo* method, void* thisPtr, int64_t value);
     void ExecuteInterpreterInstanceVoidI4(const MethodInfo* method, void* thisPtr, int32_t value);
 
+    bool DispatchDiagnosticsEnabled();
+#if HYBRIDCLR_DHE_DIAGNOSTICS
     void RecordInterpreterEntry();
     void RecordAotBridgeCall();
     void RecordAotEntry();
+#else
+    inline void RecordInterpreterEntry() {}
+    inline void RecordAotBridgeCall() {}
+    inline void RecordAotEntry() {}
+#endif
     int32_t GetInterpreterEntryCount();
     int32_t GetAotBridgeCallCount();
     int32_t GetAotEntryCount();

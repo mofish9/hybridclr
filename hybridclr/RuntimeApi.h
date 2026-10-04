@@ -20,6 +20,7 @@ namespace hybridclr
 		static int32_t LoadDifferentialHybridAssemblyBatchWithPhase(Il2CppArray* dllData, Il2CppArray* baseMvData, Il2CppArray* currentMvData, Il2CppArray* typeSelections, Il2CppArray* methodSelections, Il2CppArray* sourceKinds, Il2CppArray* excludedTypeSelections, Il2CppArray* genericContextSelections, Il2CppArray* interpreterDlls, int32_t* phase);
 		static int32_t IsDifferentialMethodChanged(Il2CppReflectionMethod* method);
 		static int32_t GetDifferentialInterpreterEntryCount();
+		static bool AreDifferentialDispatchDiagnosticsEnabled();
 		static int32_t GetDifferentialAotBridgeCallCount();
 		static int32_t GetDifferentialAotEntryCount();
 		static void ResetDifferentialDispatchCounters();

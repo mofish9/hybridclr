@@ -1,4 +1,6 @@
 #include "DheRuntime.h"
+#include "DheThreadCache.h"
+#include "DheInvokeBuffer.h"
 
 #include <algorithm>
 #include <atomic>
@@ -54,6 +56,7 @@ namespace
     struct PublishedState
     {
         std::unordered_map<const Il2CppAssembly*, DHEAssemblyState> assemblyStates;
+        bool hasChangedMethods = false;
     };
 
     // State is copied and published only when an assembly is registered. The
@@ -62,14 +65,17 @@ namespace
     std::recursive_mutex s_registrationMutex;
     const PublishedState* s_emptyState = new PublishedState();
     std::atomic<const PublishedState*> s_publishedState{ s_emptyState };
+    thread_local ThreadCache<bool> s_methodDecisionCache;
     // SUPERSET creates the current MethodInfo objects before DHE receives the
     // MetaVersion pair. Keep these mappings until the registration snapshot
     // copies them into its lock-free dispatch state.
     std::unordered_map<const Il2CppAssembly*,
         std::unordered_map<const MethodInfo*, const MethodInfo*>> s_logicalMethodMappings;
+#if HYBRIDCLR_DHE_DIAGNOSTICS
     std::atomic<int32_t> s_interpreterEntryCount{ 0 };
     std::atomic<int32_t> s_aotBridgeCallCount{ 0 };
     std::atomic<int32_t> s_aotEntryCount{ 0 };
+#endif
 
     constexpr uint32_t kSha256InitialState[8] = {
         0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
@@ -434,6 +440,12 @@ bool ParseMetaVersion(const void* data, uint32_t size, MetaVersionData& result)
         }
     }
 
+const void* GetPublicationIdentity()
+{
+    const PublishedState* state = s_publishedState.load(std::memory_order_acquire);
+    return state->assemblyStates.empty() ? nullptr : state;
+}
+
 bool IsDheAssembly(const Il2CppAssembly* assembly)
 {
     if (!assembly)
@@ -497,13 +509,13 @@ static bool IsUnaffectedConditionalGenericInstance(const MethodInfo* method,
     const DHEAssemblyState& state, uint32_t token);
 static bool HasCompatibleClosedBaseFrame(const MethodInfo* method);
 
-bool IsChangedMethod(const MethodInfo* method)
+static bool IsChangedMethodUncached(const MethodInfo* method, const PublishedState* published)
 {
     if (!method || !method->klass || !method->klass->image || !method->klass->image->assembly)
     {
         return false;
     }
-    const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
+    if (!published->hasChangedMethods) return false;
     auto state = published->assemblyStates.find(method->klass->image->assembly);
     if (state == published->assemblyStates.end())
     {
@@ -523,6 +535,21 @@ bool IsChangedMethod(const MethodInfo* method)
     return state->second.baseMethods.find(token) != state->second.baseMethods.end() &&
         state->second.changedMethodTokens.find(token) !=
             state->second.changedMethodTokens.end();
+}
+
+bool IsChangedMethod(const MethodInfo* method)
+{
+    if (!method) return false;
+    const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
+    if (!published->hasChangedMethods) return false;
+    // Inflated decisions inspect the closed generic context and its physical
+    // ABI. Keep that validation live rather than memoizing an open/partial frame.
+    if (method->is_inflated) return IsChangedMethodUncached(method, published);
+    bool changed;
+    if (s_methodDecisionCache.TryGet(published, method, nullptr, 0, changed)) return changed;
+    changed = IsChangedMethodUncached(method, published);
+    s_methodDecisionCache.Put(published, method, nullptr, 0, changed);
+    return changed;
 }
 
 bool IsRemovedMethod(const MethodInfo* method)
@@ -570,11 +597,10 @@ bool IsRemovedType(const Il2CppClass* klass)
 		state->second.removedTypeTokens.end();
 }
 
-bool CanEnterWithBaseAbi(const MethodInfo* method)
+static bool CanEnterWithBaseAbiUncached(const MethodInfo* method, const PublishedState* published)
 {
     if (!method || !method->klass || !method->klass->image)
         return true;
-    const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
     auto state = published->assemblyStates.find(method->klass->image->assembly);
     if (state == published->assemblyStates.end())
         return true;
@@ -591,6 +617,19 @@ bool CanEnterWithBaseAbi(const MethodInfo* method)
             state->second.incompatibleBaseAbiTokens.end())
         return true;
     return HasCompatibleClosedBaseFrame(method);
+}
+
+bool CanEnterWithBaseAbi(const MethodInfo* method)
+{
+    if (!method) return true;
+    const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
+    if (published->assemblyStates.empty()) return true;
+    if (method->is_inflated) return CanEnterWithBaseAbiUncached(method, published);
+    bool compatible;
+    if (s_methodDecisionCache.TryGet(published, method, nullptr, 1, compatible)) return compatible;
+    compatible = CanEnterWithBaseAbiUncached(method, published);
+    s_methodDecisionCache.Put(published, method, nullptr, 1, compatible);
+    return compatible;
 }
 
 bool ShouldDispatchToInterpreter(const MethodInfo* method)
@@ -645,6 +684,7 @@ const MethodInfo* ResolveAotGuardMethodByToken(const char* assemblyName, uint32_
     if (!assemblyName || !assemblyName[0] || (token >> 24) != 6 || (token & 0xffffffu) == 0)
         return nullptr;
     const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
+    if (!published->hasChangedMethods) return nullptr;
     for (const auto& entry : published->assemblyStates)
     {
         const Il2CppAssembly* assembly = entry.first;
@@ -1672,7 +1712,10 @@ bool PrepareAndRegisterMetaVersions(
         // and state allocation can throw as well as return a failure code.
         next.reset(new PublishedState(*published));
         for (PendingMetaVersionRegistration& plan : pending)
+        {
+            next->hasChangedMethods |= !plan.state.changedMethodTokens.empty();
             next->assemblyStates.emplace(plan.baseAssembly, std::move(plan.state));
+        }
     }
     catch (...)
     {
@@ -1832,7 +1875,7 @@ void ExecuteInterpreterInvokeArgs(const MethodInfo* method, void* thisPtr,
                 "DHE invoke-args bridge has no instance receiver"));
     }
 
-    std::vector<hybridclr::interpreter::StackObject> stackArguments(interpMethod->argStackObjectSize);
+    InvokeBuffer<hybridclr::interpreter::StackObject> stackArguments(interpMethod->argStackObjectSize);
     uint32_t stackOffset = 0;
     if (isInstance)
     {
@@ -1904,6 +1947,12 @@ void ExecuteInterpreterInstanceVoidI4(const MethodInfo* method, void* thisPtr, i
     hybridclr::interpreter::Interpreter::Execute(method, args, nullptr);
 }
 
+bool DispatchDiagnosticsEnabled()
+{
+    return HYBRIDCLR_DHE_DIAGNOSTICS != 0;
+}
+
+#if HYBRIDCLR_DHE_DIAGNOSTICS
 void RecordInterpreterEntry()
 {
     s_interpreterEntryCount.fetch_add(1, std::memory_order_relaxed);
@@ -1940,6 +1989,12 @@ void ResetDispatchCounters()
     s_aotBridgeCallCount.store(0, std::memory_order_relaxed);
     s_aotEntryCount.store(0, std::memory_order_relaxed);
 }
+#else
+int32_t GetInterpreterEntryCount() { return 0; }
+int32_t GetAotBridgeCallCount() { return 0; }
+int32_t GetAotEntryCount() { return 0; }
+void ResetDispatchCounters() {}
+#endif
 
 void ResetForTests()
 {

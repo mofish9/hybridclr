@@ -718,6 +718,7 @@ namespace hybridclr
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetDifferentialAotBridgeCallCount()", (Il2CppMethodPointer)GetDifferentialAotBridgeCallCount);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetDifferentialAotEntryCount()", (Il2CppMethodPointer)GetDifferentialAotEntryCount);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::ResetDifferentialDispatchCounters()", (Il2CppMethodPointer)ResetDifferentialDispatchCounters);
+		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::AreDifferentialDispatchDiagnosticsEnabled()", (Il2CppMethodPointer)AreDifferentialDispatchDiagnosticsEnabled);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetRuntimeOption(HybridCLR.RuntimeOptionId)", (Il2CppMethodPointer)GetRuntimeOption);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::SetRuntimeOption(HybridCLR.RuntimeOptionId,System.Int32)", (Il2CppMethodPointer)SetRuntimeOption);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::PrewarmMethod(System.Reflection.MethodInfo)", (Il2CppMethodPointer)PrewarmMethod);
@@ -869,6 +870,11 @@ namespace hybridclr
 	int32_t RuntimeApi::IsDifferentialMethodChanged(Il2CppReflectionMethod* method)
 	{
 		return method && method->method && hybridclr::dhe::IsChangedMethod(method->method);
+	}
+
+	bool RuntimeApi::AreDifferentialDispatchDiagnosticsEnabled()
+	{
+		return hybridclr::dhe::DispatchDiagnosticsEnabled();
 	}
 
 	int32_t RuntimeApi::GetDifferentialInterpreterEntryCount()

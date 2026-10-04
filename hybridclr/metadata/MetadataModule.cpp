@@ -1,6 +1,7 @@
 #include "MetadataModule.h"
 #include "DheCustomAttributeMetadata.h"
 #include "DheVirtualSlots.h"
+#include "../DheThreadCache.h"
 
 #include "os/Atomic.h"
 #include "os/Mutex.h"
@@ -119,15 +120,33 @@ namespace metadata
 
 		// Cell layouts are immutable after publication under g_MetadataLock.
 		std::unordered_map<Il2CppClass*, DheFieldCellLayout> s_dheFieldCellLayouts;
-		// Node addresses remain stable across rehash; entries are immutable after insertion.
-		std::unordered_map<const Il2CppClass*, std::unordered_map<const Il2CppClass*,
-			std::unordered_map<uint16_t, VirtualInvokeData>>> s_dheInterfaceDispatch;
-		std::unordered_map<const Il2CppClass*, std::unordered_map<uint16_t,
-			VirtualInvokeData>> s_dheVirtualDispatch;
-		std::unordered_map<const Il2CppClass*, std::unordered_map<const MethodInfo*,
-			VirtualInvokeData>> s_dheVirtualMethodDispatch;
+		// Backing nodes remain alive after another assembly is published. Returned
+		// InvokeData references must survive both cache eviction and registration.
+		struct DheDispatchState
+		{
+			const void* epoch;
+			std::unordered_map<const Il2CppClass*, std::unordered_map<const Il2CppClass*,
+				std::unordered_map<uint16_t, VirtualInvokeData>>> interfaceDispatch;
+			std::unordered_map<const Il2CppClass*, std::unordered_map<uint16_t,
+				VirtualInvokeData>> virtualDispatch;
+			std::unordered_map<const Il2CppClass*, std::unordered_map<const MethodInfo*,
+				VirtualInvokeData>> virtualMethodDispatch;
+		};
+		DheDispatchState* s_dheDispatchState = nullptr;
+		DheDispatchState& GetDheDispatchStateLocked(const void* epoch)
+		{
+			if (!s_dheDispatchState || s_dheDispatchState->epoch != epoch)
+				s_dheDispatchState = new DheDispatchState{ epoch, {}, {}, {} };
+			return *s_dheDispatchState;
+		}
+		thread_local dhe::ThreadCache<const VirtualInvokeData*> s_dheDispatchCache;
+		thread_local dhe::ThreadCache<Il2CppClass*> s_dheExecutionClassCache;
+		thread_local dhe::ThreadCache<const Il2CppType*> s_dhePublicTypeCache;
 
 		std::mutex s_dheSidecarMutex;
+		std::atomic<uint64_t> s_dheFieldRegistryVersion{ 0 };
+		thread_local dhe::ThreadCache<DheInstanceFieldSlot, uint64_t> s_dheFieldSlotCache;
+		thread_local dhe::ThreadCache<DheFieldCellLayout, uint64_t> s_dheFieldCellLayoutCache;
 		std::unordered_map<const FieldInfo*, DheInstanceFieldSlot> s_dheInstanceFieldSlots;
 		uint32_t s_dheInstanceFieldSlotCount = 0;
 		std::unordered_map<Il2CppObject*, DheSidecarLocation> s_dheObjectSidecars;
@@ -262,6 +281,27 @@ namespace metadata
 			return true;
 		}
 
+		bool TryGetDheFieldSlot(const FieldInfo* field, uint32_t& slot, FieldInfo*& logicalField)
+		{
+			uint64_t version = s_dheFieldRegistryVersion.load(std::memory_order_acquire);
+			if (!field || version == 0) return false;
+			DheInstanceFieldSlot value;
+			if (!s_dheFieldSlotCache.TryGet(version, field, nullptr, 0, value))
+			{
+				std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
+				version = s_dheFieldRegistryVersion.load(std::memory_order_acquire);
+				uint32_t foundSlot = 0;
+				FieldInfo* foundField = nullptr;
+				TryGetDheFieldSlotLocked(field, foundSlot, foundField);
+				value = { foundSlot, foundField };
+				s_dheFieldSlotCache.Put(version, field, nullptr, 0, value);
+			}
+			if (!value.logicalField) return false;
+			slot = value.slot;
+			logicalField = value.logicalField;
+			return true;
+		}
+
 		Il2CppObject* GetDheSidecarValueLocked(Il2CppObject* obj, uint32_t slot)
 		{
 			auto sidecar = s_dheObjectSidecars.find(obj);
@@ -330,16 +370,18 @@ namespace metadata
 		{
 			uint32_t slot;
 			FieldInfo* logicalField;
-			{
-				std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
-				if (!TryGetDheFieldSlotLocked(field, slot, logicalField))
-					return false;
-			}
+			if (!TryGetDheFieldSlot(field, slot, logicalField)) return false;
 			if (!obj)
 				il2cpp::vm::Exception::RaiseNullReferenceException();
 			// Never enter engine Field APIs under the sidecar mutex: they reenter DHE.
-			il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
-			DheFieldCellLayout layout = GetDheFieldCellLayoutLocked(logicalField->type);
+			const uint64_t version = s_dheFieldRegistryVersion.load(std::memory_order_acquire);
+			DheFieldCellLayout layout;
+			if (!s_dheFieldCellLayoutCache.TryGet(version, logicalField->type, nullptr, 0, layout))
+			{
+				il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
+				layout = GetDheFieldCellLayoutLocked(logicalField->type);
+				s_dheFieldCellLayoutCache.Put(version, logicalField->type, nullptr, 0, layout);
+			}
 			valueField = layout.value;
 			{
 				std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
@@ -599,6 +641,10 @@ namespace metadata
 		if (type != IL2CPP_TYPE_CLASS && type != IL2CPP_TYPE_VALUETYPE && type != IL2CPP_TYPE_GENERICINST &&
 			type != IL2CPP_TYPE_ARRAY && type != IL2CPP_TYPE_SZARRAY)
 			return klass;
+		const void* epoch = dhe::GetPublicationIdentity();
+		if (!epoch) return klass;
+		Il2CppClass* cached;
+		if (s_dheExecutionClassCache.TryGet(epoch, klass, nullptr, 0, cached)) return cached;
 		// A generic container need not belong to the assembly owning its selected
 		// argument. Each definition/argument acquires its own publication below.
 		if (!klass->generic_class && !klass->rank)
@@ -612,8 +658,11 @@ namespace metadata
 		}
 		// Execution mapping interns types and generic contexts in metadata pools.
 		il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
+		epoch = dhe::GetPublicationIdentity();
 		const Il2CppType* current = GetDheExecutionTypeAcrossImagesLocked(&klass->byval_arg);
-		return current != &klass->byval_arg ? il2cpp::vm::Class::FromIl2CppType(current) : klass;
+		Il2CppClass* result = current != &klass->byval_arg ? il2cpp::vm::Class::FromIl2CppType(current) : klass;
+		s_dheExecutionClassCache.Put(epoch, klass, nullptr, 0, result);
+		return result;
 	}
 
 	static const Il2CppType* GetDhePublicReferenceTypeLocked(const Il2CppType* type)
@@ -683,8 +732,15 @@ namespace metadata
 		}
 		if (type->type != IL2CPP_TYPE_CLASS && type->type != IL2CPP_TYPE_GENERICINST &&
 			type->type != IL2CPP_TYPE_SZARRAY && type->type != IL2CPP_TYPE_ARRAY && type->type != IL2CPP_TYPE_PTR) return type;
+		const void* epoch = dhe::GetPublicationIdentity();
+		if (!epoch) return type;
+		const Il2CppType* cached;
+		if (s_dhePublicTypeCache.TryGet(epoch, type, nullptr, 0, cached)) return cached;
 		il2cpp::os::FastAutoLock metadataLock(&il2cpp::vm::g_MetadataLock);
-		return GetDhePublicReferenceTypeLocked(type);
+		epoch = dhe::GetPublicationIdentity();
+		const Il2CppType* result = GetDhePublicReferenceTypeLocked(type);
+		s_dhePublicTypeCache.Put(epoch, type, nullptr, 0, result);
+		return result;
 	}
 
 	FieldInfo* MetadataModule::ResolveDheReferenceInstanceField(Il2CppObject* obj, const FieldInfo* field)
@@ -907,18 +963,26 @@ namespace metadata
 	bool MetadataModule::TryGetDheVirtualInvokeData(const Il2CppClass* klass,
 		uint16_t logicalSlot, const VirtualInvokeData*& result)
 	{
+		const void* epoch = dhe::GetPublicationIdentity();
+		if (!epoch || !klass) return false;
+		if (s_dheDispatchCache.TryGet(epoch, klass, nullptr, logicalSlot, result)) return result != nullptr;
 		if (!HasDheVirtualHierarchy(klass))
+		{
+			if (epoch == dhe::GetPublicationIdentity())
+				s_dheDispatchCache.Put(epoch, klass, nullptr, logicalSlot, nullptr);
 			return false;
+		}
 		Il2CppClass* nativeAncestor = const_cast<Il2CppClass*>(klass);
 		while (nativeAncestor && IsInterpreterType(nativeAncestor))
 			nativeAncestor = nativeAncestor->parent;
 		if (!nativeAncestor)
 			return false;
 		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
+		epoch = dhe::GetPublicationIdentity();
 		InitDheVTable(nativeAncestor);
 		if (logicalSlot >= nativeAncestor->vtable_count)
 			return false;
-		auto& cache = s_dheVirtualDispatch[klass];
+		auto& cache = GetDheDispatchStateLocked(epoch).virtualDispatch[klass];
 		auto cached = cache.find(logicalSlot);
 		if (cached == cache.end())
 		{
@@ -929,17 +993,26 @@ namespace metadata
 		// No pointer escapes before full construction. Node addresses survive
 		// rehash, and both readers and writers hold the metadata lock.
 		result = &cached->second;
+		s_dheDispatchCache.Put(epoch, klass, nullptr, logicalSlot, result);
 		return true;
 	}
 
 	bool MetadataModule::TryGetDheVirtualInvokeData(const Il2CppClass* klass,
 		const MethodInfo* method, const VirtualInvokeData*& result)
 	{
+		const void* epoch = dhe::GetPublicationIdentity();
+		if (!epoch || !klass) return false;
+		if (s_dheDispatchCache.TryGet(epoch, klass, method, UINTPTR_MAX, result)) return result != nullptr;
 		if (!method || !IsVirtualMethod(method->flags) || IsInterface(method->klass->flags) ||
 			!HasDheVirtualHierarchy(klass))
+		{
+			if (epoch == dhe::GetPublicationIdentity())
+				s_dheDispatchCache.Put(epoch, klass, method, UINTPTR_MAX, nullptr);
 			return false;
+		}
 		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
-		auto& cache = s_dheVirtualMethodDispatch[klass];
+		epoch = dhe::GetPublicationIdentity();
+		auto& cache = GetDheDispatchStateLocked(epoch).virtualMethodDispatch[klass];
 		auto cached = cache.find(method);
 		if (cached == cache.end())
 		{
@@ -947,6 +1020,7 @@ namespace metadata
 			cached = cache.emplace(method, entry).first;
 		}
 		result = &cached->second;
+		s_dheDispatchCache.Put(epoch, klass, method, UINTPTR_MAX, result);
 		return true;
 	}
 
@@ -1012,17 +1086,26 @@ namespace metadata
 	bool MetadataModule::TryGetDheInterfaceInvokeData(const Il2CppClass* klass,
 		const Il2CppClass* interfaceType, uint16_t logicalSlot, const VirtualInvokeData*& result)
 	{
+		const void* epoch = dhe::GetPublicationIdentity();
+		if (!epoch || !klass || !interfaceType || !interfaceType->image) return false;
+		if (s_dheDispatchCache.TryGet(epoch, klass, interfaceType, logicalSlot, result)) return result != nullptr;
 		if (!klass || !interfaceType || !interfaceType->image || klass->is_import_or_windows_runtime ||
 			!dhe::IsMutableDheAssembly(interfaceType->image->assembly))
+		{
+			if (epoch == dhe::GetPublicationIdentity())
+				s_dheDispatchCache.Put(epoch, klass, interfaceType, logicalSlot, nullptr);
 			return false;
+		}
 		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
+		epoch = dhe::GetPublicationIdentity();
+		auto& dispatch = GetDheDispatchStateLocked(epoch).interfaceDispatch;
 		AOTHomologousImage* interfaceImage = GetDheSupplementalImage(interfaceType->image);
 		const MethodInfo* currentInterfaceMethod = nullptr;
 		if (!interfaceImage || !interfaceImage->TryGetDheCurrentInterfaceMethod(
 			interfaceType, logicalSlot, currentInterfaceMethod))
 			return false;
-		auto receiverCache = s_dheInterfaceDispatch.find(klass);
-		if (receiverCache != s_dheInterfaceDispatch.end())
+		auto receiverCache = dispatch.find(klass);
+		if (receiverCache != dispatch.end())
 		{
 			auto interfaceCache = receiverCache->second.find(interfaceType);
 			if (interfaceCache != receiverCache->second.end())
@@ -1031,6 +1114,7 @@ namespace metadata
 				if (entry != interfaceCache->second.end())
 				{
 					result = &entry->second;
+					s_dheDispatchCache.Put(epoch, klass, interfaceType, logicalSlot, result);
 					return true;
 				}
 			}
@@ -1083,7 +1167,8 @@ namespace metadata
 			VirtualInvokeData entry = {};
 			entry.method = target;
 			entry.methodPtr = pointer;
-			result = &s_dheInterfaceDispatch[klass][interfaceType].emplace(logicalSlot, entry).first->second;
+			result = &dispatch[klass][interfaceType].emplace(logicalSlot, entry).first->second;
+			s_dheDispatchCache.Put(epoch, klass, interfaceType, logicalSlot, result);
 			return true;
 		}
 		il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetMissingMethodException(
@@ -1341,23 +1426,27 @@ namespace metadata
 			DheInstanceFieldSlot slot = { definition->second.slot, logicalField };
 			s_dheInstanceFieldSlots[runtimeField] = slot;
 			s_dheInstanceFieldSlots[logicalField] = slot;
+			s_dheFieldRegistryVersion.fetch_add(1, std::memory_order_release);
 			return;
 		}
 		auto runtimeSlot = s_dheInstanceFieldSlots.find(runtimeField);
 		if (runtimeSlot != s_dheInstanceFieldSlots.end())
 		{
 			s_dheInstanceFieldSlots[logicalField] = runtimeSlot->second;
+			s_dheFieldRegistryVersion.fetch_add(1, std::memory_order_release);
 			return;
 		}
 		DheInstanceFieldSlot slot = { s_dheInstanceFieldSlotCount++, logicalField };
 		s_dheInstanceFieldSlots[runtimeField] = slot;
 		s_dheInstanceFieldSlots[logicalField] = slot;
+		s_dheFieldRegistryVersion.fetch_add(1, std::memory_order_release);
 	}
 
 	bool MetadataModule::IsDheSupplementalInstanceField(const FieldInfo* field)
 	{
-		std::lock_guard<std::mutex> lock(s_dheSidecarMutex);
-		return s_dheInstanceFieldSlots.find(field) != s_dheInstanceFieldSlots.end();
+		uint32_t slot;
+		FieldInfo* logicalField;
+		return TryGetDheFieldSlot(field, slot, logicalField);
 	}
 
 	bool MetadataModule::TryGetDheSupplementalInstanceFieldValue(Il2CppObject* obj,
