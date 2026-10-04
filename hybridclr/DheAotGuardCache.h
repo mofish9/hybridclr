@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string>
 
 namespace hybridclr
@@ -28,7 +29,7 @@ namespace dhe
         bool TryGet(const void* epoch, const char* name, uint32_t token, Value& value) const
         {
             const Entry& entry = _entries[Index(token)];
-            if (entry.epoch != epoch || entry.token != token || entry.name != name) return false;
+            if (entry.epoch != epoch || entry.token != token || std::strcmp(entry.name.c_str(), name) != 0) return false;
             value = entry.value;
             return true;
         }

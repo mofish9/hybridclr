@@ -705,6 +705,22 @@ const MethodInfo* ResolveAotGuardMethodByToken(const char* assemblyName, uint32_
         return nullptr;
     const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
     if (!published->hasChangedMethods) return nullptr;
+    // A bounded short scan is cheaper than TLS initialization/name replacement
+    // for tiny registries, particularly when assemblies share a method token.
+    if (published->assemblyStates.size() <= 4)
+    {
+        for (const auto& entry : published->assemblyStates)
+        {
+            const Il2CppAssembly* assembly = entry.first;
+            if (!assembly || !assembly->aname.name || std::strcmp(assembly->aname.name, assemblyName) != 0)
+                continue;
+            if (entry.second.changedMethodTokens.find(token) == entry.second.changedMethodTokens.end())
+                return nullptr;
+            auto method = entry.second.baseMethods.find(token);
+            return method == entry.second.baseMethods.end() ? nullptr : method->second;
+        }
+        return nullptr;
+    }
     const MethodInfo* result;
     if (s_aotGuardCache.TryGet(published, assemblyName, token, result)) return result;
     result = nullptr;
