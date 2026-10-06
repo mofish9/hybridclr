@@ -1346,13 +1346,8 @@ static bool HasCompatiblePhysicalBaseFrame(const MethodInfo* baseMethod, const M
         return false;
     for (uint8_t index = 0; index < baseMethod->parameters_count; ++index)
     {
-#if HYBRIDCLR_UNITY_2021
-        const Il2CppType* baseType = baseMethod->parameters[index].parameter_type;
-        const Il2CppType* currentType = currentMethod->parameters[index].parameter_type;
-#else
-        const Il2CppType* baseType = baseMethod->parameters[index];
-        const Il2CppType* currentType = currentMethod->parameters[index];
-#endif
+        const Il2CppType* baseType = GET_METHOD_PARAMETER_TYPE(baseMethod->parameters[index]);
+        const Il2CppType* currentType = GET_METHOD_PARAMETER_TYPE(currentMethod->parameters[index]);
         if (!SameClosedPhysicalAbiType(baseType, currentType))
             return false;
     }
