@@ -21,92 +21,6 @@ static const PropertyInfo* LegacyProperty(Il2CppClass* klass, uint32_t index) {
     return &klass->properties[index];
 #endif
 }
-struct HookTable {
-    int mode;
-    bool (*Metadata_TryCopyDheBoxedValueToCurrent_0)(Il2CppObject* value, Il2CppClass* currentClass, void* destination);
-    Image* (*Metadata_GetUnderlyingInterpreterImage_0)(const MethodInfo* methodInfo);
-    Image* (*Metadata_GetInterpreterResolveImage_0)(const MethodInfo* methodInfo);
-    bool (*Metadata_HasDheReflectedParent_0)(Il2CppClass* reflectedClass, Il2CppClass* declaringClass);
-    bool (*Metadata_IsDheEquivalentClass_0)(Il2CppClass* left, Il2CppClass* right);
-    Il2CppClass* (*Metadata_ResolveDheTypeHandleClass_0)(Il2CppClass* klass);
-    const Il2CppType* (*Metadata_ResolveDheExecutionType_0)(const Il2CppType* type);
-    const MethodInfo* (*Metadata_ResolveDheMethodExecution_0)(const MethodInfo* logical);
-    const FieldInfo* (*Metadata_ResolveDheFieldReference_0)(const Il2CppType& type, const Il2CppFieldDefinition* fieldDef);
-    const MethodInfo* (*Metadata_FindDheMethodFallback_0)(const Il2CppType* type, const char* resolveMethodName, const MethodRefSig& resolveSig, const Il2CppGenericInst* genericInstantiation, const Il2CppGenericContext* genericContext);
-    const Il2CppImage* (*Metadata_GetDheMethodMetadataImage_0)(const MethodInfo* method);
-    const MethodInfo* (*Metadata_GetDheCurrentMethodMetadata_0)(const MethodInfo* method);
-    Il2CppClass* (*Metadata_GetDheClassInitializationOwner_0)(Il2CppClass* klass);
-    Il2CppClass* (*Metadata_GetDheReferenceAllocationClass_0)(Il2CppClass* klass);
-    Il2CppClass* (*Metadata_GetDheExecutionClass_0)(Il2CppClass* klass);
-    const Il2CppType* (*Metadata_GetDhePublicReferenceType_0)(const Il2CppType* type);
-    FieldInfo* (*Metadata_ResolveDheReferenceInstanceField_0)(Il2CppObject* obj, const FieldInfo* field);
-    bool (*Metadata_TryGetDheVirtualInvokeData_0)(const Il2CppClass* klass, uint16_t logicalSlot, const VirtualInvokeData*& result);
-    bool (*Metadata_TryGetDheVirtualInvokeData_1)(const Il2CppClass* klass, const MethodInfo* method, const VirtualInvokeData*& result);
-    bool (*Metadata_TryGetDheVirtualBaseMethod_0)(const MethodInfo* method, bool definition, const MethodInfo*& result);
-    bool (*Metadata_TryGetDheVirtualReflectionIdentity_0)(const Il2CppClass* reflectedType, const MethodInfo* method, const MethodInfo*& result);
-    bool (*Metadata_TryGetDheInterfaceInvokeData_0)(const Il2CppClass* klass, const Il2CppClass* interfaceType, uint16_t logicalSlot, const VirtualInvokeData*& result);
-    bool (*Metadata_TryGetDheReferencedAssemblies_0)(const Il2CppAssembly* assembly, std::vector<const Il2CppAssemblyName*>& references);
-    Il2CppClass* (*Metadata_FindDheSupplementalType_0)(const Il2CppImage* image, const char* namespaze, const char* name);
-    void (*Metadata_GetDheSupplementalTypes_0)(const Il2CppImage* image, std::vector<const Il2CppClass*>& types);
-    Il2CppClass* (*Metadata_GetFirstDheSupplementalNestedType_0)(Il2CppClass* klass, void** iter);
-    bool (*Metadata_TryGetNextDheSupplementalNestedType_0)(Il2CppClass* klass, void** iter, Il2CppClass** nestedType);
-    const MethodInfo* (*Metadata_GetFirstDheSupplementalMethod_0)(Il2CppClass* klass, void** iter);
-    bool (*Metadata_TryGetNextDheSupplementalMethod_0)(Il2CppClass* klass, void** iter, const MethodInfo** method);
-    FieldInfo* (*Metadata_GetFirstDheSupplementalField_0)(Il2CppClass* klass, void** iter);
-    bool (*Metadata_TryGetNextDheSupplementalField_0)(Il2CppClass* klass, void** iter, FieldInfo** field);
-    size_t (*Metadata_GetDheSupplementalFieldCount_0)(Il2CppClass* klass);
-    const FieldInfo* (*Metadata_ResolveDheSupplementalField_0)(const FieldInfo* field);
-    const Il2CppFieldDefinition* (*Metadata_ResolveDheSupplementalFieldDefinition_0)(const Il2CppType* type, const char* name, const Il2CppType* fieldType);
-    size_t (*Metadata_GetDheRemovedMethodCount_0)(Il2CppClass* klass);
-    size_t (*Metadata_GetDheSupplementalMethodCount_0)(Il2CppClass* klass);
-    bool (*Metadata_IsDheRemovedField_0)(const FieldInfo* field);
-    size_t (*Metadata_GetDheRemovedFieldCount_0)(Il2CppClass* klass);
-    Il2CppClass* (*Metadata_GetDheLogicalFieldParent_0)(FieldInfo* field);
-    bool (*Metadata_IsDheField_0)(const FieldInfo* field);
-    bool (*Metadata_IsDheSupplementalInstanceField_0)(const FieldInfo* field);
-    bool (*Metadata_TryGetDheSupplementalInstanceFieldValue_0)(Il2CppObject* obj, FieldInfo* field, void* value);
-    bool (*Metadata_TrySetDheSupplementalInstanceFieldValue_0)(Il2CppObject* obj, const FieldInfo* field, void* value, bool dereferencePointer);
-    bool (*Metadata_TryGetDheSupplementalInstanceFieldAddress_0)(Il2CppObject* obj, const FieldInfo* field, void** address);
-    bool (*Metadata_TryGetDheSupplementalInstanceFieldValueObject_0)(Il2CppObject* obj, FieldInfo* field, Il2CppObject** value);
-    bool (*Metadata_TrySetDheSupplementalInstanceFieldValueObject_0)(Il2CppObject* obj, FieldInfo* field, Il2CppObject* value);
-    bool (*Metadata_HasDheLogicalPropertyView_0)(Il2CppClass* klass);
-    const PropertyInfo* (*Metadata_GetFirstDheLogicalProperty_0)(Il2CppClass* klass, void** iter);
-    bool (*Metadata_TryGetNextDheLogicalProperty_0)(Il2CppClass* klass, void** iter, const PropertyInfo** property);
-    size_t (*Metadata_GetDheLogicalPropertyCount_0)(Il2CppClass* klass);
-    const PropertyInfo* (*Metadata_GetDheCustomAttributeProperty_0)(Il2CppClass* klass, uint32_t index);
-    const MethodInfo* (*Metadata_ResolveDheMethod_0)(const MethodInfo* method);
-    bool (*Metadata_HasDheLogicalEventView_0)(Il2CppClass* klass);
-    const EventInfo* (*Metadata_GetFirstDheLogicalEvent_0)(Il2CppClass* klass, void** iter);
-    bool (*Metadata_TryGetNextDheLogicalEvent_0)(Il2CppClass* klass, void** iter, const EventInfo** eventInfo);
-    size_t (*Metadata_GetDheLogicalEventCount_0)(Il2CppClass* klass);
-    bool (*Metadata_TryGetDheCustomAttributeSource_0)(const Il2CppImage* image, uint32_t token, const Il2CppImage*& sourceImage, uint32_t& sourceToken);
-    Il2CppClass* (*Runtime_ResolveReferenceAllocationClass_0)(Il2CppClass* klass);
-    const void* (*Runtime_GetPublicationIdentity_0)();
-    const Il2CppImage* (*Runtime_ResolvePublicAssemblyImage_0)(const Il2CppImage* image);
-    Il2CppClass* (*Runtime_SelectReferenceInterfaceIterationClass_0)(Il2CppClass* requested, Il2CppClass* selected, const void* iterator);
-    bool (*Runtime_IsDheAssembly_0)(const Il2CppAssembly* assembly);
-    bool (*Runtime_IsMutableDheAssembly_0)(const Il2CppAssembly* assembly);
-    bool (*Runtime_IsDheModuleInitializationReady_0)(const char* assemblyName);
-    bool (*Runtime_IsFrozenAotExecutionSource_0)(const Il2CppAssembly* assembly);
-    bool (*Runtime_TryGetVirtualInvokeData_0)(const Il2CppClass* klass, uint16_t logicalSlot, const VirtualInvokeData*& result);
-    bool (*Runtime_TryGetVirtualInvokeData_1)(const Il2CppClass* klass, const MethodInfo* method, const VirtualInvokeData*& result);
-    bool (*Runtime_TryGetVirtualBaseMethod_0)(const MethodInfo* method, bool definition, const MethodInfo*& result);
-    bool (*Runtime_TryGetVirtualReflectionIdentity_0)(const Il2CppClass* reflectedType, const MethodInfo* method, const MethodInfo*& result);
-    bool (*Runtime_TryGetInterfaceInvokeData_0)(const Il2CppClass* klass, const Il2CppClass* interfaceType, uint16_t logicalSlot, const VirtualInvokeData*& result);
-    bool (*Runtime_IsChangedMethod_0)(const MethodInfo* method);
-    bool (*Runtime_IsRemovedMethod_0)(const MethodInfo* method);
-    bool (*Runtime_IsRemovedType_0)(const Il2CppClass* klass);
-    bool (*Runtime_ShouldDispatchToInterpreter_0)(const MethodInfo* method);
-    bool (*Runtime_CanEnterWithBaseAbi_0)(const MethodInfo* method);
-    const MethodInfo* (*Runtime_ResolveAotGuardMethodByToken_0)(const char* assemblyName, uint32_t token);
-    const MethodInfo* (*Runtime_ResolveMethodByToken_0)(const char* assemblyName, uint32_t token);
-    const MethodInfo* (*Runtime_ResolveMethodByNameAndToken_0)(const char* assemblyName, const char* declaringType, const char* methodName, uint32_t parameterCount, uint32_t token);
-    const MethodInfo* (*Runtime_ResolveInterpreterMethod_0)(const MethodInfo* baseMethod);
-    const MethodInfo* (*Runtime_ResolveCurrentExecutionMethod_0)(const MethodInfo* method);
-    const MethodInfo* (*Runtime_ResolveNativeReferenceInvokeMethod_0)(const MethodInfo* method, void* receiver);
-    const MethodInfo* (*Runtime_ResolveCurrentReceiverMethod_0)(const MethodInfo* method, void* receiver);
-    const MethodInfo* (*Runtime_ResolveInterpreterVirtualMethod_0)(const MethodInfo* method, void* receiver, const MethodInfo* callSignature);
-};
 static bool Legacy_Metadata_TryCopyDheBoxedValueToCurrent_0(Il2CppObject* value, Il2CppClass* currentClass, void* destination) { return false; }
 static Image* Legacy_Metadata_GetUnderlyingInterpreterImage_0(const MethodInfo* methodInfo) { return LegacyInterpreterImage(methodInfo); }
 static Image* Legacy_Metadata_GetInterpreterResolveImage_0(const MethodInfo* methodInfo) { return LegacyInterpreterImage(methodInfo); }
@@ -448,7 +362,7 @@ static const HookTable unselectedTable = {
     &Legacy_Runtime_ResolveCurrentReceiverMethod_0,
     &Legacy_Runtime_ResolveInterpreterVirtualMethod_0
 };
-static std::atomic<const HookTable*> selectedHooks{&unselectedTable};
+std::atomic<const HookTable*> selectedHooks{&unselectedTable};
 int BindMode(int mode) {
     if (mode != 1 && mode != 2) return 2;
     if (selectedHooks.load(std::memory_order_acquire)->mode) return 1;
@@ -523,15 +437,11 @@ bool hybridclr::dhe::IsDheAssembly(const Il2CppAssembly* assembly) { return hybr
 bool hybridclr::dhe::IsMutableDheAssembly(const Il2CppAssembly* assembly) { return hybridclr::startup::GetHooks().Runtime_IsMutableDheAssembly_0(assembly); }
 bool hybridclr::dhe::IsDheModuleInitializationReady(const char* assemblyName) { return hybridclr::startup::GetHooks().Runtime_IsDheModuleInitializationReady_0(assemblyName); }
 bool hybridclr::dhe::IsFrozenAotExecutionSource(const Il2CppAssembly* assembly) { return hybridclr::startup::GetHooks().Runtime_IsFrozenAotExecutionSource_0(assembly); }
-bool hybridclr::dhe::TryGetVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot, const VirtualInvokeData*& result) { return hybridclr::startup::GetHooks().Runtime_TryGetVirtualInvokeData_0(klass, logicalSlot, result); }
-bool hybridclr::dhe::TryGetVirtualInvokeData(const Il2CppClass* klass, const MethodInfo* method, const VirtualInvokeData*& result) { return hybridclr::startup::GetHooks().Runtime_TryGetVirtualInvokeData_1(klass, method, result); }
 bool hybridclr::dhe::TryGetVirtualBaseMethod(const MethodInfo* method, bool definition, const MethodInfo*& result) { return hybridclr::startup::GetHooks().Runtime_TryGetVirtualBaseMethod_0(method, definition, result); }
 bool hybridclr::dhe::TryGetVirtualReflectionIdentity(const Il2CppClass* reflectedType, const MethodInfo* method, const MethodInfo*& result) { return hybridclr::startup::GetHooks().Runtime_TryGetVirtualReflectionIdentity_0(reflectedType, method, result); }
-bool hybridclr::dhe::TryGetInterfaceInvokeData(const Il2CppClass* klass, const Il2CppClass* interfaceType, uint16_t logicalSlot, const VirtualInvokeData*& result) { return hybridclr::startup::GetHooks().Runtime_TryGetInterfaceInvokeData_0(klass, interfaceType, logicalSlot, result); }
 bool hybridclr::dhe::IsChangedMethod(const MethodInfo* method) { return hybridclr::startup::GetHooks().Runtime_IsChangedMethod_0(method); }
 bool hybridclr::dhe::IsRemovedMethod(const MethodInfo* method) { return hybridclr::startup::GetHooks().Runtime_IsRemovedMethod_0(method); }
 bool hybridclr::dhe::IsRemovedType(const Il2CppClass* klass) { return hybridclr::startup::GetHooks().Runtime_IsRemovedType_0(klass); }
-bool hybridclr::dhe::ShouldDispatchToInterpreter(const MethodInfo* method) { return hybridclr::startup::GetHooks().Runtime_ShouldDispatchToInterpreter_0(method); }
 bool hybridclr::dhe::CanEnterWithBaseAbi(const MethodInfo* method) { return hybridclr::startup::GetHooks().Runtime_CanEnterWithBaseAbi_0(method); }
 const MethodInfo* hybridclr::dhe::ResolveAotGuardMethodByToken(const char* assemblyName, uint32_t token) { return hybridclr::startup::GetHooks().Runtime_ResolveAotGuardMethodByToken_0(assemblyName, token); }
 const MethodInfo* hybridclr::dhe::ResolveMethodByToken(const char* assemblyName, uint32_t token) { return hybridclr::startup::GetHooks().Runtime_ResolveMethodByToken_0(assemblyName, token); }

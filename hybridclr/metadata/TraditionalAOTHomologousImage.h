@@ -44,7 +44,7 @@ namespace hybridclr
 
 		struct TraditionalMethodDefDetail
 		{
-			//uint32_t homoRowIndex; 
+			//uint32_t homoRowIndex;
 			//MethodRefSig signature;
 			//const Il2CppTypeDefinition* declaringTypeDef;
 			//const Il2CppClass* declaringKlass;

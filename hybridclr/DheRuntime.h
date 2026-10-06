@@ -386,3 +386,15 @@ namespace dhe
 #endif
 }
 }
+
+// BEGIN GENERATED AOT INLINE
+#include "AotModeHooks.h"
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+namespace hybridclr { namespace dhe {
+inline bool TryGetVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot, const VirtualInvokeData*& result) { return startup::selectedHooks.load(std::memory_order_acquire)->Runtime_TryGetVirtualInvokeData_0(klass, logicalSlot, result); }
+inline bool TryGetVirtualInvokeData(const Il2CppClass* klass, const MethodInfo* method, const VirtualInvokeData*& result) { return startup::selectedHooks.load(std::memory_order_acquire)->Runtime_TryGetVirtualInvokeData_1(klass, method, result); }
+inline bool TryGetInterfaceInvokeData(const Il2CppClass* klass, const Il2CppClass* interfaceType, uint16_t logicalSlot, const VirtualInvokeData*& result) { return startup::selectedHooks.load(std::memory_order_acquire)->Runtime_TryGetInterfaceInvokeData_0(klass, interfaceType, logicalSlot, result); }
+inline bool ShouldDispatchToInterpreter(const MethodInfo* method) { return startup::selectedHooks.load(std::memory_order_acquire)->Runtime_ShouldDispatchToInterpreter_0(method); }
+}}
+#endif
+// END GENERATED AOT INLINE
