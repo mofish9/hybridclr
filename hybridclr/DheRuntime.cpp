@@ -660,9 +660,9 @@ bool HCLR_AOT_IMPL(CanEnterWithBaseAbi)(const MethodInfo* method)
 
 bool HCLR_AOT_IMPL(ShouldDispatchToInterpreter)(const MethodInfo* method)
 {
-    if (!IsChangedMethod(method))
+    if (!HCLR_AOT_DIRECT(IsChangedMethod)(method))
         return false;
-    if (!CanEnterWithBaseAbi(method))
+    if (!HCLR_AOT_DIRECT(CanEnterWithBaseAbi)(method))
         il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetExecutionEngineException(
             "DHE Current value layout requires a Current call frame; the old AOT ABI cannot be used."));
     return true;

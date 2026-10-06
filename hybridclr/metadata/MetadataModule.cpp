@@ -49,36 +49,36 @@ namespace hybridclr
 	{
 		Il2CppClass* HCLR_AOT_IMPL(ResolveReferenceAllocationClass)(Il2CppClass* klass)
 		{
-			return metadata::MetadataModule::GetDheReferenceAllocationClass(klass);
+			return metadata::MetadataModule::HCLR_AOT_DIRECT(GetDheReferenceAllocationClass)(klass);
 		}
 
 		bool HCLR_AOT_IMPL(TryGetVirtualInvokeData)(const Il2CppClass* klass, uint16_t logicalSlot,
 			const VirtualInvokeData*& result)
 		{
-			return metadata::MetadataModule::TryGetDheVirtualInvokeData(klass, logicalSlot, result);
+			return metadata::MetadataModule::HCLR_AOT_DIRECT(TryGetDheVirtualInvokeData)(klass, logicalSlot, result);
 		}
 
 		bool HCLR_AOT_IMPL(TryGetVirtualInvokeData)(const Il2CppClass* klass, const MethodInfo* method,
 			const VirtualInvokeData*& result)
 		{
-			return metadata::MetadataModule::TryGetDheVirtualInvokeData(klass, method, result);
+			return metadata::MetadataModule::HCLR_AOT_DIRECT(TryGetDheVirtualInvokeData)(klass, method, result);
 		}
 
 		bool HCLR_AOT_IMPL(TryGetVirtualBaseMethod)(const MethodInfo* method, bool definition, const MethodInfo*& result)
 		{
-			return metadata::MetadataModule::TryGetDheVirtualBaseMethod(method, definition, result);
+			return metadata::MetadataModule::HCLR_AOT_DIRECT(TryGetDheVirtualBaseMethod)(method, definition, result);
 		}
 
 		bool HCLR_AOT_IMPL(TryGetVirtualReflectionIdentity)(const Il2CppClass* reflectedType, const MethodInfo* method,
 			const MethodInfo*& result)
 		{
-			return metadata::MetadataModule::TryGetDheVirtualReflectionIdentity(reflectedType, method, result);
+			return metadata::MetadataModule::HCLR_AOT_DIRECT(TryGetDheVirtualReflectionIdentity)(reflectedType, method, result);
 		}
 
 		bool HCLR_AOT_IMPL(TryGetInterfaceInvokeData)(const Il2CppClass* klass, const Il2CppClass* interfaceType,
 			uint16_t logicalSlot, const VirtualInvokeData*& result)
 		{
-			return metadata::MetadataModule::TryGetDheInterfaceInvokeData(klass, interfaceType, logicalSlot, result);
+			return metadata::MetadataModule::HCLR_AOT_DIRECT(TryGetDheInterfaceInvokeData)(klass, interfaceType, logicalSlot, result);
 		}
 	}
 
@@ -1188,12 +1188,12 @@ const MethodInfo* MetadataModule::HCLR_AOT_IMPL(FindDheMethodFallback)(const Il2
 	bool MetadataModule::HCLR_AOT_IMPL(TryGetDheVirtualInvokeData)(const Il2CppClass* klass,
 		uint16_t logicalSlot, const VirtualInvokeData*& result)
 	{
-		const void* epoch = dhe::GetPublicationIdentity();
+		const void* epoch = dhe::HCLR_AOT_DIRECT(GetPublicationIdentity)();
 		if (!epoch || !klass) return false;
 		if (s_dheDispatchCache.TryGet(epoch, klass, nullptr, logicalSlot, result)) return result != nullptr;
 		if (!HasDheVirtualHierarchy(klass))
 		{
-			if (epoch == dhe::GetPublicationIdentity())
+			if (epoch == dhe::HCLR_AOT_DIRECT(GetPublicationIdentity)())
 				s_dheDispatchCache.Put(epoch, klass, nullptr, logicalSlot, nullptr);
 			return false;
 		}
@@ -1203,7 +1203,7 @@ const MethodInfo* MetadataModule::HCLR_AOT_IMPL(FindDheMethodFallback)(const Il2
 		if (!nativeAncestor)
 			return false;
 		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
-		epoch = dhe::GetPublicationIdentity();
+		epoch = dhe::HCLR_AOT_DIRECT(GetPublicationIdentity)();
 		InitDheVTable(nativeAncestor);
 		if (logicalSlot >= nativeAncestor->vtable_count)
 			return false;
@@ -1225,18 +1225,18 @@ const MethodInfo* MetadataModule::HCLR_AOT_IMPL(FindDheMethodFallback)(const Il2
 	bool MetadataModule::HCLR_AOT_IMPL(TryGetDheVirtualInvokeData)(const Il2CppClass* klass,
 		const MethodInfo* method, const VirtualInvokeData*& result)
 	{
-		const void* epoch = dhe::GetPublicationIdentity();
+		const void* epoch = dhe::HCLR_AOT_DIRECT(GetPublicationIdentity)();
 		if (!epoch || !klass) return false;
 		if (s_dheDispatchCache.TryGet(epoch, klass, method, UINTPTR_MAX, result)) return result != nullptr;
 		if (!method || !IsVirtualMethod(method->flags) || IsInterface(method->klass->flags) ||
 			!HasDheVirtualHierarchy(klass))
 		{
-			if (epoch == dhe::GetPublicationIdentity())
+			if (epoch == dhe::HCLR_AOT_DIRECT(GetPublicationIdentity)())
 				s_dheDispatchCache.Put(epoch, klass, method, UINTPTR_MAX, nullptr);
 			return false;
 		}
 		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
-		epoch = dhe::GetPublicationIdentity();
+		epoch = dhe::HCLR_AOT_DIRECT(GetPublicationIdentity)();
 		auto& cache = GetDheDispatchStateLocked(epoch).virtualMethodDispatch[klass];
 		auto cached = cache.find(method);
 		if (cached == cache.end())
@@ -1311,18 +1311,18 @@ const MethodInfo* MetadataModule::HCLR_AOT_IMPL(FindDheMethodFallback)(const Il2
 	bool MetadataModule::HCLR_AOT_IMPL(TryGetDheInterfaceInvokeData)(const Il2CppClass* klass,
 		const Il2CppClass* interfaceType, uint16_t logicalSlot, const VirtualInvokeData*& result)
 	{
-		const void* epoch = dhe::GetPublicationIdentity();
+		const void* epoch = dhe::HCLR_AOT_DIRECT(GetPublicationIdentity)();
 		if (!epoch || !klass || !interfaceType || !interfaceType->image) return false;
 		if (s_dheDispatchCache.TryGet(epoch, klass, interfaceType, logicalSlot, result)) return result != nullptr;
 		if (!klass || !interfaceType || !interfaceType->image || klass->is_import_or_windows_runtime ||
-			!dhe::IsMutableDheAssembly(interfaceType->image->assembly))
+			!dhe::HCLR_AOT_DIRECT(IsMutableDheAssembly)(interfaceType->image->assembly))
 		{
-			if (epoch == dhe::GetPublicationIdentity())
+			if (epoch == dhe::HCLR_AOT_DIRECT(GetPublicationIdentity)())
 				s_dheDispatchCache.Put(epoch, klass, interfaceType, logicalSlot, nullptr);
 			return false;
 		}
 		il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
-		epoch = dhe::GetPublicationIdentity();
+		epoch = dhe::HCLR_AOT_DIRECT(GetPublicationIdentity)();
 		auto& dispatch = GetDheDispatchStateLocked(epoch).interfaceDispatch;
 		AOTHomologousImage* interfaceImage = GetDheSupplementalImage(interfaceType->image);
 		const MethodInfo* currentInterfaceMethod = nullptr;
