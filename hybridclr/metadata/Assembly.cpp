@@ -19,6 +19,7 @@
 #include "MetadataUtil.h"
 #include "ConsistentAOTHomologousImage.h"
 #include "SuperSetAOTHomologousImage.h"
+#include "TraditionalAOTHomologousImage.h"
 
 namespace hybridclr
 {
@@ -219,10 +220,20 @@ namespace metadata
         il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
 
         AOTHomologousImage* image = nullptr;
+        bool traditionalSuperset = false;
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+        traditionalSuperset = startup::GetMode() == 2;
+#endif
         switch (mode)
         {
         case HomologousImageMode::CONSISTENT: image = new ConsistentAOTHomologousImage(); break;
-        case HomologousImageMode::SUPERSET: image = new SuperSetAOTHomologousImage(); break;
+        case HomologousImageMode::SUPERSET:
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+            if (traditionalSuperset) image = new TraditionalAOTHomologousImage();
+            else
+#endif
+                image = new SuperSetAOTHomologousImage();
+            break;
         default: return LoadImageErrorCode::INVALID_HOMOLOGOUS_MODE;
         }
 
@@ -265,7 +276,7 @@ namespace metadata
 			return LoadImageErrorCode::HOMOLOGOUS_ASSEMBLY_HAS_BEEN_LOADED;
 		}
 		InterpreterImage* interpreterFallbackImage = nullptr;
-		if (mode == HomologousImageMode::SUPERSET)
+		if (mode == HomologousImageMode::SUPERSET && !traditionalSuperset)
 		{
 			uint32_t imageId = InterpreterImage::AllocImageIndex(dllSize);
 			if (imageId == kInvalidImageIndex)

@@ -222,7 +222,6 @@ namespace
 Il2CppClass* HCLR_AOT_IMPL(SelectReferenceInterfaceIterationClass)(Il2CppClass* requested,
     Il2CppClass* selected, const void* iterator)
 {
-    HCLR_AOT_OBSERVE("Runtime_SelectReferenceInterfaceIterationClass_0");
     if (!iterator || !requested || requested == selected || !requested->implementedInterfaces)
         return selected;
     // A non-null cursor comes from a completed SetupInterfaces call. Base
@@ -463,14 +462,12 @@ bool ParseMetaVersion(const void* data, uint32_t size, MetaVersionData& result)
 
 const void* HCLR_AOT_IMPL(GetPublicationIdentity)()
 {
-    HCLR_AOT_OBSERVE("Runtime_GetPublicationIdentity_0");
     const PublishedState* state = s_publishedState.load(std::memory_order_acquire);
     return state->assemblyStates.empty() ? nullptr : state;
 }
 
 bool HCLR_AOT_IMPL(IsDheAssembly)(const Il2CppAssembly* assembly)
 {
-    HCLR_AOT_OBSERVE("Runtime_IsDheAssembly_0");
     if (!assembly)
     {
         return false;
@@ -481,7 +478,6 @@ bool HCLR_AOT_IMPL(IsDheAssembly)(const Il2CppAssembly* assembly)
 
 bool HCLR_AOT_IMPL(IsMutableDheAssembly)(const Il2CppAssembly* assembly)
 {
-    HCLR_AOT_OBSERVE("Runtime_IsMutableDheAssembly_0");
     const PublishedState* state = s_publishedState.load(std::memory_order_acquire);
     auto entry = state->assemblyStates.find(assembly);
     return entry != state->assemblyStates.end() &&
@@ -490,7 +486,6 @@ bool HCLR_AOT_IMPL(IsMutableDheAssembly)(const Il2CppAssembly* assembly)
 
 const Il2CppImage* HCLR_AOT_IMPL(ResolvePublicAssemblyImage)(const Il2CppImage* image)
 {
-    HCLR_AOT_OBSERVE("Runtime_ResolvePublicAssemblyImage_0");
     // IsDheAssembly acquires the completed registration. Both image ownership
     // and the public assembly image are initialized before that publication.
     // In particular, do not publish a hidden image during Current preparation.
@@ -500,14 +495,12 @@ const Il2CppImage* HCLR_AOT_IMPL(ResolvePublicAssemblyImage)(const Il2CppImage* 
 
 bool HCLR_AOT_IMPL(IsDheModuleInitializationReady)(const char* assemblyName)
 {
-    HCLR_AOT_OBSERVE("Runtime_IsDheModuleInitializationReady_0");
     return assemblyName && assemblyName[0] && IsMutableDheAssembly(
         il2cpp::vm::MetadataCache::GetAssemblyByName(assemblyName));
 }
 
 bool HCLR_AOT_IMPL(IsFrozenAotExecutionSource)(const Il2CppAssembly* assembly)
 {
-    HCLR_AOT_OBSERVE("Runtime_IsFrozenAotExecutionSource_0");
     const PublishedState* state = s_publishedState.load(std::memory_order_acquire);
     auto entry = state->assemblyStates.find(assembly);
     return entry != state->assemblyStates.end() &&
@@ -566,7 +559,6 @@ static bool IsChangedMethodUncached(const MethodInfo* method, const PublishedSta
 
 bool HCLR_AOT_IMPL(IsChangedMethod)(const MethodInfo* method)
 {
-    HCLR_AOT_OBSERVE("Runtime_IsChangedMethod_0");
     if (!method) return false;
     const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
     if (!published->hasChangedMethods) return false;
@@ -582,7 +574,6 @@ bool HCLR_AOT_IMPL(IsChangedMethod)(const MethodInfo* method)
 
 bool HCLR_AOT_IMPL(IsRemovedMethod)(const MethodInfo* method)
 {
-    HCLR_AOT_OBSERVE("Runtime_IsRemovedMethod_0");
 	if (!method || !method->klass || !method->klass->image ||
 		!method->klass->image->assembly)
 	{
@@ -615,7 +606,6 @@ bool HCLR_AOT_IMPL(IsRemovedMethod)(const MethodInfo* method)
 
 bool HCLR_AOT_IMPL(IsRemovedType)(const Il2CppClass* klass)
 {
-    HCLR_AOT_OBSERVE("Runtime_IsRemovedType_0");
 	if (!klass || !klass->image || !klass->image->assembly)
 	{
 		return false;
@@ -651,7 +641,6 @@ static bool CanEnterWithBaseAbiUncached(const MethodInfo* method, const Publishe
 
 bool HCLR_AOT_IMPL(CanEnterWithBaseAbi)(const MethodInfo* method)
 {
-    HCLR_AOT_OBSERVE("Runtime_CanEnterWithBaseAbi_0");
     if (!method) return true;
     const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
     if (published->assemblyStates.empty()) return true;
@@ -665,7 +654,6 @@ bool HCLR_AOT_IMPL(CanEnterWithBaseAbi)(const MethodInfo* method)
 
 bool HCLR_AOT_IMPL(ShouldDispatchToInterpreter)(const MethodInfo* method)
 {
-    HCLR_AOT_OBSERVE("Runtime_ShouldDispatchToInterpreter_0");
     if (!IsChangedMethod(method))
         return false;
     if (!CanEnterWithBaseAbi(method))
@@ -713,7 +701,6 @@ static const MethodInfo* ResolveMethodInAssembly(const Il2CppAssembly* assembly,
 
 const MethodInfo* HCLR_AOT_IMPL(ResolveAotGuardMethodByToken)(const char* assemblyName, uint32_t token)
 {
-    HCLR_AOT_OBSERVE("Runtime_ResolveAotGuardMethodByToken_0");
     if (!assemblyName || !assemblyName[0] || (token >> 24) != 6 || (token & 0xffffffu) == 0)
         return nullptr;
     const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
@@ -753,7 +740,6 @@ const MethodInfo* HCLR_AOT_IMPL(ResolveAotGuardMethodByToken)(const char* assemb
 
 const MethodInfo* HCLR_AOT_IMPL(ResolveMethodByToken)(const char* assemblyName, uint32_t token)
 {
-    HCLR_AOT_OBSERVE("Runtime_ResolveMethodByToken_0");
     if (!assemblyName || assemblyName[0] == '\0' || token == 0)
     {
         return nullptr;
@@ -910,7 +896,6 @@ static bool IsUnaffectedConditionalGenericInstance(const MethodInfo* method,
 
 const MethodInfo* HCLR_AOT_IMPL(ResolveInterpreterMethod)(const MethodInfo* baseMethod)
 {
-    HCLR_AOT_OBSERVE("Runtime_ResolveInterpreterMethod_0");
     if (!baseMethod || !baseMethod->klass || !baseMethod->klass->image ||
         !baseMethod->klass->image->assembly)
     {
@@ -973,7 +958,6 @@ const MethodInfo* HCLR_AOT_IMPL(ResolveInterpreterMethod)(const MethodInfo* base
 const MethodInfo* HCLR_AOT_IMPL(ResolveMethodByNameAndToken)(const char* assemblyName,
     const char* declaringType, const char* methodName, uint32_t parameterCount, uint32_t token)
 {
-    HCLR_AOT_OBSERVE("Runtime_ResolveMethodByNameAndToken_0");
     if (!assemblyName || assemblyName[0] == '\0' || !declaringType || declaringType[0] == '\0' ||
         !methodName || methodName[0] == '\0' || token == 0)
     {
@@ -1003,7 +987,6 @@ const MethodInfo* HCLR_AOT_IMPL(ResolveMethodByNameAndToken)(const char* assembl
 
 const MethodInfo* HCLR_AOT_IMPL(ResolveCurrentExecutionMethod)(const MethodInfo* method)
 {
-    HCLR_AOT_OBSERVE("Runtime_ResolveCurrentExecutionMethod_0");
     if (!method || !method->klass || !method->klass->image) return method;
     const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
     auto state = published->assemblyStates.find(method->klass->image->assembly);
@@ -1460,7 +1443,6 @@ static bool HasCompatibleClosedBaseFrame(const MethodInfo* method)
 
 const MethodInfo* HCLR_AOT_IMPL(ResolveNativeReferenceInvokeMethod)(const MethodInfo* method, void* receiver)
 {
-    HCLR_AOT_OBSERVE("Runtime_ResolveNativeReferenceInvokeMethod_0");
     if (!receiver || !method || !method->klass || method->klass->byval_arg.valuetype ||
         (method->flags & METHOD_ATTRIBUTE_STATIC) || method->is_generic || CanEnterWithBaseAbi(method))
         return method;
@@ -1491,7 +1473,6 @@ const MethodInfo* HCLR_AOT_IMPL(ResolveNativeReferenceInvokeMethod)(const Method
 
 const MethodInfo* HCLR_AOT_IMPL(ResolveCurrentReceiverMethod)(const MethodInfo* method, void* receiver)
 {
-    HCLR_AOT_OBSERVE("Runtime_ResolveCurrentReceiverMethod_0");
     if (!receiver || !method || !method->klass ||
         (method->flags & METHOD_ATTRIBUTE_STATIC) || method->is_generic)
         return method;
@@ -1526,7 +1507,6 @@ const MethodInfo* HCLR_AOT_IMPL(ResolveCurrentReceiverMethod)(const MethodInfo* 
 const MethodInfo* HCLR_AOT_IMPL(ResolveInterpreterVirtualMethod)(const MethodInfo* method, void* receiver,
     const MethodInfo* callSignature)
 {
-    HCLR_AOT_OBSERVE("Runtime_ResolveInterpreterVirtualMethod_0");
     const MethodInfo* current = ResolveCurrentReceiverMethod(method, receiver);
     if (current == method) return method;
     bool compatible = callSignature && callSignature->parameters_count == current->parameters_count &&
@@ -2062,6 +2042,7 @@ int32_t GetAotEntryCount() { return 0; }
 void ResetDispatchCounters() {}
 #endif
 
+#if defined(HYBRIDCLR_LAB_NATIVE_TEST) || HYBRIDCLR_DHE_DIAGNOSTICS
 void ResetForTests()
 {
     std::lock_guard<std::recursive_mutex> lock(s_registrationMutex);
@@ -2069,5 +2050,6 @@ void ResetForTests()
     s_logicalMethodMappings.clear();
     ResetDispatchCounters();
 }
+#endif
 }
 }

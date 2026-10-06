@@ -12,16 +12,7 @@ namespace hybridclr { namespace startup {
     bool IsDeferredAssembly(const char* name);
     void RequireDheMode();
     void RequireSelectedMode();
-    void ObserveDheImplementation(const char* name);
-    void ArmDheImplementations(int poison);
-    int CountDheImplementations();
 }}
-#if HYBRIDCLR_DHE_DIAGNOSTICS
-#define HCLR_AOT_OBSERVE(name) hybridclr::startup::ObserveDheImplementation(name)
-#else
-#define HCLR_AOT_OBSERVE(name) ((void)0)
-#endif
 #else
 #define HCLR_AOT_IMPL(name) name
-#define HCLR_AOT_OBSERVE(name) ((void)0)
 #endif

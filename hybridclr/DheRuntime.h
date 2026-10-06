@@ -381,6 +381,8 @@ namespace dhe
 
     // Test-only reset. Production code never needs to remove a registered
     // DHE assembly because the corresponding homologous image is one-shot.
+#if defined(HYBRIDCLR_LAB_NATIVE_TEST) || HYBRIDCLR_DHE_DIAGNOSTICS
     void ResetForTests();
+#endif
 }
 }
