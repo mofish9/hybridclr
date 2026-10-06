@@ -566,7 +566,8 @@ static bool IsChangedMethodUncached(const MethodInfo* method, const PublishedSta
             state->second.changedMethodTokens.end();
 }
 
-bool HCLR_AOT_IMPL(IsChangedMethod)(const MethodInfo* method)
+// Share the predicate without a second call frame in every AOT entry guard.
+static IL2CPP_FORCE_INLINE bool IsChangedMethodFast(const MethodInfo* method)
 {
     if (!method) return false;
     const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
@@ -579,6 +580,11 @@ bool HCLR_AOT_IMPL(IsChangedMethod)(const MethodInfo* method)
     changed = IsChangedMethodUncached(method, published);
     s_methodDecisionCache.Put(published, method, nullptr, 0, changed);
     return changed;
+}
+
+bool HCLR_AOT_IMPL(IsChangedMethod)(const MethodInfo* method)
+{
+    return IsChangedMethodFast(method);
 }
 
 bool HCLR_AOT_IMPL(IsRemovedMethod)(const MethodInfo* method)
@@ -663,7 +669,7 @@ bool HCLR_AOT_IMPL(CanEnterWithBaseAbi)(const MethodInfo* method)
 
 bool HCLR_AOT_IMPL(ShouldDispatchToInterpreter)(const MethodInfo* method)
 {
-    if (!HCLR_AOT_DIRECT(IsChangedMethod)(method))
+    if (!IsChangedMethodFast(method))
         return false;
     if (!HCLR_AOT_DIRECT(CanEnterWithBaseAbi)(method))
         il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetExecutionEngineException(
