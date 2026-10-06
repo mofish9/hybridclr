@@ -78,6 +78,20 @@
     "owner": "hybridclr::metadata::MetadataModule::"
   },
   {
+    "key": "Metadata_ResolveDheTypeHandleClass_0",
+    "group": "Metadata",
+    "name": "ResolveDheTypeHandleClass",
+    "ret": "Il2CppClass*",
+    "params": [
+      "Il2CppClass* klass"
+    ],
+    "args": [
+      "klass"
+    ],
+    "fallback": "klass",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
     "key": "Metadata_GetDheMethodMetadataImage_0",
     "group": "Metadata",
     "name": "GetDheMethodMetadataImage",

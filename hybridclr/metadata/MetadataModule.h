@@ -75,6 +75,10 @@ namespace metadata
 #if HYBRIDCLR_ENABLE_AOT_SELECTION
         static bool DheImpl_IsDheEquivalentClass(Il2CppClass* left, Il2CppClass* right);
 #endif
+        static Il2CppClass* ResolveDheTypeHandleClass(Il2CppClass* klass);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+        static Il2CppClass* DheImpl_ResolveDheTypeHandleClass(Il2CppClass* klass);
+#endif
 
         static const Il2CppImage* GetDheMethodMetadataImage(const MethodInfo* method);
 #if HYBRIDCLR_ENABLE_AOT_SELECTION

@@ -27,6 +27,7 @@ struct HookTable {
     Image* (*Metadata_GetInterpreterResolveImage_0)(const MethodInfo* methodInfo);
     bool (*Metadata_HasDheReflectedParent_0)(Il2CppClass* reflectedClass, Il2CppClass* declaringClass);
     bool (*Metadata_IsDheEquivalentClass_0)(Il2CppClass* left, Il2CppClass* right);
+    Il2CppClass* (*Metadata_ResolveDheTypeHandleClass_0)(Il2CppClass* klass);
     const Il2CppImage* (*Metadata_GetDheMethodMetadataImage_0)(const MethodInfo* method);
     const MethodInfo* (*Metadata_GetDheCurrentMethodMetadata_0)(const MethodInfo* method);
     Il2CppClass* (*Metadata_GetDheClassInitializationOwner_0)(Il2CppClass* klass);
@@ -106,6 +107,7 @@ static Image* Legacy_Metadata_GetUnderlyingInterpreterImage_0(const MethodInfo* 
 static Image* Legacy_Metadata_GetInterpreterResolveImage_0(const MethodInfo* methodInfo) { return LegacyInterpreterImage(methodInfo); }
 static bool Legacy_Metadata_HasDheReflectedParent_0(Il2CppClass* reflectedClass, Il2CppClass* declaringClass) { return false; }
 static bool Legacy_Metadata_IsDheEquivalentClass_0(Il2CppClass* left, Il2CppClass* right) { return false; }
+static Il2CppClass* Legacy_Metadata_ResolveDheTypeHandleClass_0(Il2CppClass* klass) { return klass; }
 static const Il2CppImage* Legacy_Metadata_GetDheMethodMetadataImage_0(const MethodInfo* method) { return method->klass->image; }
 static const MethodInfo* Legacy_Metadata_GetDheCurrentMethodMetadata_0(const MethodInfo* method) { return method; }
 static Il2CppClass* Legacy_Metadata_GetDheClassInitializationOwner_0(Il2CppClass* klass) { return klass; }
@@ -186,6 +188,7 @@ static const HookTable legacyTable = {
     &Legacy_Metadata_GetInterpreterResolveImage_0,
     &Legacy_Metadata_HasDheReflectedParent_0,
     &Legacy_Metadata_IsDheEquivalentClass_0,
+    &Legacy_Metadata_ResolveDheTypeHandleClass_0,
     &Legacy_Metadata_GetDheMethodMetadataImage_0,
     &Legacy_Metadata_GetDheCurrentMethodMetadata_0,
     &Legacy_Metadata_GetDheClassInitializationOwner_0,
@@ -267,6 +270,7 @@ static const HookTable dheTable = {
     &hybridclr::metadata::MetadataModule::DheImpl_GetInterpreterResolveImage,
     &hybridclr::metadata::MetadataModule::DheImpl_HasDheReflectedParent,
     &hybridclr::metadata::MetadataModule::DheImpl_IsDheEquivalentClass,
+    &hybridclr::metadata::MetadataModule::DheImpl_ResolveDheTypeHandleClass,
     &hybridclr::metadata::MetadataModule::DheImpl_GetDheMethodMetadataImage,
     &hybridclr::metadata::MetadataModule::DheImpl_GetDheCurrentMethodMetadata,
     &hybridclr::metadata::MetadataModule::DheImpl_GetDheClassInitializationOwner,
@@ -348,6 +352,7 @@ static const HookTable unselectedTable = {
     &Legacy_Metadata_GetInterpreterResolveImage_0,
     &Legacy_Metadata_HasDheReflectedParent_0,
     &Legacy_Metadata_IsDheEquivalentClass_0,
+    &Legacy_Metadata_ResolveDheTypeHandleClass_0,
     &Legacy_Metadata_GetDheMethodMetadataImage_0,
     &Legacy_Metadata_GetDheCurrentMethodMetadata_0,
     &Legacy_Metadata_GetDheClassInitializationOwner_0,
@@ -437,6 +442,7 @@ Image* hybridclr::metadata::MetadataModule::GetUnderlyingInterpreterImage(const 
 Image* hybridclr::metadata::MetadataModule::GetInterpreterResolveImage(const MethodInfo* methodInfo) { return hybridclr::startup::GetHooks().Metadata_GetInterpreterResolveImage_0(methodInfo); }
 bool hybridclr::metadata::MetadataModule::HasDheReflectedParent(Il2CppClass* reflectedClass, Il2CppClass* declaringClass) { return hybridclr::startup::GetHooks().Metadata_HasDheReflectedParent_0(reflectedClass, declaringClass); }
 bool hybridclr::metadata::MetadataModule::IsDheEquivalentClass(Il2CppClass* left, Il2CppClass* right) { return hybridclr::startup::GetHooks().Metadata_IsDheEquivalentClass_0(left, right); }
+Il2CppClass* hybridclr::metadata::MetadataModule::ResolveDheTypeHandleClass(Il2CppClass* klass) { return hybridclr::startup::GetHooks().Metadata_ResolveDheTypeHandleClass_0(klass); }
 const Il2CppImage* hybridclr::metadata::MetadataModule::GetDheMethodMetadataImage(const MethodInfo* method) { return hybridclr::startup::GetHooks().Metadata_GetDheMethodMetadataImage_0(method); }
 const MethodInfo* hybridclr::metadata::MetadataModule::GetDheCurrentMethodMetadata(const MethodInfo* method) { return hybridclr::startup::GetHooks().Metadata_GetDheCurrentMethodMetadata_0(method); }
 Il2CppClass* hybridclr::metadata::MetadataModule::GetDheClassInitializationOwner(Il2CppClass* klass) { return hybridclr::startup::GetHooks().Metadata_GetDheClassInitializationOwner_0(klass); }

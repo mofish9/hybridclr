@@ -445,6 +445,22 @@ bool MetadataModule::HCLR_AOT_IMPL(IsDheEquivalentClass)(Il2CppClass* left, Il2C
         return current && il2cpp::vm::Class::FromIl2CppType(current) == right;
     }
 
+    Il2CppClass* MetadataModule::HCLR_AOT_IMPL(ResolveDheTypeHandleClass)(Il2CppClass* klass)
+    {
+    HCLR_AOT_OBSERVE("Metadata_ResolveDheTypeHandleClass_0");
+		if (klass && klass->image && klass->image->assembly)
+		{
+			hybridclr::metadata::AOTHomologousImage* homologous =
+				hybridclr::metadata::AOTHomologousImage::FindImageByAssembly(klass->image->assembly);
+			if (homologous)
+				// typeof(T) must agree with objects using the selected physical
+				// representation. A method-only update retains the Base class.
+				if (const Il2CppType* current = homologous->GetDheExecutionType(&klass->byval_arg))
+					klass = il2cpp::vm::Class::FromIl2CppType(current);
+		}
+        return klass;
+    }
+
     void MetadataModule::Initialize()
     {
         MetadataPool::Initialize();
