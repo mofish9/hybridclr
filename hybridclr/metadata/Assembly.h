@@ -14,6 +14,11 @@ namespace metadata
     {
     public:
         static void InitializePlaceHolderAssemblies();
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+        static const Il2CppAssembly* FindDeferredUnityAssembly(const char* name);
+        static const Il2CppImage* GetDeferredUnityImage(const Il2CppImage* image);
+        static void BindDeferredUnityImage(const Il2CppAssembly* baseAssembly);
+#endif
         static Il2CppAssembly* LoadFromBytes(const void* assemblyData, uint64_t length, const void* rawSymbolStoreBytes, uint64_t rawSymbolStoreLength);
         static LoadImageErrorCode LoadMetadataForAOTAssembly(const void* dllBytes, uint32_t dllSize,
             HomologousImageMode mode, const Il2CppAssembly** targetAssembly = nullptr,

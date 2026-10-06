@@ -14,6 +14,7 @@
 #include "vm/String.h"
 #include "vm/MetadataLock.h"
 #include "vm/MetadataCache.h"
+#include "vm-utils/VmStringUtils.h"
 
 #include "Image.h"
 #include "MetadataModule.h"
@@ -88,6 +89,40 @@ namespace metadata
             il2cpp::vm::MetadataCache::RegisterInterpreterAssembly(placeHolderAss);
         }
     }
+
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    const Il2CppAssembly* Assembly::FindDeferredUnityAssembly(const char* name)
+    {
+        const char* assemblyName = GetAssemblyNameFromPath(name);
+        il2cpp::utils::VmStringUtils::CaseInsensitiveComparer comparer;
+        for (Il2CppAssembly* assembly : s_placeHolderAssembies)
+            if (startup::IsDeferredAssembly(assembly->aname.name) &&
+                (comparer(assembly->aname.name, assemblyName) || comparer(assembly->image->name, assemblyName)))
+                return assembly;
+        return nullptr;
+    }
+
+    const Il2CppImage* Assembly::GetDeferredUnityImage(const Il2CppImage* image)
+    {
+        const Il2CppAssembly* assembly = image ? FindDeferredUnityAssembly(image->name) : nullptr;
+        return assembly ? assembly->image : image;
+    }
+
+    void Assembly::BindDeferredUnityImage(const Il2CppAssembly* baseAssembly)
+    {
+        Il2CppAssembly* placeholder = FindPlaceHolderAssembly(baseAssembly->aname.name);
+        IL2CPP_ASSERT(placeholder && !placeholder->token);
+        // Unity caches this image before managed startup. Keep its address and
+        // name storage stable. The private Base image/assembly remain canonical
+        // for all DHE metadata; only the Unity API exposes this public view.
+        Il2CppImage* image = placeholder->image;
+        const char* name = image->name;
+        const char* nameNoExt = image->nameNoExt;
+        *image = *baseAssembly->image;
+        image->name = name;
+        image->nameNoExt = nameNoExt;
+    }
+#endif
 
     static void RunModuleInitializer(Il2CppImage* image)
     {
