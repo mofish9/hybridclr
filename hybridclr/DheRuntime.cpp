@@ -398,11 +398,13 @@ bool ParseMetaVersion(const void* data, uint32_t size, MetaVersionData& result)
         InvokerMethod invokerMethod = nullptr;
         bool initInterpCallMethodPointer = false;
         bool isInterpterImpl = false;
+#if HYBRIDCLR_UNITY_2022_OR_NEW
         bool hasFullGenericSharingAotInvoker = false;
+#endif
         void* interpData = nullptr;
         Il2CppMethodPointer methodPointerCallByInterp = nullptr;
         Il2CppMethodPointer virtualMethodPointerCallByInterp = nullptr;
-#if HYBRIDCLR_UNITY_2021_OR_NEW
+#if HYBRIDCLR_UNITY_2022_OR_NEW
         uint32_t fullGenericSharingPreparationState = 0;
 #endif
         VirtualInvokeData* vtableEntry = nullptr;
@@ -419,11 +421,13 @@ bool ParseMetaVersion(const void* data, uint32_t size, MetaVersionData& result)
         snapshot.invokerMethod = method->invoker_method;
         snapshot.initInterpCallMethodPointer = method->initInterpCallMethodPointer;
         snapshot.isInterpterImpl = method->isInterpterImpl;
+#if HYBRIDCLR_UNITY_2022_OR_NEW
         snapshot.hasFullGenericSharingAotInvoker = method->hasFullGenericSharingAotInvoker;
+#endif
         snapshot.interpData = method->interpData;
         snapshot.methodPointerCallByInterp = method->methodPointerCallByInterp;
         snapshot.virtualMethodPointerCallByInterp = method->virtualMethodPointerCallByInterp;
-#if HYBRIDCLR_UNITY_2021_OR_NEW
+#if HYBRIDCLR_UNITY_2022_OR_NEW
         snapshot.fullGenericSharingPreparationState = method->fullGenericSharingPreparationState;
 #endif
         if (method->klass && method->slot < method->klass->vtable_count && method->klass->vtable)
@@ -446,11 +450,13 @@ bool ParseMetaVersion(const void* data, uint32_t size, MetaVersionData& result)
         snapshot.method->invoker_method = snapshot.invokerMethod;
         snapshot.method->initInterpCallMethodPointer = snapshot.initInterpCallMethodPointer;
         snapshot.method->isInterpterImpl = snapshot.isInterpterImpl;
+#if HYBRIDCLR_UNITY_2022_OR_NEW
         snapshot.method->hasFullGenericSharingAotInvoker = snapshot.hasFullGenericSharingAotInvoker;
+#endif
         snapshot.method->interpData = snapshot.interpData;
         snapshot.method->methodPointerCallByInterp = snapshot.methodPointerCallByInterp;
         snapshot.method->virtualMethodPointerCallByInterp = snapshot.virtualMethodPointerCallByInterp;
-#if HYBRIDCLR_UNITY_2021_OR_NEW
+#if HYBRIDCLR_UNITY_2022_OR_NEW
         snapshot.method->fullGenericSharingPreparationState = snapshot.fullGenericSharingPreparationState;
 #endif
         if (snapshot.vtableEntry)

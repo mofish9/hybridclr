@@ -950,7 +950,9 @@ namespace hybridclr
 		// and the first interpreter call would otherwise initialize on demand.
 		il2cpp::vm::Class::SetupFields(klass);
 		il2cpp::vm::Class::SetupMethods(klass);
+#if HYBRIDCLR_UNITY_2022_OR_NEW
 		il2cpp::vm::Class::SetupVTable(klass);
+#endif
 		il2cpp::vm::Class::SetupInterfaces(klass);
 		il2cpp::vm::Class::SetupNestedTypes(klass);
 		il2cpp::vm::Class::SetupProperties(klass);
