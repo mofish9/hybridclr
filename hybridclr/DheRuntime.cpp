@@ -1430,13 +1430,8 @@ static bool HasCompatibleClosedBaseFrame(const MethodInfo* method)
         return false;
     for (uint8_t index = 0; index < method->parameters_count; ++index)
     {
-#if HYBRIDCLR_UNITY_2021
-        const Il2CppType* before = method->parameters[index].parameter_type;
-        const Il2CppType* after = current->parameters[index].parameter_type;
-#else
-        const Il2CppType* before = method->parameters[index];
-        const Il2CppType* after = current->parameters[index];
-#endif
+        const Il2CppType* before = GET_METHOD_PARAMETER_TYPE(method->parameters[index]);
+        const Il2CppType* after = GET_METHOD_PARAMETER_TYPE(current->parameters[index]);
         if (!SameClosedPhysicalAbiType(before, after)) return false;
     }
     return true;
@@ -1455,13 +1450,8 @@ const MethodInfo* HCLR_AOT_IMPL(ResolveNativeReferenceInvokeMethod)(const Method
         return method;
     for (uint8_t index = 0; index < method->parameters_count; ++index)
     {
-#if HYBRIDCLR_UNITY_2021
-        const Il2CppType* before = method->parameters[index].parameter_type;
-        const Il2CppType* after = current->parameters[index].parameter_type;
-#else
-        const Il2CppType* before = method->parameters[index];
-        const Il2CppType* after = current->parameters[index];
-#endif
+        const Il2CppType* before = GET_METHOD_PARAMETER_TYPE(method->parameters[index]);
+        const Il2CppType* after = GET_METHOD_PARAMETER_TYPE(current->parameters[index]);
         if (!SameClosedPhysicalAbiType(before, after)) return method;
     }
     // Public type equivalence and the native descriptor cache do not establish
@@ -1514,13 +1504,8 @@ const MethodInfo* HCLR_AOT_IMPL(ResolveInterpreterVirtualMethod)(const MethodInf
         SameClosedPhysicalAbiType(callSignature->return_type, current->return_type);
     for (uint8_t index = 0; compatible && index < current->parameters_count; ++index)
     {
-#if HYBRIDCLR_UNITY_2021
-        const Il2CppType* expected = callSignature->parameters[index].parameter_type;
-        const Il2CppType* actual = current->parameters[index].parameter_type;
-#else
-        const Il2CppType* expected = callSignature->parameters[index];
-        const Il2CppType* actual = current->parameters[index];
-#endif
+        const Il2CppType* expected = GET_METHOD_PARAMETER_TYPE(callSignature->parameters[index]);
+        const Il2CppType* actual = GET_METHOD_PARAMETER_TYPE(current->parameters[index]);
         compatible = SameClosedPhysicalAbiType(expected, actual);
     }
     if (!compatible)
