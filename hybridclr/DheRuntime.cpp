@@ -76,6 +76,9 @@ namespace
         // immutable snapshot. Build the entire index before release publication.
         std::unordered_map<const char*, const DHEAssemblyState*, AssemblyNameHash, AssemblyNameEqual> guardAssemblies;
         bool hasChangedMethods = false;
+        // A negative bit excludes this token in every registered assembly.
+        // Collisions only fall through to the existing exact name/token lookup.
+        uint64_t changedMethodTokenMask = 0;
     };
 
     // State is copied and published only when an assembly is registered. The
@@ -712,7 +715,7 @@ const MethodInfo* HCLR_AOT_IMPL(ResolveAotGuardMethodByToken)(const char* assemb
     if (!assemblyName || !assemblyName[0] || (token >> 24) != 6 || (token & 0xffffffu) == 0)
         return nullptr;
     const PublishedState* published = s_publishedState.load(std::memory_order_acquire);
-    if (!published->hasChangedMethods) return nullptr;
+    if (!(published->changedMethodTokenMask & (uint64_t(1) << (token & 63)))) return nullptr;
     // A bounded short scan is cheaper than TLS initialization/name replacement
     // for tiny registries, particularly when assemblies share a method token.
     if (published->assemblyStates.size() <= 4)
@@ -1741,9 +1744,12 @@ bool PrepareAndRegisterMetaVersions(
         next.reset(new PublishedState());
         next->assemblyStates = published->assemblyStates;
         next->hasChangedMethods = published->hasChangedMethods;
+        next->changedMethodTokenMask = published->changedMethodTokenMask;
         for (PendingMetaVersionRegistration& plan : pending)
         {
             next->hasChangedMethods |= !plan.state.changedMethodTokens.empty();
+            for (uint32_t token : plan.state.changedMethodTokens)
+                next->changedMethodTokenMask |= uint64_t(1) << (token & 63);
             next->assemblyStates.emplace(plan.baseAssembly, std::move(plan.state));
         }
         next->guardAssemblies.reserve(next->assemblyStates.size());
