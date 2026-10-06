@@ -2,6 +2,7 @@
 #include "Assembly.h"
 
 #include <cstring>
+#include <memory>
 #include <iostream>
 #include <vector>
 
@@ -117,12 +118,10 @@ namespace metadata
             il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetArgumentNullException("rawAssembly is null"));
         }
 
-        uint32_t imageId = InterpreterImage::AllocImageIndex((uint32_t)length);
-        if (imageId == kInvalidImageIndex)
-        {
-            il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetExecutionEngineException("InterpreterImage::AllocImageIndex failed"));
-        }
-        InterpreterImage* image = new InterpreterImage(imageId);
+        // Parse and validate before consuming a permanent metadata index. The
+        // image owns the copied DLL/PDB until it is published by InitBasic.
+        std::unique_ptr<InterpreterImage> pendingImage(new InterpreterImage(kInvalidImageIndex));
+        InterpreterImage* image = pendingImage.get();
         
         assemblyData = (const byte*)CopyBytes(assemblyData, length);
         LoadImageErrorCode err = image->Load(assemblyData, (size_t)length);
@@ -131,7 +130,6 @@ namespace metadata
         {
             TEMP_FORMAT(errMsg, "LoadImageErrorCode:%d", (int)err);
             il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetBadImageFormatException(errMsg));
-            // when load a bad image, mean a fatal error. we don't clean image on purpose.
         }
 
         if (rawSymbolStoreBytes)
@@ -153,6 +151,11 @@ namespace metadata
                 "Use the DHE loader for a configured deferred assembly in DHE mode."));
 #endif
 
+        uint32_t imageId = InterpreterImage::AllocImageIndex((uint32_t)length);
+        if (imageId == kInvalidImageIndex)
+            il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetExecutionEngineException("InterpreterImage::AllocImageIndex failed"));
+        image->SetIndexBeforePublication(imageId);
+
         Il2CppAssembly* ass;
         Il2CppImage* image2;
         if ((ass = FindPlaceHolderAssembly(nameNoExt)) != nullptr)
@@ -171,6 +174,7 @@ namespace metadata
             image2 = new (HYBRIDCLR_MALLOC_ZERO(sizeof(Il2CppImage))) Il2CppImage;
         }
 
+        pendingImage.release();
         image->InitBasic(image2);
         image->BuildIl2CppAssembly(ass);
         ass->image = image2;

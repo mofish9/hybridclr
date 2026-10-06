@@ -415,6 +415,12 @@ namespace metadata
 			return _index;
 		}
 
+		void SetIndexBeforePublication(uint32_t imageIndex)
+		{
+			IL2CPP_ASSERT(_index == kInvalidImageIndex && _il2cppImage == nullptr && imageIndex != kInvalidImageIndex);
+			_index = imageIndex;
+		}
+
 		void FlushClassLayoutCacheInstrumentation();
 
 		const Il2CppImage* GetIl2CppImage() const
@@ -1079,7 +1085,7 @@ namespace metadata
 		SuperSetAOTHomologousImage* _homologousTypeReferenceImage = nullptr;
 		bool _isDheInterpreterAssembly = false;
 		uint8_t _runtimeMetadataStage = 0; // guarded by g_MetadataLock
-		const uint32_t _index;
+		uint32_t _index;
 		static bool IsMetadataPublished(const int32_t* initialized)
 		{
 			return Baselib_atomic_load_32_acquire(initialized) != 0;

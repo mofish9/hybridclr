@@ -52,7 +52,6 @@
 #include "vm/String.h"
 #endif
 #include <vector>
-// Research-only fixture endpoints. No new production/public package API.
 namespace hybridclr
 {
 	namespace
