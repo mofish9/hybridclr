@@ -92,6 +92,72 @@
     "owner": "hybridclr::metadata::MetadataModule::"
   },
   {
+    "key": "Metadata_ResolveDheExecutionType_0",
+    "group": "Metadata",
+    "name": "ResolveDheExecutionType",
+    "ret": "const Il2CppType*",
+    "params": [
+      "const Il2CppType* type"
+    ],
+    "args": [
+      "type"
+    ],
+    "fallback": "type",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_ResolveDheMethodExecution_0",
+    "group": "Metadata",
+    "name": "ResolveDheMethodExecution",
+    "ret": "const MethodInfo*",
+    "params": [
+      "const MethodInfo* logical"
+    ],
+    "args": [
+      "logical"
+    ],
+    "fallback": "logical",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_ResolveDheFieldReference_0",
+    "group": "Metadata",
+    "name": "ResolveDheFieldReference",
+    "ret": "const FieldInfo*",
+    "params": [
+      "const Il2CppType& type",
+      "const Il2CppFieldDefinition* fieldDef"
+    ],
+    "args": [
+      "type",
+      "fieldDef"
+    ],
+    "fallback": "TraditionalFieldReference(type, fieldDef)",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_FindDheMethodFallback_0",
+    "group": "Metadata",
+    "name": "FindDheMethodFallback",
+    "ret": "const MethodInfo*",
+    "params": [
+      "const Il2CppType* type",
+      "const char* resolveMethodName",
+      "const MethodRefSig& resolveSig",
+      "const Il2CppGenericInst* genericInstantiation",
+      "const Il2CppGenericContext* genericContext"
+    ],
+    "args": [
+      "type",
+      "resolveMethodName",
+      "resolveSig",
+      "genericInstantiation",
+      "genericContext"
+    ],
+    "fallback": "nullptr",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
     "key": "Metadata_GetDheMethodMetadataImage_0",
     "group": "Metadata",
     "name": "GetDheMethodMetadataImage",

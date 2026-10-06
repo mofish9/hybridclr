@@ -79,6 +79,23 @@ namespace metadata
 #if HYBRIDCLR_ENABLE_AOT_SELECTION
         static Il2CppClass* DheImpl_ResolveDheTypeHandleClass(Il2CppClass* klass);
 #endif
+        static const Il2CppType* ResolveDheExecutionType(const Il2CppType* type);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+        static const Il2CppType* DheImpl_ResolveDheExecutionType(const Il2CppType* type);
+#endif
+        static const MethodInfo* ResolveDheMethodExecution(const MethodInfo* logical);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+        static const MethodInfo* DheImpl_ResolveDheMethodExecution(const MethodInfo* logical);
+#endif
+        static const FieldInfo* ResolveDheFieldReference(const Il2CppType& type, const Il2CppFieldDefinition* fieldDef);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+        static const FieldInfo* DheImpl_ResolveDheFieldReference(const Il2CppType& type, const Il2CppFieldDefinition* fieldDef);
+#endif
+        static const MethodInfo* FindDheMethodFallback(const Il2CppType* type, const char* resolveMethodName,
+            const MethodRefSig& resolveSig, const Il2CppGenericInst* genericInstantiation, const Il2CppGenericContext* genericContext);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+        static const MethodInfo* DheImpl_FindDheMethodFallback(const Il2CppType* type, const char* resolveMethodName, const MethodRefSig& resolveSig, const Il2CppGenericInst* genericInstantiation, const Il2CppGenericContext* genericContext);
+#endif
 
         static const Il2CppImage* GetDheMethodMetadataImage(const MethodInfo* method);
 #if HYBRIDCLR_ENABLE_AOT_SELECTION

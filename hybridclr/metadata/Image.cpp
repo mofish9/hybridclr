@@ -974,58 +974,7 @@ namespace metadata
 
     const Il2CppType* Image::ResolveExecutionType(const Il2CppType* type)
     {
-        if (!type) return nullptr;
-        Il2CppType mapped = *type;
-        switch (type->type)
-        {
-        case IL2CPP_TYPE_GENERICINST:
-        {
-            const Il2CppGenericClass* generic = type->data.generic_class;
-            const Il2CppType* definition = ResolveExecutionType(generic->type);
-            const Il2CppGenericInst* args = generic->context.class_inst;
-            std::vector<const Il2CppType*> current(args->type_argc);
-            bool changed = definition != generic->type;
-            for (uint32_t index = 0; index < args->type_argc; ++index)
-            {
-                current[index] = ResolveExecutionType(args->type_argv[index]);
-                changed |= current[index] != args->type_argv[index];
-            }
-            if (!changed) return type;
-            mapped.data.generic_class = il2cpp::metadata::GenericMetadata::GetGenericClass(definition,
-                il2cpp::vm::MetadataCache::GetGenericInst(current.data(), args->type_argc));
-            return MetadataPool::GetPooledIl2CppType(mapped);
-        }
-        case IL2CPP_TYPE_SZARRAY:
-        case IL2CPP_TYPE_PTR:
-        {
-            const Il2CppType* element = ResolveExecutionType(type->data.type);
-            if (element == type->data.type) return type;
-            mapped.data.type = element;
-            return MetadataPool::GetPooledIl2CppType(mapped);
-        }
-        case IL2CPP_TYPE_ARRAY:
-        {
-            const Il2CppType* element = ResolveExecutionType(type->data.array->etype);
-            if (element == type->data.array->etype) return type;
-            mapped.data.array = const_cast<Il2CppArrayType*>(MetadataPool::GetPooledIl2CppArrayType(element, type->data.array->rank));
-            return MetadataPool::GetPooledIl2CppType(mapped);
-        }
-        case IL2CPP_TYPE_CLASS:
-        case IL2CPP_TYPE_VALUETYPE:
-        {
-            // Prepared Current definitions may not have signatures/layouts yet.
-            // They already have their execution identity; do not materialize a
-            // class merely to rediscover it during mixed-image preparation.
-            if (IsInterpreterType(GetUnderlyingTypeDefinition(type))) return type;
-            Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(type);
-            AOTHomologousImage* image = klass && klass->image && klass->image->assembly
-                ? AOTHomologousImage::FindImageByAssembly(klass->image->assembly) : nullptr;
-            const Il2CppType* current = image ? image->GetDheExecutionType(type) : nullptr;
-            return current ? current : type;
-        }
-        default:
-            return type;
-        }
+        return MetadataModule::ResolveDheExecutionType(type);
     }
 
     Il2CppClass* Image::GetClassFromToken(Token2RuntimeHandleMap& tokenCache, uint32_t token, const Il2CppGenericContainer* klassGenericContainer, const Il2CppGenericContainer* methodGenericContainer, const Il2CppGenericContext* genericContext)
@@ -1055,44 +1004,7 @@ namespace metadata
 
     const FieldInfo* Image::GetFieldInfoFromFieldRef(const Il2CppType& type, const Il2CppFieldDefinition* fieldDef)
     {
-        const Il2CppType* executionType = ResolveExecutionType(&type);
-		Il2CppClass* logicalClass = il2cpp::vm::Class::FromIl2CppType(&type);
-		AOTHomologousImage* homologous = nullptr;
-		if (logicalClass && logicalClass->image && logicalClass->image->assembly)
-		{
-			homologous = AOTHomologousImage::FindImageByAssembly(logicalClass->image->assembly);
-		}
-		Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(executionType);
-        const char* name = il2cpp::vm::GlobalMetadata::GetStringFromIndex(fieldDef->nameIndex);
-        void* iter = nullptr;
-        for (const FieldInfo* cur = nullptr; (cur = il2cpp::vm::Class::GetFields(klass, &iter)) != nullptr; )
-        {
-            if (cur->token == fieldDef->token && std::strcmp(cur->name, name) == 0)
-            {
-                return MetadataModule::ResolveDheSupplementalField(cur);
-            }
-        }
-		// A historical Base can resolve the logical owner to its old AOT
-		// class, whose field token/layout no longer matches Current. Retry
-		// against the Current physical owner by stable field name so the
-		// interpreter uses the Current offset and field type.
-		if (homologous)
-		{
-			const Il2CppType* currentType = homologous->GetDheCurrentType(&type);
-			if (currentType)
-			{
-				Il2CppClass* currentClass = il2cpp::vm::Class::FromIl2CppType(currentType);
-				void* currentIter = nullptr;
-				for (const FieldInfo* cur = nullptr;
-					(cur = il2cpp::vm::Class::GetFields(currentClass, &currentIter)) != nullptr; )
-				{
-					if (cur->name && std::strcmp(cur->name, name) == 0)
-						return MetadataModule::ResolveDheSupplementalField(cur);
-				}
-			}
-		}
-        RaiseMissingFieldException(&type, name);
-        return nullptr;
+        return MetadataModule::ResolveDheFieldReference(type, fieldDef);
     }
 
     const MethodInfo* Image::ResolveMethodInfo(const Il2CppType* type, const char* resolveMethodName, const MethodRefSig& resolveSig, const Il2CppGenericInst* genericInstantiation, const Il2CppGenericContext* genericContext)
@@ -1113,46 +1025,8 @@ namespace metadata
                 }
             }
 
-			// A DHE current image can add methods to an existing AOT type. Those
-			// methods are deliberately absent from the Base TypeDefinition table,
-			// but Class::GetMethods exposes the merged current view and filters
-			// tombstones. MemberRef resolution must use that view as its fallback.
-			const Il2CppType* finalContainerType = genericContext
-				? TryInflateIfNeed(type, genericContext, true)
-				: type;
-			Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(finalContainerType);
-			void* iter = nullptr;
-			while (const MethodInfo* method = il2cpp::vm::Class::GetMethods(klass, &iter))
-			{
-				if (std::strcmp(resolveMethodName, method->name) != 0)
-					continue;
-				const MethodInfo* definition = method->is_inflated
-					? method->genericMethod->methodDefinition : method;
-				const Il2CppMethodDefinition* declaration = reinterpret_cast<const Il2CppMethodDefinition*>(definition->methodMetadataHandle);
-				const Il2CppTypeDefinition* declaringType = reinterpret_cast<const Il2CppTypeDefinition*>(
-					il2cpp::vm::GlobalMetadata::GetTypeHandleFromIndex(declaration->declaringType));
-				const Il2CppGenericContainer* declarationContainer = declaringType->genericContainerIndex == kGenericContainerIndexInvalid
-					? nullptr : reinterpret_cast<const Il2CppGenericContainer*>(
-						il2cpp::vm::GlobalMetadata::GetGenericContainerFromIndex(declaringType->genericContainerIndex));
-				// MemberRef signatures retain generic ordinals. Match Current's
-				// uninflated declaration and owner, then use the closed method.
-				if (!IsMatchMethodSig(definition, resolveSig, declarationContainer))
-				{
-					continue;
-				}
-				if (!genericInstantiation)
-				{
-					return method;
-				}
-				const Il2CppGenericInst* classInstantiation =
-					finalContainerType->type == IL2CPP_TYPE_GENERICINST
-					? finalContainerType->data.generic_class->context.class_inst
-					: nullptr;
-				Il2CppGenericContext finalGenericContext = {
-					classInstantiation, genericInstantiation };
-				return il2cpp::metadata::GenericMetadata::Inflate(definition,
-					&finalGenericContext);
-			}
+            if (const MethodInfo* method = MetadataModule::FindDheMethodFallback(type, resolveMethodName,
+                resolveSig, genericInstantiation, genericContext)) return method;
         }
         else
         {
@@ -1359,38 +1233,7 @@ namespace metadata
     {
         const MethodInfo* logical = GetMethodInfoFromToken(tokenCache, token,
             klassGenericContainer, methodGenericContainer, genericContext);
-        // Abstract declarations have no executable entry in the DHE dispatch
-        // table, but their signatures still size virtual-call argument/return
-        // storage. Keep this Current descriptor out of the logical token cache.
-        const MethodInfo* execution = IsAbstractMethod(logical->flags)
-            ? MetadataModule::GetDheCurrentMethodMetadata(logical) : logical;
-        if (execution->is_inflated && execution->genericMethod)
-        {
-            // Current-only and unchanged generic methods have no replacement
-            // entry in the DHE dispatch table. Their argument/return layouts
-            // must still use the caller's Current storage (Identity<Payload>,
-            // List<Payload>, etc.). Do not publish these execution handles into
-            // the logical token cache used by reflection and signature lookup.
-            auto mapInst = [](const Il2CppGenericInst* inst) -> const Il2CppGenericInst*
-            {
-                if (!inst) return nullptr;
-                std::vector<const Il2CppType*> args(inst->type_argc);
-                bool changed = false;
-                for (uint32_t index = 0; index < inst->type_argc; ++index)
-                {
-                    args[index] = ResolveExecutionType(inst->type_argv[index]);
-                    changed |= args[index] != inst->type_argv[index];
-                }
-                return changed ? il2cpp::vm::MetadataCache::GetGenericInst(args.data(), inst->type_argc) : inst;
-            };
-            const Il2CppGenericContext& original = execution->genericMethod->context;
-            Il2CppGenericContext current = { mapInst(original.class_inst), mapInst(original.method_inst) };
-            if (current.class_inst != original.class_inst || current.method_inst != original.method_inst)
-                execution = il2cpp::metadata::GenericMetadata::Inflate(execution->genericMethod->methodDefinition, &current);
-        }
-        execution = dhe::ResolveCurrentExecutionMethod(execution);
-        if (execution != logical) il2cpp::vm::Class::Init(execution->klass);
-        return execution;
+        return MetadataModule::ResolveDheMethodExecution(logical);
     }
 
     const MethodInfo* Image::GetMethodInfo(const Il2CppType* containerType, const Il2CppMethodDefinition* methodDef, const Il2CppGenericInst* instantiation, const Il2CppGenericContext* genericContext)
