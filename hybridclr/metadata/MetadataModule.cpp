@@ -41,65 +41,49 @@
 #include <vector>
 #include <atomic>
 
-// Diagnostic instrumentation, only in this research branch. A failpoint in an
-// existing DHE hook distinguishes ordinary loading from DHE-independent runtime.
-static std::atomic<int32_t> s_labDheHookArmed{0};
-static std::atomic<int32_t> s_labDheHookCounts[3]{};
-void HybridClrLabArmDheHookProbe(int32_t poison)
-{
-    for (auto& count : s_labDheHookCounts) count.store(0, std::memory_order_relaxed);
-    s_labDheHookArmed.store(poison < 0 ? 0 : poison + 1, std::memory_order_release);
-}
-int32_t HybridClrLabGetDheHookCount(int32_t kind)
-{
-    return kind >= 0 && kind < 3 ? s_labDheHookCounts[kind].load(std::memory_order_relaxed) : -1;
-}
-static void LabObserveDheHook(const Il2CppImage* image, int32_t kind)
-{
-    int32_t armed = s_labDheHookArmed.load(std::memory_order_acquire);
-    if (!armed || !image || !image->nameNoExt || std::strcmp(image->nameNoExt, "StartupHotfix") != 0) return;
-    s_labDheHookCounts[kind].fetch_add(1, std::memory_order_relaxed);
-    if (armed == 2)
-        hybridclr::RaiseExecutionEngineException("LAB_DHE_HOOK_FAULT: shared DHE hook reached for StartupHotfix");
-}
-
 using namespace il2cpp;
 
 namespace hybridclr
 {
 	namespace dhe
 	{
-		Il2CppClass* ResolveReferenceAllocationClass(Il2CppClass* klass)
+		Il2CppClass* HCLR_AOT_IMPL(ResolveReferenceAllocationClass)(Il2CppClass* klass)
 		{
+    HCLR_AOT_OBSERVE("Runtime_ResolveReferenceAllocationClass_0");
 			return metadata::MetadataModule::GetDheReferenceAllocationClass(klass);
 		}
 
-		bool TryGetVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot,
+		bool HCLR_AOT_IMPL(TryGetVirtualInvokeData)(const Il2CppClass* klass, uint16_t logicalSlot,
 			const VirtualInvokeData*& result)
 		{
+    HCLR_AOT_OBSERVE("Runtime_TryGetVirtualInvokeData_0");
 			return metadata::MetadataModule::TryGetDheVirtualInvokeData(klass, logicalSlot, result);
 		}
 
-		bool TryGetVirtualInvokeData(const Il2CppClass* klass, const MethodInfo* method,
+		bool HCLR_AOT_IMPL(TryGetVirtualInvokeData)(const Il2CppClass* klass, const MethodInfo* method,
 			const VirtualInvokeData*& result)
 		{
+    HCLR_AOT_OBSERVE("Runtime_TryGetVirtualInvokeData_1");
 			return metadata::MetadataModule::TryGetDheVirtualInvokeData(klass, method, result);
 		}
 
-		bool TryGetVirtualBaseMethod(const MethodInfo* method, bool definition, const MethodInfo*& result)
+		bool HCLR_AOT_IMPL(TryGetVirtualBaseMethod)(const MethodInfo* method, bool definition, const MethodInfo*& result)
 		{
+    HCLR_AOT_OBSERVE("Runtime_TryGetVirtualBaseMethod_0");
 			return metadata::MetadataModule::TryGetDheVirtualBaseMethod(method, definition, result);
 		}
 
-		bool TryGetVirtualReflectionIdentity(const Il2CppClass* reflectedType, const MethodInfo* method,
+		bool HCLR_AOT_IMPL(TryGetVirtualReflectionIdentity)(const Il2CppClass* reflectedType, const MethodInfo* method,
 			const MethodInfo*& result)
 		{
+    HCLR_AOT_OBSERVE("Runtime_TryGetVirtualReflectionIdentity_0");
 			return metadata::MetadataModule::TryGetDheVirtualReflectionIdentity(reflectedType, method, result);
 		}
 
-		bool TryGetInterfaceInvokeData(const Il2CppClass* klass, const Il2CppClass* interfaceType,
+		bool HCLR_AOT_IMPL(TryGetInterfaceInvokeData)(const Il2CppClass* klass, const Il2CppClass* interfaceType,
 			uint16_t logicalSlot, const VirtualInvokeData*& result)
 		{
+    HCLR_AOT_OBSERVE("Runtime_TryGetInterfaceInvokeData_0");
 			return metadata::MetadataModule::TryGetDheInterfaceInvokeData(klass, interfaceType, logicalSlot, result);
 		}
 	}
@@ -430,6 +414,37 @@ namespace metadata
 
 
 
+bool MetadataModule::HCLR_AOT_IMPL(HasDheReflectedParent)(Il2CppClass* reflectedClass, Il2CppClass* declaringClass)
+{
+    HCLR_AOT_OBSERVE("Metadata_HasDheReflectedParent_0");
+        if (!reflectedClass || !declaringClass || reflectedClass->byval_arg.valuetype || declaringClass->byval_arg.valuetype)
+            return false;
+        // This validates a member/type handle pair, never an object buffer.
+        // Accessors and fields retain their separate physical receiver checks.
+        const Il2CppType* declaringType = hybridclr::metadata::MetadataModule::GetDhePublicReferenceType(&declaringClass->byval_arg);
+        Il2CppClass* logicalParent = il2cpp::vm::Class::FromIl2CppType(declaringType);
+        Il2CppClass* selected = hybridclr::metadata::MetadataModule::GetDheReferenceAllocationClass(reflectedClass);
+        for (Il2CppClass* parent = selected; parent; parent = parent->parent)
+            if (parent == declaringClass || il2cpp::vm::Class::FromIl2CppType(
+                    hybridclr::metadata::MetadataModule::GetDhePublicReferenceType(&parent->byval_arg)) == logicalParent)
+                return true;
+        return false;
+    }
+
+bool MetadataModule::HCLR_AOT_IMPL(IsDheEquivalentClass)(Il2CppClass* left, Il2CppClass* right)
+{
+    HCLR_AOT_OBSERVE("Metadata_IsDheEquivalentClass_0");
+        if (!left || !right || !left->image || !left->image->assembly)
+            return false;
+        hybridclr::metadata::AOTHomologousImage* image =
+            hybridclr::metadata::AOTHomologousImage::FindImageByAssembly(
+                left->image->assembly);
+        if (!image)
+            return false;
+        const Il2CppType* current = image->GetDheCurrentType(&left->byval_arg);
+        return current && il2cpp::vm::Class::FromIl2CppType(current) == right;
+    }
+
     void MetadataModule::Initialize()
     {
         MetadataPool::Initialize();
@@ -437,8 +452,9 @@ namespace metadata
         Assembly::InitializePlaceHolderAssemblies();
     }
 
-    Image* MetadataModule::GetUnderlyingInterpreterImage(const MethodInfo* methodInfo)
+    Image* MetadataModule::HCLR_AOT_IMPL(GetUnderlyingInterpreterImage)(const MethodInfo* methodInfo)
     {
+    HCLR_AOT_OBSERVE("Metadata_GetUnderlyingInterpreterImage_0");
         if (metadata::IsInterpreterMethod(methodInfo))
         {
             return hybridclr::metadata::MetadataModule::GetImage(methodInfo->klass);
@@ -454,8 +470,9 @@ namespace metadata
         return supplemental ? supplemental : homologous;
     }
 
-	Image* MetadataModule::GetInterpreterResolveImage(const MethodInfo* methodInfo)
+	Image* MetadataModule::HCLR_AOT_IMPL(GetInterpreterResolveImage)(const MethodInfo* methodInfo)
 	{
+    HCLR_AOT_OBSERVE("Metadata_GetInterpreterResolveImage_0");
 		Image* bodyImage = GetUnderlyingInterpreterImage(methodInfo);
 		if (!methodInfo || !methodInfo->klass || !methodInfo->klass->image ||
 			!methodInfo->klass->image->assembly)
@@ -573,8 +590,9 @@ namespace metadata
         return true;
     }
 
-    bool MetadataModule::TryCopyDheBoxedValueToCurrent(Il2CppObject* value, Il2CppClass* currentClass, void* destination)
+    bool MetadataModule::HCLR_AOT_IMPL(TryCopyDheBoxedValueToCurrent)(Il2CppObject* value, Il2CppClass* currentClass, void* destination)
     {
+    HCLR_AOT_OBSERVE("Metadata_TryCopyDheBoxedValueToCurrent_0");
         if (!value || !currentClass || value->klass == currentClass) return false;
         return CopyDheValueData(value->klass, static_cast<const uint8_t*>(il2cpp::vm::Object::Unbox(value)),
             currentClass, static_cast<uint8_t*>(destination));
@@ -645,14 +663,15 @@ namespace metadata
 		return MetadataPool::GetPooledIl2CppType(result);
 	}
 
-	Il2CppClass* MetadataModule::GetDheReferenceAllocationClass(Il2CppClass* klass)
+	Il2CppClass* MetadataModule::HCLR_AOT_IMPL(GetDheReferenceAllocationClass)(Il2CppClass* klass)
 	{
-        LabObserveDheHook(klass ? klass->image : nullptr, 1);
+    HCLR_AOT_OBSERVE("Metadata_GetDheReferenceAllocationClass_0");
 		return klass && !klass->byval_arg.valuetype ? GetDheExecutionClass(klass) : klass;
 	}
 
-	Il2CppClass* MetadataModule::GetDheExecutionClass(Il2CppClass* klass)
+	Il2CppClass* MetadataModule::HCLR_AOT_IMPL(GetDheExecutionClass)(Il2CppClass* klass)
 	{
+    HCLR_AOT_OBSERVE("Metadata_GetDheExecutionClass_0");
 		// Acquire completed publication before looking up an execution layout.
 		// Native callers may still hold the public Base type (for example Unity
 		// AddComponent(Type)). A new object must own the selected physical fields.
@@ -746,8 +765,9 @@ namespace metadata
 		return MetadataPool::GetPooledIl2CppType(result);
 	}
 
-	const Il2CppType* MetadataModule::GetDhePublicReferenceType(const Il2CppType* type)
+	const Il2CppType* MetadataModule::HCLR_AOT_IMPL(GetDhePublicReferenceType)(const Il2CppType* type)
 	{
+    HCLR_AOT_OBSERVE("Metadata_GetDhePublicReferenceType_0");
 		if (!type || type->valuetype) return type;
 		if (type->type == IL2CPP_TYPE_CLASS)
 		{
@@ -767,8 +787,9 @@ namespace metadata
 		return result;
 	}
 
-	FieldInfo* MetadataModule::ResolveDheReferenceInstanceField(Il2CppObject* obj, const FieldInfo* field)
+	FieldInfo* MetadataModule::HCLR_AOT_IMPL(ResolveDheReferenceInstanceField)(Il2CppObject* obj, const FieldInfo* field)
 	{
+    HCLR_AOT_OBSERVE("Metadata_ResolveDheReferenceInstanceField_0");
 		if (!field || !obj || !field->parent || field->parent->byval_arg.valuetype ||
 			(field->type->attrs & FIELD_ATTRIBUTE_STATIC) || !field->parent->image ||
 			(!field->parent->generic_class && !dhe::IsDheAssembly(field->parent->image->assembly)) || IsDheSupplementalInstanceField(field))
@@ -806,8 +827,9 @@ namespace metadata
 		return nullptr;
 	}
 
-	Il2CppClass* MetadataModule::GetDheClassInitializationOwner(Il2CppClass* klass)
+	Il2CppClass* MetadataModule::HCLR_AOT_IMPL(GetDheClassInitializationOwner)(Il2CppClass* klass)
 	{
+    HCLR_AOT_OBSERVE("Metadata_GetDheClassInitializationOwner_0");
 		// Acquire the completed registration before reading Current metadata.
 		// Never change Base cctor state during preparation or mirror completion bits.
 		if (!klass || !klass->image || !dhe::IsDheAssembly(klass->image->assembly))
@@ -984,9 +1006,10 @@ namespace metadata
 		return GetDheVirtualEntry(receiver->vtable[declaration->slot].method);
 	}
 
-	bool MetadataModule::TryGetDheVirtualInvokeData(const Il2CppClass* klass,
+	bool MetadataModule::HCLR_AOT_IMPL(TryGetDheVirtualInvokeData)(const Il2CppClass* klass,
 		uint16_t logicalSlot, const VirtualInvokeData*& result)
 	{
+    HCLR_AOT_OBSERVE("Metadata_TryGetDheVirtualInvokeData_0");
 		const void* epoch = dhe::GetPublicationIdentity();
 		if (!epoch || !klass) return false;
 		if (s_dheDispatchCache.TryGet(epoch, klass, nullptr, logicalSlot, result)) return result != nullptr;
@@ -1021,9 +1044,10 @@ namespace metadata
 		return true;
 	}
 
-	bool MetadataModule::TryGetDheVirtualInvokeData(const Il2CppClass* klass,
+	bool MetadataModule::HCLR_AOT_IMPL(TryGetDheVirtualInvokeData)(const Il2CppClass* klass,
 		const MethodInfo* method, const VirtualInvokeData*& result)
 	{
+    HCLR_AOT_OBSERVE("Metadata_TryGetDheVirtualInvokeData_1");
 		const void* epoch = dhe::GetPublicationIdentity();
 		if (!epoch || !klass) return false;
 		if (s_dheDispatchCache.TryGet(epoch, klass, method, UINTPTR_MAX, result)) return result != nullptr;
@@ -1081,9 +1105,10 @@ namespace metadata
 		return current;
 	}
 
-	bool MetadataModule::TryGetDheVirtualReflectionIdentity(const Il2CppClass* reflectedType,
+	bool MetadataModule::HCLR_AOT_IMPL(TryGetDheVirtualReflectionIdentity)(const Il2CppClass* reflectedType,
 		const MethodInfo* method, const MethodInfo*& result)
 	{
+    HCLR_AOT_OBSERVE("Metadata_TryGetDheVirtualReflectionIdentity_0");
 		if (!method || !IsVirtualMethod(method->flags) || IsInterface(method->klass->flags) ||
 			!HasDheVirtualHierarchy(reflectedType))
 			return false;
@@ -1095,9 +1120,10 @@ namespace metadata
 		return true;
 	}
 
-	bool MetadataModule::TryGetDheVirtualBaseMethod(const MethodInfo* method, bool definition,
+	bool MetadataModule::HCLR_AOT_IMPL(TryGetDheVirtualBaseMethod)(const MethodInfo* method, bool definition,
 		const MethodInfo*& result)
 	{
+    HCLR_AOT_OBSERVE("Metadata_TryGetDheVirtualBaseMethod_0");
 		if (!method || !IsVirtualMethod(method->flags) || IsInterface(method->klass->flags) ||
 			!HasDheVirtualHierarchy(method->klass))
 			return false;
@@ -1107,9 +1133,10 @@ namespace metadata
 		return true;
 	}
 
-	bool MetadataModule::TryGetDheInterfaceInvokeData(const Il2CppClass* klass,
+	bool MetadataModule::HCLR_AOT_IMPL(TryGetDheInterfaceInvokeData)(const Il2CppClass* klass,
 		const Il2CppClass* interfaceType, uint16_t logicalSlot, const VirtualInvokeData*& result)
 	{
+    HCLR_AOT_OBSERVE("Metadata_TryGetDheInterfaceInvokeData_0");
 		const void* epoch = dhe::GetPublicationIdentity();
 		if (!epoch || !klass || !interfaceType || !interfaceType->image) return false;
 		if (s_dheDispatchCache.TryGet(epoch, klass, interfaceType, logicalSlot, result)) return result != nullptr;
@@ -1200,13 +1227,15 @@ namespace metadata
 		return false;
 	}
 
-	const PropertyInfo* MetadataModule::GetDheCustomAttributeProperty(Il2CppClass* klass, uint32_t index)
+	const PropertyInfo* MetadataModule::HCLR_AOT_IMPL(GetDheCustomAttributeProperty)(Il2CppClass* klass, uint32_t index)
 	{
+    HCLR_AOT_OBSERVE("Metadata_GetDheCustomAttributeProperty_0");
 		return GetDheAttributePropertyByIndex(GetDheSupplementalImage(klass->image), klass, index);
 	}
 
-	const MethodInfo* MetadataModule::ResolveDheMethod(const MethodInfo* method)
+	const MethodInfo* MetadataModule::HCLR_AOT_IMPL(ResolveDheMethod)(const MethodInfo* method)
 	{
+    HCLR_AOT_OBSERVE("Metadata_ResolveDheMethod_0");
 		if (!method || !method->klass || !method->klass->image ||
 			!IsInterpreterImage(method->klass->image) ||
 			!dhe::IsDheAssembly(method->klass->image->assembly))
@@ -1215,32 +1244,35 @@ namespace metadata
 		return image ? image->ResolveLogicalMethod(method) : method;
 	}
 
-	bool MetadataModule::TryGetDheCustomAttributeSource(const Il2CppImage* image,
+	bool MetadataModule::HCLR_AOT_IMPL(TryGetDheCustomAttributeSource)(const Il2CppImage* image,
 		uint32_t token, const Il2CppImage*& sourceImage, uint32_t& sourceToken)
 	{
+    HCLR_AOT_OBSERVE("Metadata_TryGetDheCustomAttributeSource_0");
 		AOTHomologousImage* homologous = GetDheSupplementalImage(image);
 		return homologous && homologous->TryGetCustomAttributeSource(
 			token, sourceImage, sourceToken);
 	}
 
-	const MethodInfo* MetadataModule::GetDheCurrentMethodMetadata(const MethodInfo* method)
+	const MethodInfo* MetadataModule::HCLR_AOT_IMPL(GetDheCurrentMethodMetadata)(const MethodInfo* method)
 	{
-        LabObserveDheHook(method->klass->image, 0);
+    HCLR_AOT_OBSERVE("Metadata_GetDheCurrentMethodMetadata_0");
 		AOTHomologousImage* image = GetDheSupplementalImage(method->klass->image);
 		return image ? image->GetCurrentMethodMetadata(method) : method;
 	}
 
-    const Il2CppImage* MetadataModule::GetDheMethodMetadataImage(const MethodInfo* method)
+    const Il2CppImage* MetadataModule::HCLR_AOT_IMPL(GetDheMethodMetadataImage)(const MethodInfo* method)
     {
+    HCLR_AOT_OBSERVE("Metadata_GetDheMethodMetadataImage_0");
         const Il2CppImage* image = method->klass->image;
         AOTHomologousImage* homologous = GetDheSupplementalImage(image);
         Image* supplemental = homologous ? homologous->GetSupplementalMethodImage(method) : nullptr;
         return supplemental ? static_cast<InterpreterImage*>(supplemental)->GetIl2CppImage() : image;
     }
 
-    bool MetadataModule::TryGetDheReferencedAssemblies(const Il2CppAssembly* assembly,
+    bool MetadataModule::HCLR_AOT_IMPL(TryGetDheReferencedAssemblies)(const Il2CppAssembly* assembly,
         std::vector<const Il2CppAssemblyName*>& references)
     {
+    HCLR_AOT_OBSERVE("Metadata_TryGetDheReferencedAssemblies_0");
         AOTHomologousImage* homologous = GetDheSupplementalImage(assembly->image);
         if (!homologous)
         {
@@ -1265,16 +1297,18 @@ namespace metadata
         return true;
     }
 
-    Il2CppClass* MetadataModule::FindDheSupplementalType(const Il2CppImage* image,
+    Il2CppClass* MetadataModule::HCLR_AOT_IMPL(FindDheSupplementalType)(const Il2CppImage* image,
         const char* namespaze, const char* name)
     {
+    HCLR_AOT_OBSERVE("Metadata_FindDheSupplementalType_0");
         AOTHomologousImage* homologous = GetDheSupplementalImage(image);
         return homologous ? homologous->FindSupplementalType(namespaze, name) : nullptr;
     }
 
-    void MetadataModule::GetDheSupplementalTypes(const Il2CppImage* image,
+    void MetadataModule::HCLR_AOT_IMPL(GetDheSupplementalTypes)(const Il2CppImage* image,
         std::vector<const Il2CppClass*>& types)
     {
+    HCLR_AOT_OBSERVE("Metadata_GetDheSupplementalTypes_0");
         AOTHomologousImage* homologous = GetDheSupplementalImage(image);
         if (homologous)
         {
@@ -1282,41 +1316,46 @@ namespace metadata
         }
     }
 
-    Il2CppClass* MetadataModule::GetFirstDheSupplementalNestedType(Il2CppClass* klass,
+    Il2CppClass* MetadataModule::HCLR_AOT_IMPL(GetFirstDheSupplementalNestedType)(Il2CppClass* klass,
         void** iter)
     {
+    HCLR_AOT_OBSERVE("Metadata_GetFirstDheSupplementalNestedType_0");
         AOTHomologousImage* homologous = klass && klass->image
             ? GetDheSupplementalImage(klass->image) : nullptr;
         return homologous ? homologous->GetFirstSupplementalNestedType(klass, iter) : nullptr;
     }
 
-    bool MetadataModule::TryGetNextDheSupplementalNestedType(Il2CppClass* klass, void** iter,
+    bool MetadataModule::HCLR_AOT_IMPL(TryGetNextDheSupplementalNestedType)(Il2CppClass* klass, void** iter,
         Il2CppClass** nestedType)
     {
+    HCLR_AOT_OBSERVE("Metadata_TryGetNextDheSupplementalNestedType_0");
         AOTHomologousImage* homologous = klass && klass->image
             ? GetDheSupplementalImage(klass->image) : nullptr;
         return homologous && homologous->TryGetNextSupplementalNestedType(
             klass, iter, nestedType);
     }
 
-    const MethodInfo* MetadataModule::GetFirstDheSupplementalMethod(Il2CppClass* klass,
+    const MethodInfo* MetadataModule::HCLR_AOT_IMPL(GetFirstDheSupplementalMethod)(Il2CppClass* klass,
         void** iter)
     {
+    HCLR_AOT_OBSERVE("Metadata_GetFirstDheSupplementalMethod_0");
         AOTHomologousImage* homologous = klass && klass->image
             ? GetDheSupplementalImage(klass->image) : nullptr;
         return homologous ? homologous->GetFirstSupplementalMethod(klass, iter) : nullptr;
     }
 
-	bool MetadataModule::TryGetNextDheSupplementalMethod(Il2CppClass* klass, void** iter,
+	bool MetadataModule::HCLR_AOT_IMPL(TryGetNextDheSupplementalMethod)(Il2CppClass* klass, void** iter,
 		const MethodInfo** method)
     {
+    HCLR_AOT_OBSERVE("Metadata_TryGetNextDheSupplementalMethod_0");
         AOTHomologousImage* homologous = klass && klass->image
             ? GetDheSupplementalImage(klass->image) : nullptr;
 		return homologous && homologous->TryGetNextSupplementalMethod(klass, iter, method);
 	}
 
-	size_t MetadataModule::GetDheRemovedMethodCount(Il2CppClass* klass)
+	size_t MetadataModule::HCLR_AOT_IMPL(GetDheRemovedMethodCount)(Il2CppClass* klass)
 	{
+    HCLR_AOT_OBSERVE("Metadata_GetDheRemovedMethodCount_0");
 		if (!klass || !klass->methods)
 		{
 			return 0;
@@ -1332,15 +1371,17 @@ namespace metadata
 		return count;
 	}
 
-	size_t MetadataModule::GetDheSupplementalMethodCount(Il2CppClass* klass)
+	size_t MetadataModule::HCLR_AOT_IMPL(GetDheSupplementalMethodCount)(Il2CppClass* klass)
 	{
+    HCLR_AOT_OBSERVE("Metadata_GetDheSupplementalMethodCount_0");
 		AOTHomologousImage* homologous = klass && klass->image
 			? GetDheSupplementalImage(klass->image) : nullptr;
 		return homologous ? homologous->GetSupplementalMethodCount(klass) : 0;
 	}
 
-	bool MetadataModule::IsDheRemovedField(const FieldInfo* field)
+	bool MetadataModule::HCLR_AOT_IMPL(IsDheRemovedField)(const FieldInfo* field)
 	{
+    HCLR_AOT_OBSERVE("Metadata_IsDheRemovedField_0");
 		if (!field || !field->parent || !field->parent->image ||
 			!dhe::IsDheAssembly(field->parent->image->assembly))
 		{
@@ -1350,8 +1391,9 @@ namespace metadata
 		return homologous && homologous->IsRemovedField(field);
 	}
 
-	size_t MetadataModule::GetDheRemovedFieldCount(Il2CppClass* klass)
+	size_t MetadataModule::HCLR_AOT_IMPL(GetDheRemovedFieldCount)(Il2CppClass* klass)
 	{
+    HCLR_AOT_OBSERVE("Metadata_GetDheRemovedFieldCount_0");
 		if (!klass || !klass->fields)
 		{
 			return 0;
@@ -1367,31 +1409,35 @@ namespace metadata
 		return count;
 	}
 
-	FieldInfo* MetadataModule::GetFirstDheSupplementalField(Il2CppClass* klass,
+	FieldInfo* MetadataModule::HCLR_AOT_IMPL(GetFirstDheSupplementalField)(Il2CppClass* klass,
 		void** iter)
 	{
+    HCLR_AOT_OBSERVE("Metadata_GetFirstDheSupplementalField_0");
 		AOTHomologousImage* homologous = klass && klass->image
 			? GetDheSupplementalImage(klass->image) : nullptr;
 		return homologous ? homologous->GetFirstSupplementalField(klass, iter) : nullptr;
 	}
 
-	bool MetadataModule::TryGetNextDheSupplementalField(Il2CppClass* klass, void** iter,
+	bool MetadataModule::HCLR_AOT_IMPL(TryGetNextDheSupplementalField)(Il2CppClass* klass, void** iter,
 		FieldInfo** field)
 	{
+    HCLR_AOT_OBSERVE("Metadata_TryGetNextDheSupplementalField_0");
 		AOTHomologousImage* homologous = klass && klass->image
 			? GetDheSupplementalImage(klass->image) : nullptr;
 		return homologous && homologous->TryGetNextSupplementalField(klass, iter, field);
 	}
 
-	size_t MetadataModule::GetDheSupplementalFieldCount(Il2CppClass* klass)
+	size_t MetadataModule::HCLR_AOT_IMPL(GetDheSupplementalFieldCount)(Il2CppClass* klass)
 	{
+    HCLR_AOT_OBSERVE("Metadata_GetDheSupplementalFieldCount_0");
 		AOTHomologousImage* homologous = klass && klass->image
 			? GetDheSupplementalImage(klass->image) : nullptr;
 		return homologous ? homologous->GetSupplementalFieldCount(klass) : 0;
 	}
 
-	Il2CppClass* MetadataModule::GetDheLogicalFieldParent(FieldInfo* field)
+	Il2CppClass* MetadataModule::HCLR_AOT_IMPL(GetDheLogicalFieldParent)(FieldInfo* field)
 	{
+    HCLR_AOT_OBSERVE("Metadata_GetDheLogicalFieldParent_0");
 		if (!field || !field->parent || !field->parent->image ||
 			!field->parent->image->assembly)
 		{
@@ -1404,8 +1450,9 @@ namespace metadata
 		return logical ? logical : field->parent;
 	}
 
-	bool MetadataModule::IsDheField(const FieldInfo* field)
+	bool MetadataModule::HCLR_AOT_IMPL(IsDheField)(const FieldInfo* field)
 	{
+    HCLR_AOT_OBSERVE("Metadata_IsDheField_0");
 		if (!field || !field->parent || !field->parent->image ||
 			!field->parent->image->assembly)
 			return false;
@@ -1414,8 +1461,9 @@ namespace metadata
 		return homologous && homologous->IsDheField(field);
 	}
 
-	const FieldInfo* MetadataModule::ResolveDheSupplementalField(const FieldInfo* field)
+	const FieldInfo* MetadataModule::HCLR_AOT_IMPL(ResolveDheSupplementalField)(const FieldInfo* field)
 	{
+    HCLR_AOT_OBSERVE("Metadata_ResolveDheSupplementalField_0");
 		if (!field || !field->parent || !field->parent->image ||
 			!dhe::IsDheAssembly(field->parent->image->assembly))
 			return field;
@@ -1423,9 +1471,10 @@ namespace metadata
 		return image ? image->ResolveSupplementalField(field) : field;
 	}
 
-	const Il2CppFieldDefinition* MetadataModule::ResolveDheSupplementalFieldDefinition(
+	const Il2CppFieldDefinition* MetadataModule::HCLR_AOT_IMPL(ResolveDheSupplementalFieldDefinition)(
 		const Il2CppType* type, const char* name, const Il2CppType* fieldType)
 	{
+    HCLR_AOT_OBSERVE("Metadata_ResolveDheSupplementalFieldDefinition_0");
 		Il2CppClass* klass = il2cpp::vm::Class::FromIl2CppType(type);
 		AOTHomologousImage* image = GetDheSupplementalImage(klass->image);
 		return image ? image->ResolveSupplementalFieldDefinition(type, name, fieldType) : nullptr;
@@ -1467,17 +1516,18 @@ namespace metadata
 		s_dheFieldRegistryVersion.fetch_add(1, std::memory_order_release);
 	}
 
-	bool MetadataModule::IsDheSupplementalInstanceField(const FieldInfo* field)
+	bool MetadataModule::HCLR_AOT_IMPL(IsDheSupplementalInstanceField)(const FieldInfo* field)
 	{
+    HCLR_AOT_OBSERVE("Metadata_IsDheSupplementalInstanceField_0");
 		uint32_t slot;
 		FieldInfo* logicalField;
 		return TryGetDheFieldSlot(field, slot, logicalField);
 	}
 
-	bool MetadataModule::TryGetDheSupplementalInstanceFieldValue(Il2CppObject* obj,
+	bool MetadataModule::HCLR_AOT_IMPL(TryGetDheSupplementalInstanceFieldValue)(Il2CppObject* obj,
 		FieldInfo* field, void* value)
 	{
-        LabObserveDheHook(field && field->parent ? field->parent->image : nullptr, 2);
+    HCLR_AOT_OBSERVE("Metadata_TryGetDheSupplementalInstanceFieldValue_0");
 		Il2CppObject* cell;
 		FieldInfo* valueField;
 		if (!TryGetDheFieldCell(obj, field, cell, valueField))
@@ -1486,9 +1536,10 @@ namespace metadata
 		return true;
 	}
 
-	bool MetadataModule::TrySetDheSupplementalInstanceFieldValue(Il2CppObject* obj,
+	bool MetadataModule::HCLR_AOT_IMPL(TrySetDheSupplementalInstanceFieldValue)(Il2CppObject* obj,
 		const FieldInfo* field, void* value, bool dereferencePointer)
 	{
+    HCLR_AOT_OBSERVE("Metadata_TrySetDheSupplementalInstanceFieldValue_0");
 		Il2CppObject* cell;
 		FieldInfo* valueField;
 		if (!TryGetDheFieldCell(obj, field, cell, valueField))
@@ -1498,9 +1549,10 @@ namespace metadata
 		return true;
 	}
 
-	bool MetadataModule::TryGetDheSupplementalInstanceFieldAddress(Il2CppObject* obj,
+	bool MetadataModule::HCLR_AOT_IMPL(TryGetDheSupplementalInstanceFieldAddress)(Il2CppObject* obj,
 		const FieldInfo* field, void** address)
 	{
+    HCLR_AOT_OBSERVE("Metadata_TryGetDheSupplementalInstanceFieldAddress_0");
 		Il2CppObject* cell;
 		FieldInfo* valueField;
 		if (!TryGetDheFieldCell(obj, field, cell, valueField))
@@ -1509,9 +1561,10 @@ namespace metadata
 		return true;
 	}
 
-	bool MetadataModule::TryGetDheSupplementalInstanceFieldValueObject(Il2CppObject* obj,
+	bool MetadataModule::HCLR_AOT_IMPL(TryGetDheSupplementalInstanceFieldValueObject)(Il2CppObject* obj,
 		FieldInfo* field, Il2CppObject** value)
 	{
+    HCLR_AOT_OBSERVE("Metadata_TryGetDheSupplementalInstanceFieldValueObject_0");
 		Il2CppObject* cell;
 		FieldInfo* valueField;
 		if (!TryGetDheFieldCell(obj, field, cell, valueField))
@@ -1520,9 +1573,10 @@ namespace metadata
 		return true;
 	}
 
-	bool MetadataModule::TrySetDheSupplementalInstanceFieldValueObject(Il2CppObject* obj,
+	bool MetadataModule::HCLR_AOT_IMPL(TrySetDheSupplementalInstanceFieldValueObject)(Il2CppObject* obj,
 		FieldInfo* field, Il2CppObject* value)
 	{
+    HCLR_AOT_OBSERVE("Metadata_TrySetDheSupplementalInstanceFieldValueObject_0");
 		Il2CppObject* cell;
 		FieldInfo* valueField;
 		if (!TryGetDheFieldCell(obj, field, cell, valueField))
@@ -1537,61 +1591,69 @@ namespace metadata
 		return true;
 	}
 
-	bool MetadataModule::HasDheLogicalPropertyView(Il2CppClass* klass)
+	bool MetadataModule::HCLR_AOT_IMPL(HasDheLogicalPropertyView)(Il2CppClass* klass)
 	{
+    HCLR_AOT_OBSERVE("Metadata_HasDheLogicalPropertyView_0");
 		AOTHomologousImage* homologous = klass && klass->image
 			? GetDheSupplementalImage(klass->image) : nullptr;
 		return homologous && homologous->HasLogicalPropertyView(klass);
 	}
 
-	const PropertyInfo* MetadataModule::GetFirstDheLogicalProperty(Il2CppClass* klass,
+	const PropertyInfo* MetadataModule::HCLR_AOT_IMPL(GetFirstDheLogicalProperty)(Il2CppClass* klass,
 		void** iter)
 	{
+    HCLR_AOT_OBSERVE("Metadata_GetFirstDheLogicalProperty_0");
 		AOTHomologousImage* homologous = klass && klass->image
 			? GetDheSupplementalImage(klass->image) : nullptr;
 		return homologous ? homologous->GetFirstLogicalProperty(klass, iter) : nullptr;
 	}
 
-	bool MetadataModule::TryGetNextDheLogicalProperty(Il2CppClass* klass, void** iter,
+	bool MetadataModule::HCLR_AOT_IMPL(TryGetNextDheLogicalProperty)(Il2CppClass* klass, void** iter,
 		const PropertyInfo** property)
 	{
+    HCLR_AOT_OBSERVE("Metadata_TryGetNextDheLogicalProperty_0");
 		AOTHomologousImage* homologous = klass && klass->image
 			? GetDheSupplementalImage(klass->image) : nullptr;
 		return homologous && homologous->TryGetNextLogicalProperty(klass, iter, property);
 	}
 
-	size_t MetadataModule::GetDheLogicalPropertyCount(Il2CppClass* klass)
+	size_t MetadataModule::HCLR_AOT_IMPL(GetDheLogicalPropertyCount)(Il2CppClass* klass)
 	{
+    HCLR_AOT_OBSERVE("Metadata_GetDheLogicalPropertyCount_0");
 		AOTHomologousImage* homologous = klass && klass->image
 			? GetDheSupplementalImage(klass->image) : nullptr;
 		return homologous ? homologous->GetLogicalPropertyCount(klass) : 0;
 	}
 
-	bool MetadataModule::HasDheLogicalEventView(Il2CppClass* klass)
+	bool MetadataModule::HCLR_AOT_IMPL(HasDheLogicalEventView)(Il2CppClass* klass)
 	{
+    HCLR_AOT_OBSERVE("Metadata_HasDheLogicalEventView_0");
 		AOTHomologousImage* homologous = klass && klass->image
 			? GetDheSupplementalImage(klass->image) : nullptr;
 		return homologous && homologous->HasLogicalEventView(klass);
 	}
 
-	const EventInfo* MetadataModule::GetFirstDheLogicalEvent(Il2CppClass* klass,
+	const EventInfo* MetadataModule::HCLR_AOT_IMPL(GetFirstDheLogicalEvent)(Il2CppClass* klass,
 		void** iter)
 	{
+    HCLR_AOT_OBSERVE("Metadata_GetFirstDheLogicalEvent_0");
 		AOTHomologousImage* homologous = klass && klass->image
 			? GetDheSupplementalImage(klass->image) : nullptr;
 		return homologous ? homologous->GetFirstLogicalEvent(klass, iter) : nullptr;
 	}
 
-	bool MetadataModule::TryGetNextDheLogicalEvent(Il2CppClass* klass, void** iter,
+	bool MetadataModule::HCLR_AOT_IMPL(TryGetNextDheLogicalEvent)(Il2CppClass* klass, void** iter,
 		const EventInfo** eventInfo)
 	{
+    HCLR_AOT_OBSERVE("Metadata_TryGetNextDheLogicalEvent_0");
 		AOTHomologousImage* homologous = klass && klass->image
 			? GetDheSupplementalImage(klass->image) : nullptr;
 		return homologous && homologous->TryGetNextLogicalEvent(klass, iter, eventInfo);
 	}
 
-	size_t MetadataModule::GetDheLogicalEventCount(Il2CppClass* klass)
+	size_t MetadataModule::HCLR_AOT_IMPL(GetDheLogicalEventCount)(Il2CppClass* klass)
 	{
+    HCLR_AOT_OBSERVE("Metadata_GetDheLogicalEventCount_0");
 		AOTHomologousImage* homologous = klass && klass->image
 			? GetDheSupplementalImage(klass->image) : nullptr;
 		return homologous ? homologous->GetLogicalEventCount(klass) : 0;

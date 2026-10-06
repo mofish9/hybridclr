@@ -107,6 +107,9 @@ namespace metadata
     Il2CppAssembly* Assembly::Create(const byte* assemblyData, uint64_t length, const byte* rawSymbolStoreBytes, uint64_t rawSymbolStoreLength)
     {
         il2cpp::os::FastAutoLock lock(&il2cpp::vm::g_MetadataLock);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+        startup::RequireSelectedMode();
+#endif
 
         if (!assemblyData)
         {
@@ -143,6 +146,11 @@ namespace metadata
 
         TbAssembly data = image->GetRawImage().ReadAssembly(1);
         const char* nameNoExt = image->GetStringFromRawIndex(data.name);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+        if (startup::GetMode() == 1 && startup::IsDeferredAssembly(nameNoExt))
+            il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetInvalidOperationException(
+                "Use the DHE loader for a configured deferred assembly in DHE mode."));
+#endif
 
         Il2CppAssembly* ass;
         Il2CppImage* image2;
@@ -182,6 +190,10 @@ namespace metadata
         AOTHomologousImage** targetImage, const char* expectedAssemblyName,
         const dhe::CurrentImagePlan* currentImagePlan, bool deferRuntimeInitialization)
     {
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+        startup::RequireSelectedMode();
+        if (expectedAssemblyName) startup::RequireDheMode();
+#endif
         if (deferRuntimeInitialization &&
             (mode != HomologousImageMode::SUPERSET || !expectedAssemblyName || !targetImage))
             return LoadImageErrorCode::DHE_MV_BAD_FORMAT;

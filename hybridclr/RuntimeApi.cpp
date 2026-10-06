@@ -53,8 +53,6 @@
 #endif
 #include <vector>
 // Research-only fixture endpoints. No new production/public package API.
-extern void HybridClrLabArmDheHookProbe(int32_t poison);
-extern int32_t HybridClrLabGetDheHookCount(int32_t kind);
 namespace hybridclr
 {
 	namespace
@@ -138,6 +136,9 @@ namespace hybridclr
 		int32_t LoadDhePayloads(std::vector<DheLoadPayload>& payloads,
 			const std::vector<InterpreterLoadPayload>& interpreterPayloads = {}, int32_t* phase = nullptr)
 		{
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+            startup::RequireDheMode();
+#endif
 			if (payloads.empty())
 			{
 				return (int32_t)metadata::LoadImageErrorCode::DHE_MV_BAD_FORMAT;
@@ -706,10 +707,12 @@ namespace hybridclr
 
 	void RuntimeApi::RegisterInternalCalls()
 	{
-        il2cpp::vm::InternalCalls::Add("AotSelectionProbe.Native::Select(System.Int32)", (Il2CppMethodPointer)il2cpp::vm::MetadataCache::SelectLabAotMode);
-        il2cpp::vm::InternalCalls::Add("AotSelectionProbe.Native::GetMode()", (Il2CppMethodPointer)il2cpp::vm::MetadataCache::GetLabAotMode);
-        il2cpp::vm::InternalCalls::Add("AotSelectionProbe.Native::Arm(System.Int32)", (Il2CppMethodPointer)HybridClrLabArmDheHookProbe);
-        il2cpp::vm::InternalCalls::Add("AotSelectionProbe.Native::Count(System.Int32)", (Il2CppMethodPointer)HybridClrLabGetDheHookCount);
+        il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::SelectExecutionMode(HybridCLR.ExecutionMode)", (Il2CppMethodPointer)il2cpp::vm::MetadataCache::SelectExecutionMode);
+        il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::GetExecutionMode()", (Il2CppMethodPointer)il2cpp::vm::MetadataCache::GetExecutionMode);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION && HYBRIDCLR_DHE_DIAGNOSTICS
+        il2cpp::vm::InternalCalls::Add("AotSelectionProbe.Native::Arm(System.Int32)", (Il2CppMethodPointer)startup::ArmDheImplementations);
+        il2cpp::vm::InternalCalls::Add("AotSelectionProbe.Native::Count()", (Il2CppMethodPointer)startup::CountDheImplementations);
+#endif
 		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.CurrentStorageRuntime::Load(System.Byte[][],System.Byte[][],System.Byte[][],System.UInt32[][],System.UInt32[][])", (Il2CppMethodPointer)LoadDhePayloadsWithExecutionPlan);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.CurrentStorageRuntime::Resolve(System.Reflection.MethodInfo)", (Il2CppMethodPointer)ResolveDheCurrentStorageProbe);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadMetadataForAOTAssembly(System.Byte[],HybridCLR.HomologousImageMode)", (Il2CppMethodPointer)LoadMetadataForAOTAssembly);

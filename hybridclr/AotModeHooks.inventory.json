@@ -1,0 +1,1240 @@
+[
+  {
+    "key": "Metadata_TryCopyDheBoxedValueToCurrent_0",
+    "group": "Metadata",
+    "name": "TryCopyDheBoxedValueToCurrent",
+    "ret": "bool",
+    "params": [
+      "Il2CppObject* value",
+      "Il2CppClass* currentClass",
+      "void* destination"
+    ],
+    "args": [
+      "value",
+      "currentClass",
+      "destination"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetUnderlyingInterpreterImage_0",
+    "group": "Metadata",
+    "name": "GetUnderlyingInterpreterImage",
+    "ret": "Image*",
+    "params": [
+      "const MethodInfo* methodInfo"
+    ],
+    "args": [
+      "methodInfo"
+    ],
+    "fallback": "LegacyInterpreterImage(methodInfo)",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetInterpreterResolveImage_0",
+    "group": "Metadata",
+    "name": "GetInterpreterResolveImage",
+    "ret": "Image*",
+    "params": [
+      "const MethodInfo* methodInfo"
+    ],
+    "args": [
+      "methodInfo"
+    ],
+    "fallback": "LegacyInterpreterImage(methodInfo)",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_HasDheReflectedParent_0",
+    "group": "Metadata",
+    "name": "HasDheReflectedParent",
+    "ret": "bool",
+    "params": [
+      "Il2CppClass* reflectedClass",
+      "Il2CppClass* declaringClass"
+    ],
+    "args": [
+      "reflectedClass",
+      "declaringClass"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_IsDheEquivalentClass_0",
+    "group": "Metadata",
+    "name": "IsDheEquivalentClass",
+    "ret": "bool",
+    "params": [
+      "Il2CppClass* left",
+      "Il2CppClass* right"
+    ],
+    "args": [
+      "left",
+      "right"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetDheMethodMetadataImage_0",
+    "group": "Metadata",
+    "name": "GetDheMethodMetadataImage",
+    "ret": "const Il2CppImage*",
+    "params": [
+      "const MethodInfo* method"
+    ],
+    "args": [
+      "method"
+    ],
+    "fallback": "method->klass->image",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetDheCurrentMethodMetadata_0",
+    "group": "Metadata",
+    "name": "GetDheCurrentMethodMetadata",
+    "ret": "const MethodInfo*",
+    "params": [
+      "const MethodInfo* method"
+    ],
+    "args": [
+      "method"
+    ],
+    "fallback": "method",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetDheClassInitializationOwner_0",
+    "group": "Metadata",
+    "name": "GetDheClassInitializationOwner",
+    "ret": "Il2CppClass*",
+    "params": [
+      "Il2CppClass* klass"
+    ],
+    "args": [
+      "klass"
+    ],
+    "fallback": "klass",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetDheReferenceAllocationClass_0",
+    "group": "Metadata",
+    "name": "GetDheReferenceAllocationClass",
+    "ret": "Il2CppClass*",
+    "params": [
+      "Il2CppClass* klass"
+    ],
+    "args": [
+      "klass"
+    ],
+    "fallback": "klass",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetDheExecutionClass_0",
+    "group": "Metadata",
+    "name": "GetDheExecutionClass",
+    "ret": "Il2CppClass*",
+    "params": [
+      "Il2CppClass* klass"
+    ],
+    "args": [
+      "klass"
+    ],
+    "fallback": "klass",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetDhePublicReferenceType_0",
+    "group": "Metadata",
+    "name": "GetDhePublicReferenceType",
+    "ret": "const Il2CppType*",
+    "params": [
+      "const Il2CppType* type"
+    ],
+    "args": [
+      "type"
+    ],
+    "fallback": "type",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_ResolveDheReferenceInstanceField_0",
+    "group": "Metadata",
+    "name": "ResolveDheReferenceInstanceField",
+    "ret": "FieldInfo*",
+    "params": [
+      "Il2CppObject* obj",
+      "const FieldInfo* field"
+    ],
+    "args": [
+      "obj",
+      "field"
+    ],
+    "fallback": "const_cast<FieldInfo*>(field)",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TryGetDheVirtualInvokeData_0",
+    "group": "Metadata",
+    "name": "TryGetDheVirtualInvokeData",
+    "ret": "bool",
+    "params": [
+      "const Il2CppClass* klass",
+      "uint16_t logicalSlot",
+      "const VirtualInvokeData*& result"
+    ],
+    "args": [
+      "klass",
+      "logicalSlot",
+      "result"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TryGetDheVirtualInvokeData_1",
+    "group": "Metadata",
+    "name": "TryGetDheVirtualInvokeData",
+    "ret": "bool",
+    "params": [
+      "const Il2CppClass* klass",
+      "const MethodInfo* method",
+      "const VirtualInvokeData*& result"
+    ],
+    "args": [
+      "klass",
+      "method",
+      "result"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TryGetDheVirtualBaseMethod_0",
+    "group": "Metadata",
+    "name": "TryGetDheVirtualBaseMethod",
+    "ret": "bool",
+    "params": [
+      "const MethodInfo* method",
+      "bool definition",
+      "const MethodInfo*& result"
+    ],
+    "args": [
+      "method",
+      "definition",
+      "result"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TryGetDheVirtualReflectionIdentity_0",
+    "group": "Metadata",
+    "name": "TryGetDheVirtualReflectionIdentity",
+    "ret": "bool",
+    "params": [
+      "const Il2CppClass* reflectedType",
+      "const MethodInfo* method",
+      "const MethodInfo*& result"
+    ],
+    "args": [
+      "reflectedType",
+      "method",
+      "result"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TryGetDheInterfaceInvokeData_0",
+    "group": "Metadata",
+    "name": "TryGetDheInterfaceInvokeData",
+    "ret": "bool",
+    "params": [
+      "const Il2CppClass* klass",
+      "const Il2CppClass* interfaceType",
+      "uint16_t logicalSlot",
+      "const VirtualInvokeData*& result"
+    ],
+    "args": [
+      "klass",
+      "interfaceType",
+      "logicalSlot",
+      "result"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TryGetDheReferencedAssemblies_0",
+    "group": "Metadata",
+    "name": "TryGetDheReferencedAssemblies",
+    "ret": "bool",
+    "params": [
+      "const Il2CppAssembly* assembly",
+      "std::vector<const Il2CppAssemblyName*>& references"
+    ],
+    "args": [
+      "assembly",
+      "references"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_FindDheSupplementalType_0",
+    "group": "Metadata",
+    "name": "FindDheSupplementalType",
+    "ret": "Il2CppClass*",
+    "params": [
+      "const Il2CppImage* image",
+      "const char* namespaze",
+      "const char* name"
+    ],
+    "args": [
+      "image",
+      "namespaze",
+      "name"
+    ],
+    "fallback": "nullptr",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetDheSupplementalTypes_0",
+    "group": "Metadata",
+    "name": "GetDheSupplementalTypes",
+    "ret": "void",
+    "params": [
+      "const Il2CppImage* image",
+      "std::vector<const Il2CppClass*>& types"
+    ],
+    "args": [
+      "image",
+      "types"
+    ],
+    "fallback": "",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetFirstDheSupplementalNestedType_0",
+    "group": "Metadata",
+    "name": "GetFirstDheSupplementalNestedType",
+    "ret": "Il2CppClass*",
+    "params": [
+      "Il2CppClass* klass",
+      "void** iter"
+    ],
+    "args": [
+      "klass",
+      "iter"
+    ],
+    "fallback": "nullptr",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TryGetNextDheSupplementalNestedType_0",
+    "group": "Metadata",
+    "name": "TryGetNextDheSupplementalNestedType",
+    "ret": "bool",
+    "params": [
+      "Il2CppClass* klass",
+      "void** iter",
+      "Il2CppClass** nestedType"
+    ],
+    "args": [
+      "klass",
+      "iter",
+      "nestedType"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetFirstDheSupplementalMethod_0",
+    "group": "Metadata",
+    "name": "GetFirstDheSupplementalMethod",
+    "ret": "const MethodInfo*",
+    "params": [
+      "Il2CppClass* klass",
+      "void** iter"
+    ],
+    "args": [
+      "klass",
+      "iter"
+    ],
+    "fallback": "nullptr",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TryGetNextDheSupplementalMethod_0",
+    "group": "Metadata",
+    "name": "TryGetNextDheSupplementalMethod",
+    "ret": "bool",
+    "params": [
+      "Il2CppClass* klass",
+      "void** iter",
+      "const MethodInfo** method"
+    ],
+    "args": [
+      "klass",
+      "iter",
+      "method"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetFirstDheSupplementalField_0",
+    "group": "Metadata",
+    "name": "GetFirstDheSupplementalField",
+    "ret": "FieldInfo*",
+    "params": [
+      "Il2CppClass* klass",
+      "void** iter"
+    ],
+    "args": [
+      "klass",
+      "iter"
+    ],
+    "fallback": "nullptr",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TryGetNextDheSupplementalField_0",
+    "group": "Metadata",
+    "name": "TryGetNextDheSupplementalField",
+    "ret": "bool",
+    "params": [
+      "Il2CppClass* klass",
+      "void** iter",
+      "FieldInfo** field"
+    ],
+    "args": [
+      "klass",
+      "iter",
+      "field"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetDheSupplementalFieldCount_0",
+    "group": "Metadata",
+    "name": "GetDheSupplementalFieldCount",
+    "ret": "size_t",
+    "params": [
+      "Il2CppClass* klass"
+    ],
+    "args": [
+      "klass"
+    ],
+    "fallback": "0",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_ResolveDheSupplementalField_0",
+    "group": "Metadata",
+    "name": "ResolveDheSupplementalField",
+    "ret": "const FieldInfo*",
+    "params": [
+      "const FieldInfo* field"
+    ],
+    "args": [
+      "field"
+    ],
+    "fallback": "field",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_ResolveDheSupplementalFieldDefinition_0",
+    "group": "Metadata",
+    "name": "ResolveDheSupplementalFieldDefinition",
+    "ret": "const Il2CppFieldDefinition*",
+    "params": [
+      "const Il2CppType* type",
+      "const char* name",
+      "const Il2CppType* fieldType"
+    ],
+    "args": [
+      "type",
+      "name",
+      "fieldType"
+    ],
+    "fallback": "nullptr",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetDheRemovedMethodCount_0",
+    "group": "Metadata",
+    "name": "GetDheRemovedMethodCount",
+    "ret": "size_t",
+    "params": [
+      "Il2CppClass* klass"
+    ],
+    "args": [
+      "klass"
+    ],
+    "fallback": "0",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetDheSupplementalMethodCount_0",
+    "group": "Metadata",
+    "name": "GetDheSupplementalMethodCount",
+    "ret": "size_t",
+    "params": [
+      "Il2CppClass* klass"
+    ],
+    "args": [
+      "klass"
+    ],
+    "fallback": "0",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_IsDheRemovedField_0",
+    "group": "Metadata",
+    "name": "IsDheRemovedField",
+    "ret": "bool",
+    "params": [
+      "const FieldInfo* field"
+    ],
+    "args": [
+      "field"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetDheRemovedFieldCount_0",
+    "group": "Metadata",
+    "name": "GetDheRemovedFieldCount",
+    "ret": "size_t",
+    "params": [
+      "Il2CppClass* klass"
+    ],
+    "args": [
+      "klass"
+    ],
+    "fallback": "0",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetDheLogicalFieldParent_0",
+    "group": "Metadata",
+    "name": "GetDheLogicalFieldParent",
+    "ret": "Il2CppClass*",
+    "params": [
+      "FieldInfo* field"
+    ],
+    "args": [
+      "field"
+    ],
+    "fallback": "field ? field->parent : nullptr",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_IsDheField_0",
+    "group": "Metadata",
+    "name": "IsDheField",
+    "ret": "bool",
+    "params": [
+      "const FieldInfo* field"
+    ],
+    "args": [
+      "field"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_IsDheSupplementalInstanceField_0",
+    "group": "Metadata",
+    "name": "IsDheSupplementalInstanceField",
+    "ret": "bool",
+    "params": [
+      "const FieldInfo* field"
+    ],
+    "args": [
+      "field"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TryGetDheSupplementalInstanceFieldValue_0",
+    "group": "Metadata",
+    "name": "TryGetDheSupplementalInstanceFieldValue",
+    "ret": "bool",
+    "params": [
+      "Il2CppObject* obj",
+      "FieldInfo* field",
+      "void* value"
+    ],
+    "args": [
+      "obj",
+      "field",
+      "value"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TrySetDheSupplementalInstanceFieldValue_0",
+    "group": "Metadata",
+    "name": "TrySetDheSupplementalInstanceFieldValue",
+    "ret": "bool",
+    "params": [
+      "Il2CppObject* obj",
+      "const FieldInfo* field",
+      "void* value",
+      "bool dereferencePointer"
+    ],
+    "args": [
+      "obj",
+      "field",
+      "value",
+      "dereferencePointer"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TryGetDheSupplementalInstanceFieldAddress_0",
+    "group": "Metadata",
+    "name": "TryGetDheSupplementalInstanceFieldAddress",
+    "ret": "bool",
+    "params": [
+      "Il2CppObject* obj",
+      "const FieldInfo* field",
+      "void** address"
+    ],
+    "args": [
+      "obj",
+      "field",
+      "address"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TryGetDheSupplementalInstanceFieldValueObject_0",
+    "group": "Metadata",
+    "name": "TryGetDheSupplementalInstanceFieldValueObject",
+    "ret": "bool",
+    "params": [
+      "Il2CppObject* obj",
+      "FieldInfo* field",
+      "Il2CppObject** value"
+    ],
+    "args": [
+      "obj",
+      "field",
+      "value"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TrySetDheSupplementalInstanceFieldValueObject_0",
+    "group": "Metadata",
+    "name": "TrySetDheSupplementalInstanceFieldValueObject",
+    "ret": "bool",
+    "params": [
+      "Il2CppObject* obj",
+      "FieldInfo* field",
+      "Il2CppObject* value"
+    ],
+    "args": [
+      "obj",
+      "field",
+      "value"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_HasDheLogicalPropertyView_0",
+    "group": "Metadata",
+    "name": "HasDheLogicalPropertyView",
+    "ret": "bool",
+    "params": [
+      "Il2CppClass* klass"
+    ],
+    "args": [
+      "klass"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetFirstDheLogicalProperty_0",
+    "group": "Metadata",
+    "name": "GetFirstDheLogicalProperty",
+    "ret": "const PropertyInfo*",
+    "params": [
+      "Il2CppClass* klass",
+      "void** iter"
+    ],
+    "args": [
+      "klass",
+      "iter"
+    ],
+    "fallback": "nullptr",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TryGetNextDheLogicalProperty_0",
+    "group": "Metadata",
+    "name": "TryGetNextDheLogicalProperty",
+    "ret": "bool",
+    "params": [
+      "Il2CppClass* klass",
+      "void** iter",
+      "const PropertyInfo** property"
+    ],
+    "args": [
+      "klass",
+      "iter",
+      "property"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetDheLogicalPropertyCount_0",
+    "group": "Metadata",
+    "name": "GetDheLogicalPropertyCount",
+    "ret": "size_t",
+    "params": [
+      "Il2CppClass* klass"
+    ],
+    "args": [
+      "klass"
+    ],
+    "fallback": "0",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetDheCustomAttributeProperty_0",
+    "group": "Metadata",
+    "name": "GetDheCustomAttributeProperty",
+    "ret": "const PropertyInfo*",
+    "params": [
+      "Il2CppClass* klass",
+      "uint32_t index"
+    ],
+    "args": [
+      "klass",
+      "index"
+    ],
+    "fallback": "LegacyProperty(klass, index)",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_ResolveDheMethod_0",
+    "group": "Metadata",
+    "name": "ResolveDheMethod",
+    "ret": "const MethodInfo*",
+    "params": [
+      "const MethodInfo* method"
+    ],
+    "args": [
+      "method"
+    ],
+    "fallback": "method",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_HasDheLogicalEventView_0",
+    "group": "Metadata",
+    "name": "HasDheLogicalEventView",
+    "ret": "bool",
+    "params": [
+      "Il2CppClass* klass"
+    ],
+    "args": [
+      "klass"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetFirstDheLogicalEvent_0",
+    "group": "Metadata",
+    "name": "GetFirstDheLogicalEvent",
+    "ret": "const EventInfo*",
+    "params": [
+      "Il2CppClass* klass",
+      "void** iter"
+    ],
+    "args": [
+      "klass",
+      "iter"
+    ],
+    "fallback": "nullptr",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TryGetNextDheLogicalEvent_0",
+    "group": "Metadata",
+    "name": "TryGetNextDheLogicalEvent",
+    "ret": "bool",
+    "params": [
+      "Il2CppClass* klass",
+      "void** iter",
+      "const EventInfo** eventInfo"
+    ],
+    "args": [
+      "klass",
+      "iter",
+      "eventInfo"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_GetDheLogicalEventCount_0",
+    "group": "Metadata",
+    "name": "GetDheLogicalEventCount",
+    "ret": "size_t",
+    "params": [
+      "Il2CppClass* klass"
+    ],
+    "args": [
+      "klass"
+    ],
+    "fallback": "0",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Metadata_TryGetDheCustomAttributeSource_0",
+    "group": "Metadata",
+    "name": "TryGetDheCustomAttributeSource",
+    "ret": "bool",
+    "params": [
+      "const Il2CppImage* image",
+      "uint32_t token",
+      "const Il2CppImage*& sourceImage",
+      "uint32_t& sourceToken"
+    ],
+    "args": [
+      "image",
+      "token",
+      "sourceImage",
+      "sourceToken"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::metadata::MetadataModule::"
+  },
+  {
+    "key": "Runtime_ResolveReferenceAllocationClass_0",
+    "group": "Runtime",
+    "name": "ResolveReferenceAllocationClass",
+    "ret": "Il2CppClass*",
+    "params": [
+      "Il2CppClass* klass"
+    ],
+    "args": [
+      "klass"
+    ],
+    "fallback": "klass",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_GetPublicationIdentity_0",
+    "group": "Runtime",
+    "name": "GetPublicationIdentity",
+    "ret": "const void*",
+    "params": [],
+    "args": [],
+    "fallback": "nullptr",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_ResolvePublicAssemblyImage_0",
+    "group": "Runtime",
+    "name": "ResolvePublicAssemblyImage",
+    "ret": "const Il2CppImage*",
+    "params": [
+      "const Il2CppImage* image"
+    ],
+    "args": [
+      "image"
+    ],
+    "fallback": "image",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_SelectReferenceInterfaceIterationClass_0",
+    "group": "Runtime",
+    "name": "SelectReferenceInterfaceIterationClass",
+    "ret": "Il2CppClass*",
+    "params": [
+      "Il2CppClass* requested",
+      "Il2CppClass* selected",
+      "const void* iterator"
+    ],
+    "args": [
+      "requested",
+      "selected",
+      "iterator"
+    ],
+    "fallback": "requested",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_IsDheAssembly_0",
+    "group": "Runtime",
+    "name": "IsDheAssembly",
+    "ret": "bool",
+    "params": [
+      "const Il2CppAssembly* assembly"
+    ],
+    "args": [
+      "assembly"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_IsMutableDheAssembly_0",
+    "group": "Runtime",
+    "name": "IsMutableDheAssembly",
+    "ret": "bool",
+    "params": [
+      "const Il2CppAssembly* assembly"
+    ],
+    "args": [
+      "assembly"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_IsDheModuleInitializationReady_0",
+    "group": "Runtime",
+    "name": "IsDheModuleInitializationReady",
+    "ret": "bool",
+    "params": [
+      "const char* assemblyName"
+    ],
+    "args": [
+      "assemblyName"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_IsFrozenAotExecutionSource_0",
+    "group": "Runtime",
+    "name": "IsFrozenAotExecutionSource",
+    "ret": "bool",
+    "params": [
+      "const Il2CppAssembly* assembly"
+    ],
+    "args": [
+      "assembly"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_TryGetVirtualInvokeData_0",
+    "group": "Runtime",
+    "name": "TryGetVirtualInvokeData",
+    "ret": "bool",
+    "params": [
+      "const Il2CppClass* klass",
+      "uint16_t logicalSlot",
+      "const VirtualInvokeData*& result"
+    ],
+    "args": [
+      "klass",
+      "logicalSlot",
+      "result"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_TryGetVirtualInvokeData_1",
+    "group": "Runtime",
+    "name": "TryGetVirtualInvokeData",
+    "ret": "bool",
+    "params": [
+      "const Il2CppClass* klass",
+      "const MethodInfo* method",
+      "const VirtualInvokeData*& result"
+    ],
+    "args": [
+      "klass",
+      "method",
+      "result"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_TryGetVirtualBaseMethod_0",
+    "group": "Runtime",
+    "name": "TryGetVirtualBaseMethod",
+    "ret": "bool",
+    "params": [
+      "const MethodInfo* method",
+      "bool definition",
+      "const MethodInfo*& result"
+    ],
+    "args": [
+      "method",
+      "definition",
+      "result"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_TryGetVirtualReflectionIdentity_0",
+    "group": "Runtime",
+    "name": "TryGetVirtualReflectionIdentity",
+    "ret": "bool",
+    "params": [
+      "const Il2CppClass* reflectedType",
+      "const MethodInfo* method",
+      "const MethodInfo*& result"
+    ],
+    "args": [
+      "reflectedType",
+      "method",
+      "result"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_TryGetInterfaceInvokeData_0",
+    "group": "Runtime",
+    "name": "TryGetInterfaceInvokeData",
+    "ret": "bool",
+    "params": [
+      "const Il2CppClass* klass",
+      "const Il2CppClass* interfaceType",
+      "uint16_t logicalSlot",
+      "const VirtualInvokeData*& result"
+    ],
+    "args": [
+      "klass",
+      "interfaceType",
+      "logicalSlot",
+      "result"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_IsChangedMethod_0",
+    "group": "Runtime",
+    "name": "IsChangedMethod",
+    "ret": "bool",
+    "params": [
+      "const MethodInfo* method"
+    ],
+    "args": [
+      "method"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_IsRemovedMethod_0",
+    "group": "Runtime",
+    "name": "IsRemovedMethod",
+    "ret": "bool",
+    "params": [
+      "const MethodInfo* method"
+    ],
+    "args": [
+      "method"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_IsRemovedType_0",
+    "group": "Runtime",
+    "name": "IsRemovedType",
+    "ret": "bool",
+    "params": [
+      "const Il2CppClass* klass"
+    ],
+    "args": [
+      "klass"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_ShouldDispatchToInterpreter_0",
+    "group": "Runtime",
+    "name": "ShouldDispatchToInterpreter",
+    "ret": "bool",
+    "params": [
+      "const MethodInfo* method"
+    ],
+    "args": [
+      "method"
+    ],
+    "fallback": "false",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_CanEnterWithBaseAbi_0",
+    "group": "Runtime",
+    "name": "CanEnterWithBaseAbi",
+    "ret": "bool",
+    "params": [
+      "const MethodInfo* method"
+    ],
+    "args": [
+      "method"
+    ],
+    "fallback": "true",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_ResolveAotGuardMethodByToken_0",
+    "group": "Runtime",
+    "name": "ResolveAotGuardMethodByToken",
+    "ret": "const MethodInfo*",
+    "params": [
+      "const char* assemblyName",
+      "uint32_t token"
+    ],
+    "args": [
+      "assemblyName",
+      "token"
+    ],
+    "fallback": "nullptr",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_ResolveMethodByToken_0",
+    "group": "Runtime",
+    "name": "ResolveMethodByToken",
+    "ret": "const MethodInfo*",
+    "params": [
+      "const char* assemblyName",
+      "uint32_t token"
+    ],
+    "args": [
+      "assemblyName",
+      "token"
+    ],
+    "fallback": "nullptr",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_ResolveMethodByNameAndToken_0",
+    "group": "Runtime",
+    "name": "ResolveMethodByNameAndToken",
+    "ret": "const MethodInfo*",
+    "params": [
+      "const char* assemblyName",
+      "const char* declaringType",
+      "const char* methodName",
+      "uint32_t parameterCount",
+      "uint32_t token"
+    ],
+    "args": [
+      "assemblyName",
+      "declaringType",
+      "methodName",
+      "parameterCount",
+      "token"
+    ],
+    "fallback": "nullptr",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_ResolveInterpreterMethod_0",
+    "group": "Runtime",
+    "name": "ResolveInterpreterMethod",
+    "ret": "const MethodInfo*",
+    "params": [
+      "const MethodInfo* baseMethod"
+    ],
+    "args": [
+      "baseMethod"
+    ],
+    "fallback": "baseMethod",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_ResolveCurrentExecutionMethod_0",
+    "group": "Runtime",
+    "name": "ResolveCurrentExecutionMethod",
+    "ret": "const MethodInfo*",
+    "params": [
+      "const MethodInfo* method"
+    ],
+    "args": [
+      "method"
+    ],
+    "fallback": "method",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_ResolveNativeReferenceInvokeMethod_0",
+    "group": "Runtime",
+    "name": "ResolveNativeReferenceInvokeMethod",
+    "ret": "const MethodInfo*",
+    "params": [
+      "const MethodInfo* method",
+      "void* receiver"
+    ],
+    "args": [
+      "method",
+      "receiver"
+    ],
+    "fallback": "method",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_ResolveCurrentReceiverMethod_0",
+    "group": "Runtime",
+    "name": "ResolveCurrentReceiverMethod",
+    "ret": "const MethodInfo*",
+    "params": [
+      "const MethodInfo* method",
+      "void* receiver"
+    ],
+    "args": [
+      "method",
+      "receiver"
+    ],
+    "fallback": "method",
+    "owner": "hybridclr::dhe::"
+  },
+  {
+    "key": "Runtime_ResolveInterpreterVirtualMethod_0",
+    "group": "Runtime",
+    "name": "ResolveInterpreterVirtualMethod",
+    "ret": "const MethodInfo*",
+    "params": [
+      "const MethodInfo* method",
+      "void* receiver",
+      "const MethodInfo* callSignature"
+    ],
+    "args": [
+      "method",
+      "receiver",
+      "callSignature"
+    ],
+    "fallback": "method",
+    "owner": "hybridclr::dhe::"
+  }
+]

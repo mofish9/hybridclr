@@ -1,4 +1,5 @@
 #pragma once
+#include "../AotModeConfig.h"
 
 #include "InterpreterImage.h"
 #include "AOTHomologousImage.h"
@@ -18,6 +19,9 @@ namespace metadata
 		// Copies a retained Base box into independent Current value storage.
 		// This never returns an alias into a differently sized Base allocation.
 		static bool TryCopyDheBoxedValueToCurrent(Il2CppObject* value, Il2CppClass* currentClass, void* destination);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TryCopyDheBoxedValueToCurrent(Il2CppObject* value, Il2CppClass* currentClass, void* destination);
+#endif
 
 		static InterpreterImage* GetImage(uint32_t imageIndex)
 		{
@@ -54,62 +58,149 @@ namespace metadata
 			return GetImage(DecodeImageIndex(encodedIndex));
 		}
 		
-		static Image* GetUnderlyingInterpreterImage(const MethodInfo* method);
-		static Image* GetInterpreterResolveImage(const MethodInfo* method);
+		static Image* GetUnderlyingInterpreterImage(const MethodInfo* methodInfo);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static Image* DheImpl_GetUnderlyingInterpreterImage(const MethodInfo* methodInfo);
+#endif
+		static Image* GetInterpreterResolveImage(const MethodInfo* methodInfo);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static Image* DheImpl_GetInterpreterResolveImage(const MethodInfo* methodInfo);
+#endif
+
+        static bool HasDheReflectedParent(Il2CppClass* reflectedClass, Il2CppClass* declaringClass);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+        static bool DheImpl_HasDheReflectedParent(Il2CppClass* reflectedClass, Il2CppClass* declaringClass);
+#endif
+        static bool IsDheEquivalentClass(Il2CppClass* left, Il2CppClass* right);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+        static bool DheImpl_IsDheEquivalentClass(Il2CppClass* left, Il2CppClass* right);
+#endif
 
         static const Il2CppImage* GetDheMethodMetadataImage(const MethodInfo* method);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+        static const Il2CppImage* DheImpl_GetDheMethodMetadataImage(const MethodInfo* method);
+#endif
 		static const MethodInfo* GetDheCurrentMethodMetadata(const MethodInfo* method);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static const MethodInfo* DheImpl_GetDheCurrentMethodMetadata(const MethodInfo* method);
+#endif
 		static Il2CppClass* GetDheClassInitializationOwner(Il2CppClass* klass);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static Il2CppClass* DheImpl_GetDheClassInitializationOwner(Il2CppClass* klass);
+#endif
 		static Il2CppClass* GetDheReferenceAllocationClass(Il2CppClass* klass);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static Il2CppClass* DheImpl_GetDheReferenceAllocationClass(Il2CppClass* klass);
+#endif
 		// Physical storage selected for a method declaration owner, including
 		// boxed value owners. Does not establish compatibility with an old object.
 		static Il2CppClass* GetDheExecutionClass(Il2CppClass* klass);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static Il2CppClass* DheImpl_GetDheExecutionClass(Il2CppClass* klass);
+#endif
 		static const Il2CppType* GetDhePublicReferenceType(const Il2CppType* type);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static const Il2CppType* DheImpl_GetDhePublicReferenceType(const Il2CppType* type);
+#endif
 		static FieldInfo* ResolveDheReferenceInstanceField(Il2CppObject* obj, const FieldInfo* field);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static FieldInfo* DheImpl_ResolveDheReferenceInstanceField(Il2CppObject* obj, const FieldInfo* field);
+#endif
 		static bool TryGetDheVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot,
 			const VirtualInvokeData*& result);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TryGetDheVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot, const VirtualInvokeData*& result);
+#endif
 		static bool TryGetDheVirtualInvokeData(const Il2CppClass* klass, const MethodInfo* method,
 			const VirtualInvokeData*& result);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TryGetDheVirtualInvokeData(const Il2CppClass* klass, const MethodInfo* method, const VirtualInvokeData*& result);
+#endif
 		static bool TryGetDheVirtualBaseMethod(const MethodInfo* method, bool definition,
 			const MethodInfo*& result);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TryGetDheVirtualBaseMethod(const MethodInfo* method, bool definition, const MethodInfo*& result);
+#endif
 		static bool TryGetDheVirtualReflectionIdentity(const Il2CppClass* reflectedType,
 			const MethodInfo* method, const MethodInfo*& result);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TryGetDheVirtualReflectionIdentity(const Il2CppClass* reflectedType, const MethodInfo* method, const MethodInfo*& result);
+#endif
 
 		static bool TryGetDheInterfaceInvokeData(const Il2CppClass* klass,
 			const Il2CppClass* interfaceType, uint16_t logicalSlot, const VirtualInvokeData*& result);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TryGetDheInterfaceInvokeData(const Il2CppClass* klass, const Il2CppClass* interfaceType, uint16_t logicalSlot, const VirtualInvokeData*& result);
+#endif
 
         static bool TryGetDheReferencedAssemblies(const Il2CppAssembly* assembly,
             std::vector<const Il2CppAssemblyName*>& references);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+        static bool DheImpl_TryGetDheReferencedAssemblies(const Il2CppAssembly* assembly, std::vector<const Il2CppAssemblyName*>& references);
+#endif
 
 		static Il2CppClass* FindDheSupplementalType(const Il2CppImage* image,
 			const char* namespaze, const char* name);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static Il2CppClass* DheImpl_FindDheSupplementalType(const Il2CppImage* image, const char* namespaze, const char* name);
+#endif
 
 		static void GetDheSupplementalTypes(const Il2CppImage* image,
 			std::vector<const Il2CppClass*>& types);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static void DheImpl_GetDheSupplementalTypes(const Il2CppImage* image, std::vector<const Il2CppClass*>& types);
+#endif
 
 		static Il2CppClass* GetFirstDheSupplementalNestedType(Il2CppClass* klass,
 			void** iter);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static Il2CppClass* DheImpl_GetFirstDheSupplementalNestedType(Il2CppClass* klass, void** iter);
+#endif
 
 		static bool TryGetNextDheSupplementalNestedType(Il2CppClass* klass, void** iter,
 			Il2CppClass** nestedType);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TryGetNextDheSupplementalNestedType(Il2CppClass* klass, void** iter, Il2CppClass** nestedType);
+#endif
 
 		static const MethodInfo* GetFirstDheSupplementalMethod(Il2CppClass* klass,
 			void** iter);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static const MethodInfo* DheImpl_GetFirstDheSupplementalMethod(Il2CppClass* klass, void** iter);
+#endif
 
 		static bool TryGetNextDheSupplementalMethod(Il2CppClass* klass, void** iter,
 			const MethodInfo** method);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TryGetNextDheSupplementalMethod(Il2CppClass* klass, void** iter, const MethodInfo** method);
+#endif
 
 		static FieldInfo* GetFirstDheSupplementalField(Il2CppClass* klass, void** iter);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static FieldInfo* DheImpl_GetFirstDheSupplementalField(Il2CppClass* klass, void** iter);
+#endif
 
 		static bool TryGetNextDheSupplementalField(Il2CppClass* klass, void** iter,
 			FieldInfo** field);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TryGetNextDheSupplementalField(Il2CppClass* klass, void** iter, FieldInfo** field);
+#endif
 
 		static size_t GetDheSupplementalFieldCount(Il2CppClass* klass);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static size_t DheImpl_GetDheSupplementalFieldCount(Il2CppClass* klass);
+#endif
 
 		static const FieldInfo* ResolveDheSupplementalField(const FieldInfo* field);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static const FieldInfo* DheImpl_ResolveDheSupplementalField(const FieldInfo* field);
+#endif
 
 		static const Il2CppFieldDefinition* ResolveDheSupplementalFieldDefinition(
 			const Il2CppType* type, const char* name, const Il2CppType* fieldType);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static const Il2CppFieldDefinition* DheImpl_ResolveDheSupplementalFieldDefinition(const Il2CppType* type, const char* name, const Il2CppType* fieldType);
+#endif
 
 		static bool IsDheRemovedMethod(const MethodInfo* method)
 		{
@@ -117,8 +208,14 @@ namespace metadata
 		}
 
 		static size_t GetDheRemovedMethodCount(Il2CppClass* klass);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static size_t DheImpl_GetDheRemovedMethodCount(Il2CppClass* klass);
+#endif
 
 		static size_t GetDheSupplementalMethodCount(Il2CppClass* klass);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static size_t DheImpl_GetDheSupplementalMethodCount(Il2CppClass* klass);
+#endif
 
 		static bool IsDheRemovedType(const Il2CppClass* klass)
 		{
@@ -126,59 +223,119 @@ namespace metadata
 		}
 
 		static bool IsDheRemovedField(const FieldInfo* field);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_IsDheRemovedField(const FieldInfo* field);
+#endif
 
 		static size_t GetDheRemovedFieldCount(Il2CppClass* klass);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static size_t DheImpl_GetDheRemovedFieldCount(Il2CppClass* klass);
+#endif
 
 		static Il2CppClass* GetDheLogicalFieldParent(FieldInfo* field);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static Il2CppClass* DheImpl_GetDheLogicalFieldParent(FieldInfo* field);
+#endif
 		static bool IsDheField(const FieldInfo* field);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_IsDheField(const FieldInfo* field);
+#endif
 
 		static void RegisterDheSupplementalInstanceField(FieldInfo* runtimeField,
 			FieldInfo* logicalField, const FieldInfo* definitionField = nullptr);
 
 		static bool IsDheSupplementalInstanceField(const FieldInfo* field);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_IsDheSupplementalInstanceField(const FieldInfo* field);
+#endif
 
 		static bool TryGetDheSupplementalInstanceFieldValue(Il2CppObject* obj,
 			FieldInfo* field, void* value);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TryGetDheSupplementalInstanceFieldValue(Il2CppObject* obj, FieldInfo* field, void* value);
+#endif
 
 		static bool TrySetDheSupplementalInstanceFieldValue(Il2CppObject* obj,
 			const FieldInfo* field, void* value, bool dereferencePointer = false);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TrySetDheSupplementalInstanceFieldValue(Il2CppObject* obj, const FieldInfo* field, void* value, bool dereferencePointer);
+#endif
 
 		static bool TryGetDheSupplementalInstanceFieldAddress(Il2CppObject* obj,
 			const FieldInfo* field, void** address);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TryGetDheSupplementalInstanceFieldAddress(Il2CppObject* obj, const FieldInfo* field, void** address);
+#endif
 
 		static bool TryGetDheSupplementalInstanceFieldValueObject(Il2CppObject* obj,
 			FieldInfo* field, Il2CppObject** value);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TryGetDheSupplementalInstanceFieldValueObject(Il2CppObject* obj, FieldInfo* field, Il2CppObject** value);
+#endif
 
 		static bool TrySetDheSupplementalInstanceFieldValueObject(Il2CppObject* obj,
 			FieldInfo* field, Il2CppObject* value);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TrySetDheSupplementalInstanceFieldValueObject(Il2CppObject* obj, FieldInfo* field, Il2CppObject* value);
+#endif
 
 		static bool HasDheLogicalPropertyView(Il2CppClass* klass);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_HasDheLogicalPropertyView(Il2CppClass* klass);
+#endif
 
 		static const PropertyInfo* GetFirstDheLogicalProperty(Il2CppClass* klass,
 			void** iter);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static const PropertyInfo* DheImpl_GetFirstDheLogicalProperty(Il2CppClass* klass, void** iter);
+#endif
 
 		static bool TryGetNextDheLogicalProperty(Il2CppClass* klass, void** iter,
 			const PropertyInfo** property);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TryGetNextDheLogicalProperty(Il2CppClass* klass, void** iter, const PropertyInfo** property);
+#endif
 
 		static size_t GetDheLogicalPropertyCount(Il2CppClass* klass);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static size_t DheImpl_GetDheLogicalPropertyCount(Il2CppClass* klass);
+#endif
 
 		static const PropertyInfo* GetDheCustomAttributeProperty(Il2CppClass* klass, uint32_t index);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static const PropertyInfo* DheImpl_GetDheCustomAttributeProperty(Il2CppClass* klass, uint32_t index);
+#endif
 
 		static const MethodInfo* ResolveDheMethod(const MethodInfo* method);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static const MethodInfo* DheImpl_ResolveDheMethod(const MethodInfo* method);
+#endif
 		static const MethodInfo* ResolveDheCustomAttributeConstructor(const MethodInfo* method)
 		{
 			return ResolveDheMethod(method);
 		}
 
 		static bool HasDheLogicalEventView(Il2CppClass* klass);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_HasDheLogicalEventView(Il2CppClass* klass);
+#endif
 
 		static const EventInfo* GetFirstDheLogicalEvent(Il2CppClass* klass,
 			void** iter);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static const EventInfo* DheImpl_GetFirstDheLogicalEvent(Il2CppClass* klass, void** iter);
+#endif
 
 		static bool TryGetNextDheLogicalEvent(Il2CppClass* klass, void** iter,
 			const EventInfo** eventInfo);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TryGetNextDheLogicalEvent(Il2CppClass* klass, void** iter, const EventInfo** eventInfo);
+#endif
 
 		static size_t GetDheLogicalEventCount(Il2CppClass* klass);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static size_t DheImpl_GetDheLogicalEventCount(Il2CppClass* klass);
+#endif
 
 
 		static const char* GetStringFromEncodeIndex(StringIndex index)
@@ -371,6 +528,9 @@ namespace metadata
 
 		static bool TryGetDheCustomAttributeSource(const Il2CppImage* image,
 			uint32_t token, const Il2CppImage*& sourceImage, uint32_t& sourceToken);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+		static bool DheImpl_TryGetDheCustomAttributeSource(const Il2CppImage* image, uint32_t token, const Il2CppImage*& sourceImage, uint32_t& sourceToken);
+#endif
 
 #if HYBRIDCLR_UNITY_2020
 		static bool HasAttribute(const Il2CppImage* image, uint32_t token, Il2CppClass* attribute)

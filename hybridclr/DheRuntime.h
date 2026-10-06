@@ -1,4 +1,5 @@
 #pragma once
+#include "AotModeConfig.h"
 
 #include <cstdint>
 #include <array>
@@ -36,19 +37,31 @@ namespace hybridclr
 namespace dhe
 {
     Il2CppClass* ResolveReferenceAllocationClass(Il2CppClass* klass);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    Il2CppClass* DheImpl_ResolveReferenceAllocationClass(Il2CppClass* klass);
+#endif
 
     // Acquire the complete one-shot registration. Null means no DHE assembly
     // has been published. Every non-null identity lives for the process lifetime.
     const void* GetPublicationIdentity();
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    const void* DheImpl_GetPublicationIdentity();
+#endif
 
     // Native consumers identify assemblies by their registered public image.
     // The hidden Current image remains the owner of physical metadata.
     const Il2CppImage* ResolvePublicAssemblyImage(const Il2CppImage* image);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    const Il2CppImage* DheImpl_ResolvePublicAssemblyImage(const Il2CppImage* image);
+#endif
 
     // Keep an in-progress native interface cursor on the table it started in.
     // requested is the caller's descriptor; selected is its published mapping.
     Il2CppClass* SelectReferenceInterfaceIterationClass(Il2CppClass* requested,
         Il2CppClass* selected, const void* iterator);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    Il2CppClass* DheImpl_SelectReferenceInterfaceIterationClass(Il2CppClass* requested, Il2CppClass* selected, const void* iterator);
+#endif
 
     // The Base Player embeds one immutable MetaVersion per DHE assembly. At
     // runtime it is compared with the current MetaVersion shipped beside the
@@ -212,56 +225,122 @@ namespace dhe
         const std::vector<Il2CppAssembly*>& interpreterAssemblies = {});
 
     bool IsDheAssembly(const Il2CppAssembly* assembly);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    bool DheImpl_IsDheAssembly(const Il2CppAssembly* assembly);
+#endif
     bool IsMutableDheAssembly(const Il2CppAssembly* assembly);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    bool DheImpl_IsMutableDheAssembly(const Il2CppAssembly* assembly);
+#endif
     // Only generated guards for configured hotfix module cctors call this.
     // Unity's eager startup call returns until Current metadata is committed.
     bool IsDheModuleInitializationReady(const char* assemblyName);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    bool DheImpl_IsDheModuleInitializationReady(const char* assemblyName);
+#endif
     bool IsFrozenAotExecutionSource(const Il2CppAssembly* assembly);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    bool DheImpl_IsFrozenAotExecutionSource(const Il2CppAssembly* assembly);
+#endif
     bool TryGetVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot,
         const VirtualInvokeData*& result);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    bool DheImpl_TryGetVirtualInvokeData(const Il2CppClass* klass, uint16_t logicalSlot, const VirtualInvokeData*& result);
+#endif
     // Current aliases can reuse a Base slot number for a different declaration.
     // Calls with method metadata must preserve that identity through dispatch.
     bool TryGetVirtualInvokeData(const Il2CppClass* klass, const MethodInfo* method,
         const VirtualInvokeData*& result);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    bool DheImpl_TryGetVirtualInvokeData(const Il2CppClass* klass, const MethodInfo* method, const VirtualInvokeData*& result);
+#endif
     bool TryGetVirtualBaseMethod(const MethodInfo* method, bool definition,
         const MethodInfo*& result);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    bool DheImpl_TryGetVirtualBaseMethod(const MethodInfo* method, bool definition, const MethodInfo*& result);
+#endif
     bool TryGetVirtualReflectionIdentity(const Il2CppClass* reflectedType, const MethodInfo* method,
         const MethodInfo*& result);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    bool DheImpl_TryGetVirtualReflectionIdentity(const Il2CppClass* reflectedType, const MethodInfo* method, const MethodInfo*& result);
+#endif
 
     bool TryGetInterfaceInvokeData(const Il2CppClass* klass, const Il2CppClass* interfaceType,
         uint16_t logicalSlot, const VirtualInvokeData*& result);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    bool DheImpl_TryGetInterfaceInvokeData(const Il2CppClass* klass, const Il2CppClass* interfaceType, uint16_t logicalSlot, const VirtualInvokeData*& result);
+#endif
     bool IsChangedMethod(const MethodInfo* method);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    bool DheImpl_IsChangedMethod(const MethodInfo* method);
+#endif
 	bool IsRemovedMethod(const MethodInfo* method);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+	bool DheImpl_IsRemovedMethod(const MethodInfo* method);
+#endif
 	bool IsRemovedType(const Il2CppClass* klass);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+	bool DheImpl_IsRemovedType(const Il2CppClass* klass);
+#endif
 
     // Called by generated AOT entry guards to select changed methods without
     // replacing the AOT method pointer used by unchanged methods.
     bool ShouldDispatchToInterpreter(const MethodInfo* method);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    bool DheImpl_ShouldDispatchToInterpreter(const MethodInfo* method);
+#endif
     // A typed native entry must not interpret Current using an old value ABI.
     // Such calls must enter through a prepared Current frame instead.
     bool CanEnterWithBaseAbi(const MethodInfo* method);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    bool DheImpl_CanEnterWithBaseAbi(const MethodInfo* method);
+#endif
 
     // Generated static calls may omit RuntimeMethod. Guards need only published
     // changed/tombstoned entries; they must never enumerate metadata during an
     // unchanged AOT call or before DHE loading (e.g. a SHA-256 bit operation).
     const MethodInfo* ResolveAotGuardMethodByToken(const char* assemblyName, uint32_t token);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    const MethodInfo* DheImpl_ResolveAotGuardMethodByToken(const char* assemblyName, uint32_t token);
+#endif
     // Metadata preparation can still resolve an unpublished Base method.
     const MethodInfo* ResolveMethodByToken(const char* assemblyName, uint32_t token);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    const MethodInfo* DheImpl_ResolveMethodByToken(const char* assemblyName, uint32_t token);
+#endif
     const MethodInfo* ResolveMethodByNameAndToken(const char* assemblyName,
         const char* declaringType, const char* methodName, uint32_t parameterCount, uint32_t token);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    const MethodInfo* DheImpl_ResolveMethodByNameAndToken(const char* assemblyName, const char* declaringType, const char* methodName, uint32_t parameterCount, uint32_t token);
+#endif
     const MethodInfo* ResolveInterpreterMethod(const MethodInfo* baseMethod);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    const MethodInfo* DheImpl_ResolveInterpreterMethod(const MethodInfo* baseMethod);
+#endif
     // Interpreter call-site metadata needs the Current signature before stack
     // sizing. This only substitutes explicit physical Current bindings; it
     // does not raise tombstones while transforming an untaken call branch.
     const MethodInfo* ResolveCurrentExecutionMethod(const MethodInfo* method);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    const MethodInfo* DheImpl_ResolveCurrentExecutionMethod(const MethodInfo* method);
+#endif
     // Raw native invocation may retain Base metadata. Only select Current
     // when the concrete argument ABI and actual reference receiver are valid.
     const MethodInfo* ResolveNativeReferenceInvokeMethod(const MethodInfo* method, void* receiver);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    const MethodInfo* DheImpl_ResolveNativeReferenceInvokeMethod(const MethodInfo* method, void* receiver);
+#endif
     // Use before unboxing or constructing a managed argument frame. Boxed value
     // receivers require exact physical storage; raw native invocation is separate.
     const MethodInfo* ResolveCurrentReceiverMethod(const MethodInfo* method, void* receiver);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    const MethodInfo* DheImpl_ResolveCurrentReceiverMethod(const MethodInfo* method, void* receiver);
+#endif
     const MethodInfo* ResolveInterpreterVirtualMethod(const MethodInfo* method, void* receiver,
         const MethodInfo* callSignature);
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+    const MethodInfo* DheImpl_ResolveInterpreterVirtualMethod(const MethodInfo* method, void* receiver, const MethodInfo* callSignature);
+#endif
     // Direct bridge for supported generated native ABI shapes. It executes
     // current IL through Interpreter::Execute instead of calling
     // methodPointerCallByInterp, whose generated entry may be the AOT guard.
