@@ -3840,7 +3840,11 @@ else \
 
 				// DHE methods listed by mv are interpreted. Unchanged methods in
 				// the same call graph stay on their AOT entry and are bridged below.
-				bool shouldImplementByInterpreter = hybridclr::metadata::MetadataModule::IsImplementedByInterpreter(const_cast<MethodInfo*>(shareMethod));
+				// Ordinary interpreter methods already carry their implementation
+				// flag; they have no AOT homologous image. Preserve their direct
+				// interpreter/PInvoke lowering instead of bridging an IL stub as AOT.
+				bool shouldImplementByInterpreter = hybridclr::metadata::IsInterpreterImplement(shareMethod) ||
+					hybridclr::metadata::MetadataModule::IsImplementedByInterpreter(const_cast<MethodInfo*>(shareMethod));
 				if (shouldImplementByInterpreter && !IsFullGenericSharingMethod(shareMethod))
 				{
 					if (!InitAndGetInterpreterDirectlyCallMethodPointer(shareMethod))
