@@ -660,7 +660,9 @@ bool HCLR_AOT_IMPL(CanEnterWithBaseAbi)(const MethodInfo* method)
 
 bool HCLR_AOT_IMPL(ShouldDispatchToInterpreter)(const MethodInfo* method)
 {
-    if (!HCLR_AOT_DIRECT(IsChangedMethod)(method))
+    // An unchanged token guard resolves to null. Keep this common AOT path
+    // out of the separate method-decision call (which also returns false).
+    if (!method || !HCLR_AOT_DIRECT(IsChangedMethod)(method))
         return false;
     if (!HCLR_AOT_DIRECT(CanEnterWithBaseAbi)(method))
         il2cpp::vm::Exception::Raise(il2cpp::vm::Exception::GetExecutionEngineException(
