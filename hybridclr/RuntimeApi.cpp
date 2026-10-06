@@ -52,6 +52,9 @@
 #include "vm/String.h"
 #endif
 #include <vector>
+// Research-only fixture endpoints. No new production/public package API.
+extern void HybridClrLabArmDheHookProbe(int32_t poison);
+extern int32_t HybridClrLabGetDheHookCount(int32_t kind);
 namespace hybridclr
 {
 	namespace
@@ -703,6 +706,10 @@ namespace hybridclr
 
 	void RuntimeApi::RegisterInternalCalls()
 	{
+        il2cpp::vm::InternalCalls::Add("AotSelectionProbe.Native::Select(System.Int32)", (Il2CppMethodPointer)il2cpp::vm::MetadataCache::SelectLabAotMode);
+        il2cpp::vm::InternalCalls::Add("AotSelectionProbe.Native::GetMode()", (Il2CppMethodPointer)il2cpp::vm::MetadataCache::GetLabAotMode);
+        il2cpp::vm::InternalCalls::Add("AotSelectionProbe.Native::Arm(System.Int32)", (Il2CppMethodPointer)HybridClrLabArmDheHookProbe);
+        il2cpp::vm::InternalCalls::Add("AotSelectionProbe.Native::Count(System.Int32)", (Il2CppMethodPointer)HybridClrLabGetDheHookCount);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.CurrentStorageRuntime::Load(System.Byte[][],System.Byte[][],System.Byte[][],System.UInt32[][],System.UInt32[][])", (Il2CppMethodPointer)LoadDhePayloadsWithExecutionPlan);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.Lab.CurrentStorageRuntime::Resolve(System.Reflection.MethodInfo)", (Il2CppMethodPointer)ResolveDheCurrentStorageProbe);
 		il2cpp::vm::InternalCalls::Add("HybridCLR.RuntimeApi::LoadMetadataForAOTAssembly(System.Byte[],HybridCLR.HomologousImageMode)", (Il2CppMethodPointer)LoadMetadataForAOTAssembly);

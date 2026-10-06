@@ -39,6 +39,29 @@
 #include <mutex>
 #include <unordered_map>
 #include <vector>
+#include <atomic>
+
+// Diagnostic instrumentation, only in this research branch. A failpoint in an
+// existing DHE hook distinguishes ordinary loading from DHE-independent runtime.
+static std::atomic<int32_t> s_labDheHookArmed{0};
+static std::atomic<int32_t> s_labDheHookCounts[3]{};
+void HybridClrLabArmDheHookProbe(int32_t poison)
+{
+    for (auto& count : s_labDheHookCounts) count.store(0, std::memory_order_relaxed);
+    s_labDheHookArmed.store(poison < 0 ? 0 : poison + 1, std::memory_order_release);
+}
+int32_t HybridClrLabGetDheHookCount(int32_t kind)
+{
+    return kind >= 0 && kind < 3 ? s_labDheHookCounts[kind].load(std::memory_order_relaxed) : -1;
+}
+static void LabObserveDheHook(const Il2CppImage* image, int32_t kind)
+{
+    int32_t armed = s_labDheHookArmed.load(std::memory_order_acquire);
+    if (!armed || !image || !image->nameNoExt || std::strcmp(image->nameNoExt, "StartupHotfix") != 0) return;
+    s_labDheHookCounts[kind].fetch_add(1, std::memory_order_relaxed);
+    if (armed == 2)
+        hybridclr::RaiseExecutionEngineException("LAB_DHE_HOOK_FAULT: shared DHE hook reached for StartupHotfix");
+}
 
 using namespace il2cpp;
 
@@ -624,6 +647,7 @@ namespace metadata
 
 	Il2CppClass* MetadataModule::GetDheReferenceAllocationClass(Il2CppClass* klass)
 	{
+        LabObserveDheHook(klass ? klass->image : nullptr, 1);
 		return klass && !klass->byval_arg.valuetype ? GetDheExecutionClass(klass) : klass;
 	}
 
@@ -1201,6 +1225,7 @@ namespace metadata
 
 	const MethodInfo* MetadataModule::GetDheCurrentMethodMetadata(const MethodInfo* method)
 	{
+        LabObserveDheHook(method->klass->image, 0);
 		AOTHomologousImage* image = GetDheSupplementalImage(method->klass->image);
 		return image ? image->GetCurrentMethodMetadata(method) : method;
 	}
@@ -1452,6 +1477,7 @@ namespace metadata
 	bool MetadataModule::TryGetDheSupplementalInstanceFieldValue(Il2CppObject* obj,
 		FieldInfo* field, void* value)
 	{
+        LabObserveDheHook(field && field->parent ? field->parent->image : nullptr, 2);
 		Il2CppObject* cell;
 		FieldInfo* valueField;
 		if (!TryGetDheFieldCell(obj, field, cell, valueField))
