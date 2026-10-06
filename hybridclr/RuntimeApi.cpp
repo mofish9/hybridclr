@@ -240,9 +240,13 @@ namespace hybridclr
 					// Retain allocations before any signature can enter a shared cache.
 					// A metadata initialization exception leaves this batch non-retryable;
 					// an MV rejection after initialization can reuse the exact graph.
-					s_pendingDheImages.emplace(payload.baseAssembly, PendingDheImage{
-						payload.currentImage, payload.currentAssemblyHash, payload.executionPlan,
-						batchAssemblies, false, interpreterPeers });
+					PendingDheImage entry;
+					entry.image = payload.currentImage;
+					entry.currentAssemblyHash = payload.currentAssemblyHash;
+					entry.executionPlan = payload.executionPlan;
+					entry.batchAssemblies = batchAssemblies;
+					entry.interpreterPeers = interpreterPeers;
+					s_pendingDheImages.emplace(payload.baseAssembly, std::move(entry));
 					newImages.push_back(payload.currentImage);
 				}
 			}
