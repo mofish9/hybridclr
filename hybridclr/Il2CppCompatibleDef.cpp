@@ -22,7 +22,7 @@ namespace hybridclr
 			InvokerMethod invoker = nullptr;
 		};
 
-#if HYBRIDCLR_UNITY_2021_OR_NEW
+#if HYBRIDCLR_UNITY_2022_OR_NEW
 		const uint32_t kFullGenericSharingPreparationReady = 1;
 		const uint32_t kFullGenericSharingPreparationInProgress = UINT32_MAX;
 		uint32_t s_aotMetadataVersion = 1;
@@ -42,7 +42,7 @@ namespace hybridclr
 
 		bool HasValidInvoker(const MethodInfo* method)
 		{
-#if HYBRIDCLR_UNITY_2021_OR_NEW
+#if HYBRIDCLR_UNITY_2022_OR_NEW
 			if (IsFullGenericSharingMethod(method) &&
 				!method->isInterpterImpl &&
 				!method->hasFullGenericSharingAotInvoker)
@@ -132,7 +132,7 @@ namespace hybridclr
 	{
 		il2cpp::os::FastAutoLock lock(&s_methodPointerInitLock);
 		std::memcpy(destination, source, size);
-#if HYBRIDCLR_UNITY_2021_OR_NEW
+#if HYBRIDCLR_UNITY_2022_OR_NEW
 		// The execution pointers may be copied, but preparation ownership belongs
 		// to the new MethodInfo and must never inherit an in-progress sentinel.
 		destination->fullGenericSharingPreparationState = 0;
@@ -141,7 +141,7 @@ namespace hybridclr
 
 	void NotifyAOTMetadataLoaded()
 	{
-#if HYBRIDCLR_UNITY_2021_OR_NEW
+#if HYBRIDCLR_UNITY_2022_OR_NEW
 		uint32_t version = il2cpp::os::Atomic::Increment(&s_aotMetadataVersion);
 		// Zero is reserved for the initial epoch. Keep registration ordering
 		// well-defined if the counter ever wraps after billions of metadata loads.
@@ -167,7 +167,7 @@ namespace hybridclr
 
 	bool PrepareFullGenericSharingMethod(const MethodInfo* method)
 	{
-#if HYBRIDCLR_UNITY_2021_OR_NEW
+#if HYBRIDCLR_UNITY_2022_OR_NEW
 		for (;;)
 		{
 			if (ReadPublishedUInt32(&method->fullGenericSharingPreparationState) ==
