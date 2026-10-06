@@ -678,7 +678,17 @@ const MethodInfo* MetadataModule::HCLR_AOT_IMPL(FindDheMethodFallback)(const Il2
             return nullptr;
         }
         AOTHomologousImage* homologous = AOTHomologousImage::FindImageByAssembly(image->assembly);
-        return homologous && homologous->GetTargetAssembly()->image == image ? homologous : nullptr;
+        if (!homologous) return nullptr;
+        const Il2CppImage* baseImage = homologous->GetTargetAssembly()->image;
+        if (baseImage == image) return homologous;
+#if HYBRIDCLR_ENABLE_AOT_SELECTION
+        // Unity holds a stable public alias of the Base image. Accept exactly
+        // that alias, never the hidden Current interpreter image that shares
+        // the assembly but must retain its own metadata semantics.
+        if (!IsInterpreterImage(image) && Assembly::GetDeferredUnityImage(baseImage) == image)
+            return homologous;
+#endif
+        return nullptr;
     }
 
     static bool IsDheValueCopyPair(Il2CppClass* before, Il2CppClass* current,
